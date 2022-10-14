@@ -17,9 +17,6 @@ from rl_x.environments.environment_manager import EnvironmentManager
 # https://github.com/google/jax/pull/12769
 absl_logging.set_verbosity(absl_logging.ERROR)
 
-rlx_logger = logging.getLogger('rl_x')
-rlx_logger.setLevel(logging.INFO)
-
 
 class Runner:
     def __init__(self, algorithm: Algorithm, environment: Environment):
@@ -33,16 +30,27 @@ class Runner:
         combined_default_config.environment = environment_default_config
         self._config_flag = config_flags.DEFINE_config_dict("config", combined_default_config)
 
+        self._rlx_logger = logging.getLogger("rl_x")
+        self._rlx_logger.setLevel(logging.INFO)
+        self._rlx_logger.propagate = False
+        consoleHandler = logging.StreamHandler()
+        consoleHandler.setLevel(logging.INFO)
+        consoleHandler.setFormatter(logging.Formatter("[%(asctime)s] [%(filename)s:%(lineno)d] %(levelname)s - %(message)s","%m-%d %H:%M:%S"))
+        self._rlx_logger.addHandler(consoleHandler)
+
 
     def run_and_show_config(self):
         def _show_config(_):
             self._config = self._config_flag.value
-            rlx_logger.info("\n" + str(self._config))
+            self._rlx_logger.info("\n" + str(self._config))
         app.run(_show_config)
     
 
     def run_experiment(self):
-        app.run(self._main)
+        try:
+            app.run(self._main)
+        except KeyboardInterrupt:
+            self._rlx_logger.warn("KeyboardInterrupt")
 
 
     def _main(self, _):
@@ -65,6 +73,7 @@ class Runner:
                 save_code=True,
             )
 
+        writer = None
         if self._config.algorithm.tb_track:
             writer = SummaryWriter(self._config.algorithm.run_path)
             writer.add_text(
@@ -74,7 +83,7 @@ class Runner:
         
         env = self._create_env(self._config)
         
-        model = self._model_class(self._config, env)
+        model = self._model_class(self._config, env, writer, self._rlx_logger)
 
         try:
             model.train()

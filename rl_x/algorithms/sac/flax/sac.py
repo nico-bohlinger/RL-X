@@ -4,8 +4,12 @@ import jax
 
 
 class SAC():
-    def __init__(self, config, env) -> None:
+    def __init__(self, config, env, writer, rlx_logger) -> None:
+        self.config = config
         self.env = env
+        self.writer = writer
+        self.rlx_logger = rlx_logger
+        
         self.seed = config.algorithm.seed
         self.device = config.algorithm.device
         self.total_timesteps = config.algorithm.total_timesteps
