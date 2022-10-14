@@ -7,4 +7,5 @@ ALGORITHM = Algorithm.SAC_FLAX
 ENVIRONMENT = Environment.ENVPOOL_HUMANOID_V4
 
 runner = Runner(ALGORITHM, ENVIRONMENT)
-runner.run()
+# runner.run_and_show_config()
+runner.run_experiment()

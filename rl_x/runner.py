@@ -1,9 +1,13 @@
 from absl import app
-from absl import flags, logging
+from absl import flags
+from absl import logging as absl_logging
+import logging
 from ml_collections import config_dict, config_flags
 import wandb
 from torch.utils.tensorboard import SummaryWriter
 
+from rl_x.algorithms.algorithm_manager import Algorithm
+from rl_x.environments.environment_manager import Environment
 from rl_x.algorithms.algorithm_manager import AlgorithmManager
 from rl_x.environments.environment_manager import EnvironmentManager
 
@@ -11,11 +15,14 @@ from rl_x.environments.environment_manager import EnvironmentManager
 # Change with newer jax version
 # https://github.com/google/jax/issues/10070
 # https://github.com/google/jax/pull/12769
-logging.set_verbosity(logging.ERROR)
+absl_logging.set_verbosity(absl_logging.ERROR)
+
+rlx_logger = logging.getLogger('rl_x')
+rlx_logger.setLevel(logging.INFO)
 
 
 class Runner:
-    def __init__(self, algorithm, environment):
+    def __init__(self, algorithm: Algorithm, environment: Environment):
         self._model_class = AlgorithmManager.get_model_class(algorithm)
         self._create_env = EnvironmentManager.get_create_env(environment)
         
@@ -25,9 +32,16 @@ class Runner:
         combined_default_config.algorithm = algorithm_default_config
         combined_default_config.environment = environment_default_config
         self._config_flag = config_flags.DEFINE_config_dict("config", combined_default_config)
+
+
+    def run_and_show_config(self):
+        def _show_config(_):
+            self._config = self._config_flag.value
+            rlx_logger.info("\n" + str(self._config))
+        app.run(_show_config)
     
 
-    def run(self):
+    def run_experiment(self):
         app.run(self._main)
 
 

@@ -5,7 +5,7 @@ import time
 def get_config(algorithm, environment):
     config = config_dict.ConfigDict()
 
-    config.algorithm = algorithm.name
+    config.algorithm_name = algorithm.name
 
     config.tb_track = False
     config.wandb_track = False
