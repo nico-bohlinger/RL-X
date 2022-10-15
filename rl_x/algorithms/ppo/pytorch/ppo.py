@@ -1,3 +1,4 @@
+import os
 import random
 import logging
 import time
@@ -6,21 +7,26 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import wandb
 
 from rl_x.algorithms.ppo.pytorch.actor import Actor
 from rl_x.algorithms.ppo.pytorch.critic import Critic
 from rl_x.algorithms.ppo.pytorch.batch import Batch
 
+rlx_logger = logging.getLogger("rl_x")
+
 
 class PPO:
-    def __init__(self, config, env, writer, rlx_logger):
+    def __init__(self, config, env, writer):
         self.config = config
         self.env = env
         self.writer = writer
-        self.rlx_logger = rlx_logger
 
-        self.tb_track = config.algorithm.tb_track
-        self.seed = config.algorithm.seed
+        self.save_model = config.runner.save_model
+        self.save_path = os.path.join(config.runner.run_path, "models")
+        self.track_tb = config.runner.track_tb
+        self.track_wandb = config.runner.track_wandb
+        self.seed = config.environment.seed
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.algorithm.nr_envs
         self.learning_rate = config.algorithm.learning_rate
@@ -36,6 +42,8 @@ class PPO:
         self.vf_coef = config.algorithm.vf_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
+        self.nr_hidden_layers = config.algorithm.nr_hidden_layers
+        self.nr_hidden_units = config.algorithm.nr_hidden_units
         self.batch_size = config.algorithm.batch_size
         self.nr_updates = config.algorithm.nr_updates
 
@@ -49,14 +57,20 @@ class PPO:
         self.os_shape = np.prod(env.observation_space.shape)
         self.as_shape = np.prod(env.action_space.shape)
 
-        self.actor = Actor(self.os_shape, self.as_shape, self.std_dev).to(self.device)
+        self.actor = Actor(self.os_shape, self.as_shape, self.std_dev, self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate, eps=1e-5)
 
-        self.critic = Critic(self.os_shape).to(self.device)
+        self.critic = Critic(self.os_shape, self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate, eps=1e-5)
+
+        if self.save_model:
+            os.makedirs(self.save_path)
+            self.best_mean_return = -np.inf
 
 
     def train(self):
+        self.set_train_mode()
+
         batch = Batch(
             states = torch.zeros((self.nr_steps, self.nr_envs, self.os_shape), dtype=torch.float32).to(self.device),
             actions = torch.zeros((self.nr_steps, self.nr_envs, self.as_shape), dtype=torch.float32).to(self.device),
@@ -67,7 +81,8 @@ class PPO:
             dones = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             log_probs = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device)
         )
-
+        
+        saving_return_buffer = deque(maxlen=100)
         global_step = 0
         while global_step < self.total_timesteps:
             start_time = time.time()
@@ -83,13 +98,11 @@ class PPO:
                 next_state, reward, done, info = self.env.step(action.cpu().numpy())
                 next_state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
                 actual_next_state = next_state.clone()
-                for idx, d in enumerate(done):
-                    if d:
-                        if isinstance(info, dict):
-                            if "terminal_observation" in info:
-                                actual_next_state[idx] = torch.tensor(info["terminal_observation"][idx], dtype=torch.float32).to(self.device)
-                        else:
-                            actual_next_state[idx] = torch.tensor(info[idx]["terminal_observation"], dtype=torch.float32).to(self.device)
+                for i, single_done in enumerate(done):
+                    if single_done:
+                        maybe_terminal_observation = self.env.get_terminal_observation(info, i)
+                        if maybe_terminal_observation is not None:
+                            actual_next_state[i] = torch.tensor(maybe_terminal_observation, dtype=torch.float32).to(self.device)
 
                 batch.states[step] = state
                 batch.actions[step] = action
@@ -99,16 +112,11 @@ class PPO:
                 batch.log_probs[step] = log_prob     
                 state = next_state
                 global_step += self.nr_envs
-                
-                if isinstance(info, dict):
-                    for maybe_episode_info in info["episode"]:
-                        if maybe_episode_info is not None:
-                            episode_info_buffer.extend([maybe_episode_info])
-                else:
-                    for single_info in info:
-                        maybe_episode_info = single_info.get("episode")
-                        if maybe_episode_info is not None:
-                            episode_info_buffer.extend([maybe_episode_info])
+
+                episode_info_buffer.extend(self.env.get_episode_infos(info))
+                if len(episode_info_buffer) > 0:
+                    ep_info_returns = [ep_info["r"] for ep_info in episode_info_buffer]
+                    saving_return_buffer.extend(ep_info_returns)
             
             acting_end_time = time.time()
 
@@ -210,19 +218,32 @@ class PPO:
             optimizing_end_time = time.time()
 
 
+            # Saving
+            # Only save when the total return buffer (over multiple updates) isn't empty
+            # Also only save when the episode info buffer isn't empty -> there were finished episodes this update
+            if self.save_model and saving_return_buffer and episode_info_buffer:
+                mean_return = np.mean(saving_return_buffer)
+                if mean_return > self.best_mean_return:
+                    self.best_mean_return = mean_return
+                    self.save()
+            
+            saving_end_time = time.time()
+
+
             # Logging
-            if self.tb_track:
+            if self.track_tb:
                 if len(episode_info_buffer) > 0:
-                    self.writer.add_scalar("rollout/ep_rew_mean", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
+                    self.writer.add_scalar("rollout/ep_rew_mean", np.mean(ep_info_returns), global_step)
                     self.writer.add_scalar("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
                     names = list(episode_info_buffer[0].keys())
                     for name in names:
                         if name != "r" and name != "l" and name != "t":
                             self.writer.add_scalar(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
-                self.writer.add_scalar("time/fps", int((self.nr_steps * self.nr_envs) / (optimizing_end_time - start_time)), global_step)
+                self.writer.add_scalar("time/fps", int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time)), global_step)
                 self.writer.add_scalar("time/acting_time", acting_end_time - start_time, global_step)
                 self.writer.add_scalar("time/calc_advantages_and_return_time", calc_adv_return_end_time - acting_end_time, global_step)
                 self.writer.add_scalar("time/optimizing_time", optimizing_end_time - calc_adv_return_end_time, global_step)
+                self.writer.add_scalar("time/saving_time", saving_end_time - optimizing_end_time, global_step)
                 self.writer.add_scalar("train/learning_rate", learning_rate, global_step)
                 self.writer.add_scalar("train/clip_range", self.clip_range, global_step)
                 self.writer.add_scalar("train/clip_fraction", np.mean(clip_fractions), global_step)
@@ -233,11 +254,59 @@ class PPO:
                 self.writer.add_scalar("train/loss", np.mean(loss_losses), global_step)
                 self.writer.add_scalar("train/std", np.mean(np.exp(self.actor.actor_logstd.data.cpu().numpy())), global_step)
                 self.writer.add_scalar("train/explained_variance", explained_var, global_step)
-            
-            self.rlx_logger.info(f"Step: {global_step}")
+
+            rlx_logger.info(f"Step: {global_step}")
         
 
+        # Clean up
         self.env.close()
-        if self.tb_track:
+        if self.track_tb:
             self.writer.close()
+
+
+    def save(self):
+        file_path = self.save_path + "/model_best.pt"
+        torch.save({
+            "config_algorithm": self.config.algorithm,
+            "actor_state_dict": self.actor.state_dict(),
+            "critic_state_dict": self.critic.state_dict(),
+            "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+            "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+        }, file_path)
+        if self.track_wandb:
+            wandb.save(file_path, base_path=os.path.dirname(file_path))
+    
+
+    def load(config, env, writer):
+        checkpoint = torch.load(config.runner.load_model)
+        config.algorithm = checkpoint["config_algorithm"]
+        model = PPO(config, env, writer)
+        model.actor.load_state_dict(checkpoint["actor_state_dict"])
+        model.critic.load_state_dict(checkpoint["critic_state_dict"])
+        model.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
+        model.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
+
+        return model
+
+
+    def test(self, episodes):
+        self.set_eval_mode()
+        for i in range(episodes):
+            done = False
+            state = self.env.reset()
+            while not done:
+                action, _, __ = self.actor.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                state, reward, done, info = self.env.step(action.cpu().numpy())
+            return_val = self.env.get_episode_infos(info)[0]["r"]
+            rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
+
+
+    def set_train_mode(self):
+        self.actor.train()
+        self.critic.train()
+
+
+    def set_eval_mode(self):
+        self.actor.eval()
+        self.critic.eval()
 

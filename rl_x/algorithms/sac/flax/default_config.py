@@ -7,16 +7,6 @@ def get_config(algorithm, environment):
 
     config.algorithm_name = algorithm.name
 
-    config.tb_track = False
-    config.wandb_track = False
-    config.project_name = "placeholder"
-    config.exp_name = "placeholder"
-    config.run_name = f"{int(time.time())}"
-    config.run_path = f"runs/{config.project_name}/{config.exp_name}/{config.run_name}"
-
-    config.mode = "train"  # train, test
-    config.seed = 1
-
     config.device = "cuda"  # cpu, cuda
     config.total_timesteps = 1e9
     config.nr_envs = 2

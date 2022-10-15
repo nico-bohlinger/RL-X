@@ -36,3 +36,20 @@ class RecordEpisodeStatistics(gym.Wrapper):
                 self.episode_returns[i] = 0
                 self.episode_lengths[i] = 0
         return (observations, rewards, dones, infos)
+    
+
+class ConvertInfo(gym.Wrapper):
+    def __init__(self, env):
+        super(ConvertInfo, self).__init__(env)
+
+
+    def get_episode_infos(self, info):
+        episode_infos = []
+        for maybe_episode_info in info["episode"]:
+            if maybe_episode_info is not None:
+                episode_infos.append(maybe_episode_info)
+        return episode_infos
+    
+
+    def get_terminal_observation(self, info, id):
+        return None

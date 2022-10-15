@@ -3,3 +3,4 @@ __pycache__/
 .vscode
 runs/
 todo.txt
+wandb/

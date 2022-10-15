@@ -6,17 +6,7 @@ def get_config(algorithm, environment):
     config = config_dict.ConfigDict()
 
     config.algorithm_name = algorithm.name
-
-    config.tb_track = False
-    config.wandb_track = False
-    config.project_name = "placeholder"
-    config.exp_name = "placeholder"
-    config.run_name = f"{int(time.time())}"
-    config.run_path = f"runs/{config.project_name}/{config.exp_name}/{config.run_name}"
-
-    config.mode = "train"  # train, test
-    config.seed = 1
-
+    
     config.device = "cuda"  # cpu, cuda
     config.total_timesteps = 1e9
     config.nr_envs = 2
@@ -33,6 +23,9 @@ def get_config(algorithm, environment):
     config.vf_coef = 0.5
     config.max_grad_norm = 0.5
     config.std_dev = 1.0
+    
+    config.nr_hidden_layers = 2
+    config.nr_hidden_units = 64
 
     config.batch_size = config.nr_envs * config.nr_steps
     config.nr_updates = config.total_timesteps / config.batch_size
