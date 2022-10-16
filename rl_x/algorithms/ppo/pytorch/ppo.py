@@ -57,10 +57,10 @@ class PPO:
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
 
-        self.actor = Actor(np.prod(self.os_shape), env.get_single_action_space_shape(), self.std_dev, self.nr_hidden_layers, self.nr_hidden_units, env.get_action_space_type()).to(self.device)
+        self.actor = Actor(env, self.std_dev, self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate, eps=1e-5)
 
-        self.critic = Critic(np.prod(self.os_shape), self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
+        self.critic = Critic(env, self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate, eps=1e-5)
 
         if self.save_model:

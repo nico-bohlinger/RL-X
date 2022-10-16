@@ -60,11 +60,11 @@ class RLXInfo(gym.Wrapper):
 
     def get_action_space_type(self):
         return ActionSpaceType.DISCRETE
-    
 
+    
     def get_single_action_space_shape(self):
         return self.action_space.n
-
+    
 
     def get_observation_space_type(self):
-        return ObservationSpaceType.FLAT_VALUES
+        return ObservationSpaceType.IMAGES

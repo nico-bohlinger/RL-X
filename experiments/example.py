@@ -8,8 +8,9 @@ from rl_x.algorithms.sac.flax import SAC_FLAX
 
 # Environments
 from rl_x.environments.envpool.humanoid_v4 import ENVPOOL_HUMANOID_V4
-from rl_x.environments.gym.humanoid_v3 import GYM_HUMANOID_V3
 from rl_x.environments.envpool.cart_pole_v1 import ENVPOOL_CART_POLE_V1
+from rl_x.environments.envpool.pong_v5 import ENVPOOL_PONG_V5
+from rl_x.environments.gym.humanoid_v3 import GYM_HUMANOID_V3
 
 
 ALGORITHM = PPO_PYTORCH

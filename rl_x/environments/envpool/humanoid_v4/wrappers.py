@@ -2,6 +2,7 @@ import gym
 import numpy as np
 
 from rl_x.environments.action_space_type import ActionSpaceType
+from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
 class RecordEpisodeStatistics(gym.Wrapper):
@@ -63,4 +64,7 @@ class RLXInfo(gym.Wrapper):
     
     def get_single_action_space_shape(self):
         return np.prod(self.action_space.shape)
+    
 
+    def get_observation_space_type(self):
+        return ObservationSpaceType.FLAT_VALUES
