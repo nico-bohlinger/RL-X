@@ -37,6 +37,11 @@ class Actor(nn.Module):
 
         if self.action_space_type == ActionSpaceType.CONTINUOUS:
             self.actor_logstd = nn.Parameter(torch.full((1, single_as_shape), np.log(std_dev)))
+            self.get_action = self.get_action_contiuous
+        elif self.action_space_type == ActionSpaceType.DISCRETE:
+            self.get_action = self.get_action_discrete
+        else:
+            raise ValueError("Unknown action space type")
     
 
     def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
@@ -45,23 +50,19 @@ class Actor(nn.Module):
         return layer
     
 
-    def get_action(self, x, action=None):
+    def get_action_contiuous(self, x, action=None):
         action_mean = self.actor_mean(x)
-        if self.action_space_type == ActionSpaceType.CONTINUOUS:
-            action_logstd = self.actor_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
-            action_std = torch.exp(action_logstd)
-            probs = Normal(action_mean, action_std)
-            if action is None:
-                action = probs.sample()
-            log_prob = probs.log_prob(action).sum(1)
-            entropy = probs.entropy().sum(1)
-        elif self.action_space_type == ActionSpaceType.DISCRETE:
-            probs = Categorical(logits=action_mean)
-            if action is None:
-                action = probs.sample()
-            log_prob = probs.log_prob(action)
-            entropy = probs.entropy()
-        else:
-            raise ValueError("Invalid action_space_type")
-        
-        return action, log_prob, entropy
+        action_logstd = self.actor_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1)
+    
+
+    def get_action_discrete(self, x, action=None):
+        action_mean = self.actor_mean(x)
+        probs = Categorical(logits=action_mean)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy()
