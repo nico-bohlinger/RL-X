@@ -1,11 +1,19 @@
-from rl_x.algorithms.algorithm_manager import Algorithm
-from rl_x.environments.environment_manager import Environment
 from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.runner import Runner
 
+# Algorithms
+from rl_x.algorithms.ppo.pytorch import PPO_PYTORCH
+from rl_x.algorithms.sac.pytorch import SAC_PYTORCH
+from rl_x.algorithms.sac.flax import SAC_FLAX
 
-ALGORITHM = Algorithm.PPO_PYTORCH
-ENVIRONMENT = Environment.ENVPOOL_HUMANOID_V4
+# Environments
+from rl_x.environments.envpool.humanoid_v4 import ENVPOOL_HUMANOID_V4
+from rl_x.environments.gym.humanoid_v3 import GYM_HUMANOID_V3
+from rl_x.environments.envpool.cart_pole_v1 import ENVPOOL_CART_POLE_V1
+
+
+ALGORITHM = PPO_PYTORCH
+ENVIRONMENT = ENVPOOL_HUMANOID_V4
 RUNNER_MODE = RunnerMode.RUN_EXPERIMENT
 
 

@@ -1,7 +1,5 @@
-from enum import Enum
-
-
-class Environment(Enum):
-    ENVPOOL_HUMANOID_V4 = 0
-    GYM_HUMANOID_V3 = 1
-    ENVPOOL_CART_POLE_V1 = 2
+class Environment:
+    def __init__(self, name, get_default_config, create_env):
+        self.name = name
+        self.get_default_config = get_default_config
+        self.create_env = create_env

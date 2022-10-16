@@ -10,10 +10,8 @@ import gym
 
 from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.default_config import get_config as get_runner_config
-from rl_x.algorithms.algorithm_manager import Algorithm
-from rl_x.environments.environment_manager import Environment
-from rl_x.algorithms.algorithm_manager import AlgorithmManager
-from rl_x.environments.environment_manager import EnvironmentManager
+from rl_x.algorithms.algorithm_manager import get_algorithm_config, get_algorithm_model_class
+from rl_x.environments.environment_manager import get_environment_config, get_environment_create_env
 
 
 # Change with newer jax version
@@ -29,13 +27,13 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class Runner:
-    def __init__(self, algorithm: Algorithm, environment: Environment):
-        self._model_class = AlgorithmManager.get_model_class(algorithm)
-        self._create_env = EnvironmentManager.get_create_env(environment)
+    def __init__(self, algorithm_name, environment_name):
+        self._model_class = get_algorithm_model_class(algorithm_name)
+        self._create_env = get_environment_create_env(environment_name)
         
         runner_default_config = get_runner_config()
-        algorithm_default_config = AlgorithmManager.get_default_config(algorithm, environment)
-        environment_default_config = EnvironmentManager.get_default_config(algorithm, environment)
+        algorithm_default_config = get_algorithm_config(algorithm_name)
+        environment_default_config = get_environment_config(environment_name)
         combined_default_config = config_dict.ConfigDict()
         combined_default_config.runner = runner_default_config
         combined_default_config.algorithm = algorithm_default_config

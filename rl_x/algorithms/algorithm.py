@@ -1,7 +1,5 @@
-from enum import Enum
-
-
-class Algorithm(Enum):
-    SAC_FLAX = 0
-    SAC_PYTORCH = 1
-    PPO_PYTORCH = 2
+class Algorithm:
+    def __init__(self, name, get_default_config, get_model_class):
+        self.name = name
+        self.get_default_config = get_default_config
+        self.get_model_class = get_model_class

@@ -1,11 +1,10 @@
 from ml_collections import config_dict
-import time
 
 
-def get_config(algorithm, environment):
+def get_config(algorithm_name):
     config = config_dict.ConfigDict()
 
-    config.algorithm_name = algorithm.name
+    config.algorithm_name = algorithm_name
 
     config.device = "cuda"  # cpu, cuda
     config.total_timesteps = 1e9
