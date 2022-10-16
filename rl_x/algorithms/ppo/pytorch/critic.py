@@ -19,11 +19,11 @@ class Critic(nn.Module):
                 raise ValueError("nr_hidden_units must be >= 1")
 
             if nr_hidden_layers == 0:
-                self.critic = nn.Sequential(self.layer_init(nn.Linear(single_os_shape, 1), std=1.0))
+                self.critic = nn.Sequential(self.layer_init(nn.Linear(np.prod(single_os_shape), 1), std=1.0))
             else:
                 layers = []
                 layers.extend([
-                    (f"fc_{len(layers) + 1}", self.layer_init(nn.Linear(single_os_shape, nr_hidden_units))),
+                    (f"fc_{len(layers) + 1}", self.layer_init(nn.Linear(np.prod(single_os_shape), nr_hidden_units))),
                     (f"tanh_{len(layers) + 1}", nn.Tanh())
                 ])
                 for _ in range(nr_hidden_layers - 1):
