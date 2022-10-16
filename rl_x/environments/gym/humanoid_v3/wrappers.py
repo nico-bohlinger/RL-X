@@ -1,9 +1,12 @@
 import gym
+import numpy as np
+
+from rl_x.environments.action_space_type import ActionSpaceType
 
 
-class ConvertInfo(gym.Wrapper):
+class RLXInfo(gym.Wrapper):
     def __init__(self, env):
-        super(ConvertInfo, self).__init__(env)
+        super(RLXInfo, self).__init__(env)
 
 
     def get_episode_infos(self, info):
@@ -17,3 +20,11 @@ class ConvertInfo(gym.Wrapper):
 
     def get_terminal_observation(self, info, id):
         return info[id]["terminal_observation"]
+
+    
+    def get_action_space_type(self):
+        return ActionSpaceType.CONTINUOUS
+
+
+    def get_single_action_space_shape(self):
+        return np.prod(self.action_space.shape)

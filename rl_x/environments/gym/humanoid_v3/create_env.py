@@ -2,7 +2,7 @@ import gym
 import numpy as np
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
-from rl_x.environments.gym.humanoid_v3.wrappers import ConvertInfo
+from rl_x.environments.gym.humanoid_v3.wrappers import RLXInfo
 
 
 def create_env(config):
@@ -21,5 +21,5 @@ def create_env(config):
             return env
         return thunk
     env = SubprocVecEnv([make_env(config.environment.seed + i) for i in range(config.algorithm.nr_envs)])
-    env = ConvertInfo(env)
+    env = RLXInfo(env)
     return env

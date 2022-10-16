@@ -6,6 +6,7 @@ import logging
 from ml_collections import config_dict, config_flags
 import wandb
 from torch.utils.tensorboard import SummaryWriter
+import gym
 
 from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.default_config import get_config as get_runner_config
@@ -19,6 +20,10 @@ from rl_x.environments.environment_manager import EnvironmentManager
 # https://github.com/google/jax/issues/10070
 # https://github.com/google/jax/pull/12769
 absl_logging.set_verbosity(absl_logging.ERROR)
+
+# Warning in CartPoleV1
+# https://github.com/openai/gym/issues/2216
+gym.logger.set_level(40)
 
 rlx_logger = logging.getLogger("rl_x")
 

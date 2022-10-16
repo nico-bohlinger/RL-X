@@ -4,19 +4,20 @@ import torch.nn as nn
 
 
 class Critic(nn.Module):
-    def __init__(self, os_shape, nr_hidden_layers, nr_hidden_units):
+    def __init__(self, single_os_shape, nr_hidden_layers, nr_hidden_units):
         super().__init__()
+
         if nr_hidden_layers < 0:
             raise ValueError("nr_hidden_layers must be >= 0")
         if nr_hidden_units < 1:
             raise ValueError("nr_hidden_units must be >= 1")
 
         if nr_hidden_layers == 0:
-            self.critic = nn.Sequential(self.layer_init(nn.Linear(os_shape, 1), std=1.0))
+            self.critic = nn.Sequential(self.layer_init(nn.Linear(single_os_shape, 1), std=1.0))
         else:
             layers = []
             layers.extend([
-                (f"fc_{len(layers) + 1}", self.layer_init(nn.Linear(os_shape, nr_hidden_units))),
+                (f"fc_{len(layers) + 1}", self.layer_init(nn.Linear(single_os_shape, nr_hidden_units))),
                 (f"tanh_{len(layers) + 1}", nn.Tanh())
             ])
             for _ in range(nr_hidden_layers - 1):

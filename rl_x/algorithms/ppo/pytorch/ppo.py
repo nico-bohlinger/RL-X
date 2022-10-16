@@ -54,13 +54,13 @@ class PPO:
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
 
-        self.os_shape = np.prod(env.observation_space.shape)
-        self.as_shape = np.prod(env.action_space.shape)
+        self.os_shape = env.observation_space.shape
+        self.as_shape = env.action_space.shape
 
-        self.actor = Actor(self.os_shape, self.as_shape, self.std_dev, self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
+        self.actor = Actor(np.prod(self.os_shape), env.get_single_action_space_shape(), self.std_dev, self.nr_hidden_layers, self.nr_hidden_units, env.get_action_space_type()).to(self.device)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate, eps=1e-5)
 
-        self.critic = Critic(self.os_shape, self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
+        self.critic = Critic(np.prod(self.os_shape), self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate, eps=1e-5)
 
         if self.save_model:
@@ -72,8 +72,8 @@ class PPO:
         self.set_train_mode()
 
         batch = Batch(
-            states = torch.zeros((self.nr_steps, self.nr_envs, self.os_shape), dtype=torch.float32).to(self.device),
-            actions = torch.zeros((self.nr_steps, self.nr_envs, self.as_shape), dtype=torch.float32).to(self.device),
+            states = torch.zeros((self.nr_steps, self.nr_envs) + self.os_shape, dtype=torch.float32).to(self.device),
+            actions = torch.zeros((self.nr_steps, self.nr_envs) + self.as_shape, dtype=torch.float32).to(self.device),
             rewards = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             returns = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             values = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
@@ -147,8 +147,8 @@ class PPO:
                 for param_group in self.actor_optimizer.param_groups + self.critic_optimizer.param_groups:
                     param_group["lr"] = learning_rate
             
-            batch_states = batch.states.reshape(-1, self.os_shape)
-            batch_actions = batch.actions.reshape(-1, self.as_shape)
+            batch_states = batch.states.reshape((-1,) + self.os_shape)
+            batch_actions = batch.actions.reshape((-1,) + self.as_shape)
             batch_advantages = advantages.reshape(-1)
             batch_returns = batch.returns.reshape(-1)
             batch_values = batch.values.reshape(-1)

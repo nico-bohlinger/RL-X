@@ -58,9 +58,8 @@ class RLXInfo(gym.Wrapper):
     
 
     def get_action_space_type(self):
-        return ActionSpaceType.CONTINUOUS
-
+        return ActionSpaceType.DISCRETE
     
-    def get_single_action_space_shape(self):
-        return np.prod(self.action_space.shape)
 
+    def get_single_action_space_shape(self):
+        return self.action_space.n
