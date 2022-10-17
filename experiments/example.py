@@ -3,6 +3,7 @@ from rl_x.runner.runner import Runner
 
 # Algorithms
 from rl_x.algorithms.ppo.pytorch import PPO_PYTORCH
+from rl_x.algorithms.ppo.torchscript import PPO_TORCHSCRIPT
 from rl_x.algorithms.sac.pytorch import SAC_PYTORCH
 from rl_x.algorithms.sac.flax import SAC_FLAX
 
