@@ -13,6 +13,7 @@ def get_config():
 
     config.track_tb = False
     config.track_wandb = False
+    config.wandb_entity = "placeholder"
     config.project_name = "placeholder"
     config.exp_name = "placeholder"
     config.run_name = f"{int(time.time())}"

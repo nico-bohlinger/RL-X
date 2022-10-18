@@ -91,6 +91,7 @@ class Runner:
     def _train(self):
         if self._config.runner.track_wandb:
             wandb.init(
+                entity=self._config.runner.wandb_entity,
                 project=self._config.runner.project_name,
                 group=self._config.runner.exp_name,
                 name=self._config.runner.run_name,

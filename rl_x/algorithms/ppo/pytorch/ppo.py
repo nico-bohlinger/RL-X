@@ -9,8 +9,8 @@ import torch.nn as nn
 import torch.optim as optim
 import wandb
 
-from rl_x.algorithms.ppo.pytorch.actor import Actor
-from rl_x.algorithms.ppo.pytorch.critic import Critic
+from rl_x.algorithms.ppo.pytorch.actor import get_actor
+from rl_x.algorithms.ppo.pytorch.critic import get_critic
 from rl_x.algorithms.ppo.pytorch.batch import Batch
 
 rlx_logger = logging.getLogger("rl_x")
@@ -56,10 +56,10 @@ class PPO:
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
 
-        self.actor = Actor(env, self.std_dev, self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
+        self.actor = get_actor(config, env).to(self.device)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate, eps=1e-5)
 
-        self.critic = Critic(env, self.nr_hidden_layers, self.nr_hidden_units).to(self.device)
+        self.critic = get_critic(config, env).to(self.device)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate, eps=1e-5)
 
         if self.save_model:
