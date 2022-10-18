@@ -8,43 +8,43 @@ from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
+def get_agent(config, env):
+    action_space_type = env.get_action_space_type()
+    observation_space_type = env.get_observation_space_type()
+
+    if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
+        return Agent(env, config.algorithm.std_dev, config.algorithm.nr_hidden_units, config.algorithm.clip_range, config.algorithm.ent_coef, config.algorithm.vf_coef)
+    else:
+        raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
+
+
 class Agent(nn.Module):
-    def __init__(self, env, std_dev, nr_hidden_layers, nr_hidden_units, clip_range: float, ent_coef: float, vf_coef: float):
+    def __init__(self, env, std_dev, nr_hidden_units, clip_range: float, ent_coef: float, vf_coef: float):
         super().__init__()
         self.clip_range = clip_range
         self.ent_coef = ent_coef
         self.vf_coef = vf_coef
-        self.action_space_type = env.get_action_space_type()
-        self.observation_space_type = env.get_observation_space_type()
         single_os_shape = env.observation_space.shape
         single_as_shape = env.get_single_action_space_shape()
 
-        if self.observation_space_type != ObservationSpaceType.FLAT_VALUES:
-            raise ValueError(f"Unsupported observation_space_type: {self.observation_space_type}")
-        
-        if self.action_space_type != ActionSpaceType.CONTINUOUS:
-            raise ValueError(f"Unsupported action_space_type: {self.action_space_type}")
-
-        if nr_hidden_layers < 0:
-            raise ValueError("nr_hidden_layers must be >= 0")
         if nr_hidden_units < 1:
             raise ValueError("nr_hidden_units must be >= 1")
 
         self.actor_mean = nn.Sequential(
-            self.layer_init(nn.Linear(np.prod(single_os_shape).item(), 64)),
+            self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),
             nn.Tanh(),
-            self.layer_init(nn.Linear(64, 64)),
+            self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),
-            self.layer_init(nn.Linear(64, single_as_shape.item()), std=0.01),
+            self.layer_init(nn.Linear(nr_hidden_units, single_as_shape.item()), std=0.01),
         )
         self.actor_logstd = nn.Parameter(torch.full((1, single_as_shape.item()), np.log(std_dev).item()))
 
         self.critic = nn.Sequential(
-            self.layer_init(nn.Linear(np.prod(single_os_shape).item(), 64)),
+            self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),
             nn.Tanh(),
-            self.layer_init(nn.Linear(64, 64)),
+            self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),
-            self.layer_init(nn.Linear(64, 1), std=1.0),
+            self.layer_init(nn.Linear(nr_hidden_units, 1), std=1.0),
         )
 
 

@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 import wandb
 
-from rl_x.algorithms.ppo.torchscript.agent import Agent
+from rl_x.algorithms.ppo.torchscript.agent import get_agent
 from rl_x.algorithms.ppo.torchscript.batch import Batch
 
 rlx_logger = logging.getLogger("rl_x")
@@ -40,7 +40,6 @@ class PPO:
         self.vf_coef = config.algorithm.vf_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
-        self.nr_hidden_layers = config.algorithm.nr_hidden_layers
         self.nr_hidden_units = config.algorithm.nr_hidden_units
         self.batch_size = config.algorithm.nr_envs * config.algorithm.nr_steps
 
@@ -54,7 +53,7 @@ class PPO:
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
 
-        self.agent = Agent(env, self.std_dev, self.nr_hidden_layers, self.nr_hidden_units, self.clip_range, self.ent_coef, self.vf_coef).to(self.device)
+        self.agent = get_agent(config, env).to(self.device)
         self.agent = torch.jit.script(self.agent)
         self.agent_optimizer = optim.Adam(self.agent.parameters(), lr=self.learning_rate, eps=1e-5)
 

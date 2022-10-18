@@ -4,6 +4,7 @@ from rl_x.runner.runner import Runner
 # Algorithms
 from rl_x.algorithms.ppo.pytorch import PPO_PYTORCH
 from rl_x.algorithms.ppo.torchscript import PPO_TORCHSCRIPT
+from rl_x.algorithms.ppo.flax import PPO_FLAX
 from rl_x.algorithms.sac.pytorch import SAC_PYTORCH
 from rl_x.algorithms.sac.flax import SAC_FLAX
 
@@ -15,7 +16,7 @@ from rl_x.environments.gym.humanoid_v3 import GYM_HUMANOID_V3
 
 
 ALGORITHM = PPO_PYTORCH
-ENVIRONMENT = ENVPOOL_PONG_V5
+ENVIRONMENT = ENVPOOL_HUMANOID_V4
 RUNNER_MODE = RunnerMode.RUN_EXPERIMENT
 
 
