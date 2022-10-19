@@ -228,7 +228,6 @@ class ESPO:
             acting_end_time = time.time()
 
 
-
             # Calculating advantages and returns
             storage = calculate_gae_advantages(self.train_state.params, next_states, rewards, dones, storage)
             
