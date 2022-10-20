@@ -18,8 +18,10 @@ def get_config(algorithm_name):
     config.train_freq = 1
     config.gradient_steps = 1
     config.ent_coef = "auto"
-    config.target_update_interval = 1
     config.target_entropy = "auto"
+    config.target_update_interval = 1
+    config.log_std_min = -5
+    config.log_std_max = 2
 
     config.nr_hidden_units = 64
 

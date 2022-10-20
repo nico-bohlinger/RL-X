@@ -3,6 +3,11 @@ import logging
 import random
 import numpy as np
 import torch
+import torch.optim as optim
+
+from rl_x.algorithms.sac.pytorch.actor import get_actor
+from rl_x.algorithms.sac.pytorch.critic import get_critic
+from rl_x.algorithms.sac.pytorch.replay_buffer import ReplayBuffer
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -29,8 +34,8 @@ class SAC():
         self.train_freq = config.algorithm.train_freq
         self.gradient_steps = config.algorithm.gradient_steps
         self.ent_coef = config.algorithm.ent_coef
-        self.target_update_interval = config.algorithm.target_update_interval
         self.target_entropy = config.algorithm.target_entropy
+        self.target_update_interval = config.algorithm.target_update_interval
         self.nr_hidden_units = config.algorithm.nr_hidden_units
 
         self.device = torch.device("cuda" if config.algorithm.device == "cuda" and torch.cuda.is_available() else "cpu")
@@ -43,11 +48,50 @@ class SAC():
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
 
+        self.actor = get_actor(config, env, self.device).to(self.device)
+        self.q1 = get_critic(config, env).to(self.device)
+        self.q2 = get_critic(config, env).to(self.device)
+        self.q1_target = get_critic(config, env).to(self.device)
+        self.q2_target = get_critic(config, env).to(self.device)
+        self.q1_target.load_state_dict(self.q1.state_dict())
+        self.q2_target.load_state_dict(self.q2.state_dict())
 
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate)
+        self.q_optimizer = optim.Adam(list(self.q1.parameters()) + list(self.q2.parameters()), lr=self.learning_rate)
 
-
-
+        if self.ent_coef == "auto":
+            if self.target_entropy == "auto":
+                self.target_entropy = -torch.prod(torch.tensor(env.get_single_action_space_shape(), dtype=torch.float32).to(self.device)).item()
+                log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+                self.alpha = log_alpha.exp()
+                self.alpha_optimizer = optim.Adam([log_alpha], lr=self.learning_rate)
+            
+        else:
+            self.alpha = self.ent_coef
 
         if self.save_model:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
+
+    
+    def train(self):
+        self.set_train_mode()
+
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.os_shape, self.as_shape, self.device)
+        exit()
+    
+
+    def set_train_mode(self):
+        self.actor.train()
+        self.q1.train()
+        self.q2.train()
+        self.q1_target.train()
+        self.q2_target.train()
+
+
+    def set_eval_mode(self):
+        self.actor.eval()
+        self.q1.eval()
+        self.q2.eval()
+        self.q1_target.eval()
+        self.q2_target.eval()

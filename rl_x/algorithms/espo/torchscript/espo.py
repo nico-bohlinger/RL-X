@@ -63,7 +63,7 @@ class ESPO:
 
         self.agent = get_agent(config, env, self.device).to(self.device)
         self.agent = torch.jit.script(self.agent)
-        self.agent_optimizer = optim.Adam(self.agent.parameters(), lr=self.learning_rate, eps=1e-5)
+        self.agent_optimizer = optim.Adam(self.agent.parameters(), lr=self.learning_rate)
 
         if self.save_model:
             os.makedirs(self.save_path)

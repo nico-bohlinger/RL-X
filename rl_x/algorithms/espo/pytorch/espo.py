@@ -64,10 +64,10 @@ class ESPO:
         self.as_shape = env.action_space.shape
 
         self.actor = get_actor(config, env, self.device).to(self.device)
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate, eps=1e-5)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate)
 
         self.critic = get_critic(config, env).to(self.device)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate, eps=1e-5)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate)
 
         if self.save_model:
             os.makedirs(self.save_path)

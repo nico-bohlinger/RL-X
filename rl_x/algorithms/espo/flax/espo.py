@@ -86,7 +86,7 @@ class ESPO:
             ),
             tx=optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate, eps=1e-5),
+                optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
             ),
         )
         
