@@ -56,7 +56,7 @@ class PPO:
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
 
-        self.actor = get_actor(config, env).to(self.device)
+        self.actor = get_actor(config, env, self.device).to(self.device)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate, eps=1e-5)
 
         self.critic = get_critic(config, env).to(self.device)
@@ -90,9 +90,9 @@ class PPO:
             episode_info_buffer = deque(maxlen=100)
             for step in range(self.nr_steps):
                 with torch.no_grad():
-                    action, log_prob, _ = self.actor.get_action(state)
+                    action, processed_action, log_prob = self.actor.get_action_logprob(state)
                     value = self.critic.get_value(state)
-                next_state, reward, done, info = self.env.step(action.cpu().numpy())
+                next_state, reward, done, info = self.env.step(processed_action.cpu().numpy())
                 next_state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
                 actual_next_state = next_state.clone()
                 for i, single_done in enumerate(done):
@@ -165,7 +165,7 @@ class PPO:
                     end = start + self.minibatch_size
                     minibatch_indices = batch_indices[start:end]
 
-                    _, new_log_prob, entropy = self.actor.get_action(batch_states[minibatch_indices], batch_actions[minibatch_indices])
+                    new_log_prob, entropy = self.actor.get_logprob_entropy(batch_states[minibatch_indices], batch_actions[minibatch_indices])
                     new_value = self.critic.get_value(batch_states[minibatch_indices])
                     logratio = new_log_prob - batch_log_probs[minibatch_indices]
                     ratio = logratio.exp()
@@ -286,8 +286,8 @@ class PPO:
             done = False
             state = self.env.reset()
             while not done:
-                action, _, __ = self.actor.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                state, reward, done, info = self.env.step(action.cpu().numpy())
+                _, processed_action, __ = self.actor.get_action_logprob(torch.tensor(state, dtype=torch.float32).to(self.device))
+                state, reward, done, info = self.env.step(processed_action.cpu().numpy())
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
 

@@ -61,7 +61,7 @@ class ESPO:
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
 
-        self.agent = get_agent(config, env).to(self.device)
+        self.agent = get_agent(config, env, self.device).to(self.device)
         self.agent = torch.jit.script(self.agent)
         self.agent_optimizer = optim.Adam(self.agent.parameters(), lr=self.learning_rate, eps=1e-5)
 
@@ -95,9 +95,9 @@ class ESPO:
             episode_info_buffer = deque(maxlen=100)
             for step in range(self.nr_steps):
                 with torch.no_grad():
-                    action, log_prob = self.agent.get_action_logprob(state)
+                    action, processed_action, log_prob = self.agent.get_action_logprob(state)
                     value = self.agent.get_value(state)
-                next_state, reward, done, info = self.env.step(action.cpu().numpy())
+                next_state, reward, done, info = self.env.step(processed_action.cpu().numpy())
                 next_state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
                 actual_next_state = next_state.clone()
                 for i, single_done in enumerate(done):
@@ -258,8 +258,8 @@ class ESPO:
             done = False
             state = self.env.reset()
             while not done:
-                action, _ = self.agent.get_action_logprob(torch.tensor(state, dtype=torch.float32).to(self.device))
-                state, reward, done, info = self.env.step(action.cpu().numpy())
+                _, processed_action, __ = self.agent.get_action_logprob(torch.tensor(state, dtype=torch.float32).to(self.device))
+                state, reward, done, info = self.env.step(processed_action.cpu().numpy())
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
 

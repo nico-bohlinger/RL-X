@@ -8,21 +8,28 @@ from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
-def get_agent(config, env):
+def get_agent(config, env, device):
     action_space_type = env.get_action_space_type()
     observation_space_type = env.get_observation_space_type()
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return Agent(env, config.algorithm.std_dev, config.algorithm.nr_hidden_units, config.algorithm.ent_coef, config.algorithm.vf_coef)
+        env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(device)
+        env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(device)
+        return Agent(env, config.algorithm.std_dev, config.algorithm.nr_hidden_units, env_as_low, env_as_high,
+                     config.algorithm.ent_coef, config.algorithm.vf_coef)
     else:
         raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
 
 
 class Agent(nn.Module):
-    def __init__(self, env, std_dev, nr_hidden_units, ent_coef: float, vf_coef: float):
+    def __init__(self, env, std_dev, nr_hidden_units, env_as_low, env_as_high, ent_coef: float, vf_coef: float):
         super().__init__()
         self.ent_coef = ent_coef
         self.vf_coef = vf_coef
+        self.actor_as_low = -1
+        self.actor_as_high = 1
+        self.env_as_low = env_as_low
+        self.env_as_high = env_as_high
         single_os_shape = env.observation_space.shape
         single_as_shape = env.get_single_action_space_shape()
 
@@ -60,7 +67,9 @@ class Agent(nn.Module):
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         action = probs.sample()
-        return action, probs.log_prob(action).sum(1)
+        clipped_action = torch.clip(action, self.actor_as_low, self.actor_as_high)
+        clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        return action, clipped_and_scaled_action, probs.log_prob(action).sum(1)
     
 
     @torch.jit.export

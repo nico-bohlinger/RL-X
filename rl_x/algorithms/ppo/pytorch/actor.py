@@ -9,16 +9,16 @@ from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
-def get_actor(config, env):
+def get_actor(config, env, device):
     action_space_type = env.get_action_space_type()
     observation_space_type = env.get_observation_space_type()
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return ContinuousFlatValuesActor(env, config.algorithm.std_dev, config.algorithm.nr_hidden_layers, config.algorithm.nr_hidden_units)
+        return ContinuousFlatValuesActor(env, config.algorithm.std_dev, config.algorithm.nr_hidden_layers, config.algorithm.nr_hidden_units, device)
     elif action_space_type == ActionSpaceType.DISCRETE and observation_space_type == ObservationSpaceType.FLAT_VALUES:
         return DiscreteFlatValuesActor(env, config.algorithm.nr_hidden_layers, config.algorithm.nr_hidden_units)
     elif action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.IMAGES:
-        return ContinuousImagesActor(env, config.algorithm.std_dev)
+        return ContinuousImagesActor(env, config.algorithm.std_dev, device)
     elif action_space_type == ActionSpaceType.DISCRETE and observation_space_type == ObservationSpaceType.IMAGES:
         return DiscreteImagesActor(env)
     else:
@@ -26,8 +26,12 @@ def get_actor(config, env):
 
 
 class ContinuousFlatValuesActor(nn.Module):
-    def __init__(self, env, std_dev, nr_hidden_layers, nr_hidden_units):
+    def __init__(self, env, std_dev, nr_hidden_layers, nr_hidden_units, device):
         super().__init__()
+        self.actor_as_low = -1
+        self.actor_as_high = 1
+        self.env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(device)
+        self.env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(device)
         single_os_shape = env.observation_space.shape
         single_as_shape = env.get_single_action_space_shape()
 
@@ -61,15 +65,23 @@ class ContinuousFlatValuesActor(nn.Module):
         return layer
     
 
-    def get_action(self, x, action=None):
+    def get_action_logprob(self, x):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1)
+        action = probs.sample()
+        clipped_action = torch.clip(action, self.actor_as_low, self.actor_as_high)
+        clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        return action, clipped_and_scaled_action, probs.log_prob(action).sum(1)
+    
 
+    def get_logprob_entropy(self, x, action):
+        action_mean = self.actor_mean(x)
+        action_logstd = self.actor_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        return probs.log_prob(action).sum(1), probs.entropy().sum(1)
 
 
 class DiscreteFlatValuesActor(nn.Module):
@@ -106,17 +118,26 @@ class DiscreteFlatValuesActor(nn.Module):
         return layer
 
 
-    def get_action(self, x, action=None):
+    def get_action_logprob(self, x):
         action_mean = self.actor_mean(x)
         probs = Categorical(logits=action_mean)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy()
+        action = probs.sample()
+        return action, action, probs.log_prob(action)
+    
+
+    def get_logprob_entropy(self, x, action=None):
+        action_mean = self.actor_mean(x)
+        probs = Categorical(logits=action_mean)
+        return probs.log_prob(action), probs.entropy()
 
 
 class ContinuousImagesActor(nn.Module):
-    def __init__(self, env, std_dev):
+    def __init__(self, env, std_dev, device):
         super().__init__()
+        self.actor_as_low = -1
+        self.actor_as_high = 1
+        self.env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(device)
+        self.env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(device)
         single_as_shape = env.get_single_action_space_shape()
 
         self.actor_mean = nn.Sequential(
@@ -141,14 +162,23 @@ class ContinuousImagesActor(nn.Module):
         return layer
     
 
-    def get_action(self, x, action=None):
+    def get_action_logprob(self, x):
         action_mean = self.actor_mean(x / 255.0)
         action_logstd = self.actor_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1)
+        action = probs.sample()
+        clipped_action = torch.clip(action, self.actor_as_low, self.actor_as_high)
+        clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        return action, clipped_and_scaled_action, probs.log_prob(action).sum(1)
+    
+
+    def get_logprob_entropy(self, x, action):
+        action_mean = self.actor_mean(x / 255.0)
+        action_logstd = self.actor_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        return probs.log_prob(action).sum(1), probs.entropy().sum(1)
 
 
 class DiscreteImagesActor(nn.Module):
@@ -177,9 +207,14 @@ class DiscreteImagesActor(nn.Module):
         return layer
     
 
-    def get_action(self, x, action=None):
+    def get_action_logprob(self, x):
         action_mean = self.actor_mean(x / 255.0)
         probs = Categorical(logits=action_mean)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy()
+        action = probs.sample()
+        return action, action, probs.log_prob(action)
+    
+
+    def get_logprob_entropy(self, x, action=None):
+        action_mean = self.actor_mean(x / 255.0)
+        probs = Categorical(logits=action_mean)
+        return probs.log_prob(action), probs.entropy()

@@ -21,4 +21,6 @@ def get_config(algorithm_name):
     config.target_update_interval = 1
     config.target_entropy = "auto"
 
+    config.nr_hidden_units = 64
+
     return config

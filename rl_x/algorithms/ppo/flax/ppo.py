@@ -66,7 +66,7 @@ class PPO:
             fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates
             return self.learning_rate * fraction
         
-        self.actor = get_actor(config, env)
+        self.actor, self.get_processed_action = get_actor(config, env)
         self.critic = get_critic(config, env)
 
         self.first_state = env.reset()
@@ -106,7 +106,8 @@ class PPO:
                 log_probs=storage.log_probs.at[step].set(log_prob.sum(1)),
                 values=storage.values.at[step].set(value.reshape(-1))
             )
-            return action, storage, key
+            processed_action = self.get_processed_action(action)
+            return processed_action, storage, key
         
 
         @jax.jit
@@ -222,8 +223,8 @@ class PPO:
             # Acting
             episode_info_buffer = deque(maxlen=100)
             for step in range(self.nr_steps):
-                action, storage, self.key = get_action_and_value(self.train_state.params, state, storage, step, self.key)
-                next_state, reward, done, info = self.env.step(jax.device_get(action))
+                processed_action, storage, self.key = get_action_and_value(self.train_state.params, state, storage, step, self.key)
+                next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
                 actual_next_state = next_state.copy()
                 for i, single_done in enumerate(done):
                     if single_done:
@@ -359,13 +360,13 @@ class PPO:
         @jax.jit
         def get_action(params: flax.core.FrozenDict, state: np.ndarray):
             action_mean, action_logstd = jax.lax.stop_gradient(self.actor.apply(params.actor_params, state))
-            return action_mean
+            return self.get_processed_action(action_mean)
         
         for i in range(episodes):
             done = False
             state = self.env.reset()
             while not done:
-                action = get_action(self.train_state.params, state)
-                state, reward, done, info = self.env.step(jax.device_get(action))
+                processed_action = get_action(self.train_state.params, state)
+                state, reward, done, info = self.env.step(jax.device_get(processed_action))
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
