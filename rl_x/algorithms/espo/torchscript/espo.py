@@ -258,7 +258,7 @@ class ESPO:
             done = False
             state = self.env.reset()
             while not done:
-                _, processed_action, __ = self.agent.get_action_logprob(torch.tensor(state, dtype=torch.float32).to(self.device))
+                processed_action = self.agent.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, done, info = self.env.step(processed_action.cpu().numpy())
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")

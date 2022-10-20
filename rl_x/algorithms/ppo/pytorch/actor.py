@@ -84,6 +84,14 @@ class ContinuousFlatValuesActor(nn.Module):
         return probs.log_prob(action).sum(1), probs.entropy().sum(1)
 
 
+    def get_deterministic_action(self, x):
+        with torch.no_grad():
+            action = self.actor_mean(x)
+        clipped_action = torch.clip(action, self.actor_as_low, self.actor_as_high)
+        clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        return clipped_and_scaled_action
+
+
 class DiscreteFlatValuesActor(nn.Module):
     def __init__(self, env, nr_hidden_layers, nr_hidden_units):
         super().__init__()
@@ -129,6 +137,11 @@ class DiscreteFlatValuesActor(nn.Module):
         action_mean = self.actor_mean(x)
         probs = Categorical(logits=action_mean)
         return probs.log_prob(action), probs.entropy()
+    
+
+    def get_deterministic_action(self, x):
+        with torch.no_grad():
+            return self.actor_mean(x).argmax(1)
 
 
 class ContinuousImagesActor(nn.Module):
@@ -179,6 +192,14 @@ class ContinuousImagesActor(nn.Module):
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         return probs.log_prob(action).sum(1), probs.entropy().sum(1)
+    
+
+    def get_deterministic_action(self, x):
+        with torch.no_grad():
+            action = self.actor_mean(x / 255.0)
+        clipped_action = torch.clip(action, self.actor_as_low, self.actor_as_high)
+        clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        return clipped_and_scaled_action
 
 
 class DiscreteImagesActor(nn.Module):
@@ -218,3 +239,8 @@ class DiscreteImagesActor(nn.Module):
         action_mean = self.actor_mean(x / 255.0)
         probs = Categorical(logits=action_mean)
         return probs.log_prob(action), probs.entropy()
+    
+
+    def get_deterministic_action(self, x):
+        with torch.no_grad():
+            return self.actor_mean(x / 255.0).argmax(1)

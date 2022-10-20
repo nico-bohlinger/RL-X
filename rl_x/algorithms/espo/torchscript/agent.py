@@ -82,6 +82,15 @@ class Agent(nn.Module):
     
 
     @torch.jit.export
+    def get_deterministic_action(self, x):
+        with torch.no_grad():
+            action = self.actor_mean(x)
+        clipped_action = torch.clip(action, self.actor_as_low, self.actor_as_high)
+        clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        return clipped_and_scaled_action
+    
+
+    @torch.jit.export
     def get_value(self, x):
         return self.critic(x)
     
