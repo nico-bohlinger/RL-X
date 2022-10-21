@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 import wandb
 
-from rl_x.algorithms.espo.pytorch.actor import get_actor
+from rl_x.algorithms.espo.pytorch.policy import get_policy
 from rl_x.algorithms.espo.pytorch.critic import get_critic
 from rl_x.algorithms.espo.pytorch.batch import Batch
 
@@ -63,8 +63,8 @@ class ESPO:
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
 
-        self.actor = get_actor(config, env, self.device).to(self.device)
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate)
+        self.policy = get_policy(config, env, self.device).to(self.device)
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
 
         self.critic = get_critic(config, env).to(self.device)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate)
@@ -98,7 +98,7 @@ class ESPO:
             episode_info_buffer = deque(maxlen=100)
             for step in range(self.nr_steps):
                 with torch.no_grad():
-                    action, processed_action, log_prob = self.actor.get_action_logprob(state)
+                    action, processed_action, log_prob = self.policy.get_action_logprob(state)
                     value = self.critic.get_value(state)
                 next_state, reward, done, info = self.env.step(processed_action.cpu().numpy())
                 next_state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
@@ -149,7 +149,7 @@ class ESPO:
             if self.anneal_learning_rate:
                 fraction = 1 - (global_step / self.total_timesteps)
                 learning_rate = fraction * self.learning_rate
-                for param_group in self.actor_optimizer.param_groups + self.critic_optimizer.param_groups:
+                for param_group in self.policy_optimizer.param_groups + self.critic_optimizer.param_groups:
                     param_group["lr"] = learning_rate
             
             batch_states = batch.states.reshape((-1,) + self.os_shape)
@@ -168,7 +168,7 @@ class ESPO:
             for epoch in range(self.max_epochs):
                 minibatch_indices = rng.choice(self.batch_size, size=self.minibatch_size, replace=False)
 
-                new_log_prob, entropy = self.actor.get_logprob_entropy(batch_states[minibatch_indices], batch_actions[minibatch_indices])
+                new_log_prob, entropy = self.policy.get_logprob_entropy(batch_states[minibatch_indices], batch_actions[minibatch_indices])
                 new_value = self.critic.get_value(batch_states[minibatch_indices]).reshape(-1)
                 logratio = new_log_prob - batch_log_probs[minibatch_indices]
                 ratio = logratio.exp()
@@ -185,12 +185,12 @@ class ESPO:
                 entropy_loss = entropy.mean()
                 loss = pg_loss + self.vf_coef * v_loss - self.ent_coef * entropy_loss
 
-                self.actor_optimizer.zero_grad()
+                self.policy_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+                nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
-                self.actor_optimizer.step()
+                self.policy_optimizer.step()
                 self.critic_optimizer.step()
 
                 episode_ratio_delta = self.delta_calc_operator(torch.abs(ratio - 1))
@@ -245,7 +245,7 @@ class ESPO:
                 self.writer.add_scalar("train/value_loss", np.mean(value_losses), global_step)
                 self.writer.add_scalar("train/entropy_loss", np.mean(entropy_losses), global_step)
                 self.writer.add_scalar("train/loss", np.mean(loss_losses), global_step)
-                self.writer.add_scalar("train/std", np.mean(np.exp(self.actor.actor_logstd.data.cpu().numpy())), global_step)
+                self.writer.add_scalar("train/std", np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy())), global_step)
                 self.writer.add_scalar("train/explained_variance", explained_var, global_step)
 
             rlx_logger.info(f"Step: {global_step}")
@@ -255,9 +255,9 @@ class ESPO:
         file_path = self.save_path + "/model_best.pt"
         torch.save({
             "config_algorithm": self.config.algorithm,
-            "actor_state_dict": self.actor.state_dict(),
+            "policy_state_dict": self.policy.state_dict(),
             "critic_state_dict": self.critic.state_dict(),
-            "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+            "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
             "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
         }, file_path)
         if self.track_wandb:
@@ -268,9 +268,9 @@ class ESPO:
         checkpoint = torch.load(config.runner.load_model)
         config.algorithm = checkpoint["config_algorithm"]
         model = ESPO(config, env, writer)
-        model.actor.load_state_dict(checkpoint["actor_state_dict"])
+        model.policy.load_state_dict(checkpoint["policy_state_dict"])
         model.critic.load_state_dict(checkpoint["critic_state_dict"])
-        model.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
+        model.policy_optimizer.load_state_dict(checkpoint["policy_optimizer_state_dict"])
         model.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
 
         return model
@@ -282,18 +282,18 @@ class ESPO:
             done = False
             state = self.env.reset()
             while not done:
-                processed_action = self.actor.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, done, info = self.env.step(processed_action.cpu().numpy())
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
 
 
     def set_train_mode(self):
-        self.actor.train()
+        self.policy.train()
         self.critic.train()
 
 
     def set_eval_mode(self):
-        self.actor.eval()
+        self.policy.eval()
         self.critic.eval()
 

@@ -13,7 +13,7 @@ from flax.training import checkpoints
 import optax
 import wandb
 
-from rl_x.algorithms.ppo.flax.actor import get_actor
+from rl_x.algorithms.ppo.flax.policy import get_policy
 from rl_x.algorithms.ppo.flax.critic import get_critic
 from rl_x.algorithms.ppo.flax.agent_params import AgentParams
 from rl_x.algorithms.ppo.flax.storage import Storage
@@ -57,7 +57,7 @@ class PPO:
         random.seed(self.seed)
         np.random.seed(self.seed)
         self.key = jax.random.PRNGKey(self.seed)
-        self.key, actor_key, critic_key = jax.random.split(self.key, 3)
+        self.key, policy_key, critic_key = jax.random.split(self.key, 3)
 
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
@@ -66,7 +66,7 @@ class PPO:
             fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates
             return self.learning_rate * fraction
         
-        self.actor, self.get_processed_action = get_actor(config, env)
+        self.policy, self.get_processed_action = get_policy(config, env)
         self.critic = get_critic(config, env)
 
         self.first_state = env.reset()
@@ -74,7 +74,7 @@ class PPO:
         self.train_state = TrainState.create(
             apply_fn=None,
             params=AgentParams(
-                self.actor.init(actor_key, self.first_state),
+                self.policy.init(policy_key, self.first_state),
                 self.critic.init(critic_key, self.first_state),
             ),
             tx=optax.chain(
@@ -83,7 +83,7 @@ class PPO:
             ),
         )
         
-        self.actor.apply = jax.jit(self.actor.apply)
+        self.policy.apply = jax.jit(self.policy.apply)
         self.critic.apply = jax.jit(self.critic.apply)
 
         if self.save_model:
@@ -94,7 +94,7 @@ class PPO:
     def train(self):
         @jax.jit
         def get_action_and_value(params: flax.core.FrozenDict, state: np.ndarray, storage: Storage, step: int, key: jax.random.PRNGKey):
-            action_mean, action_logstd = jax.lax.stop_gradient(self.actor.apply(params.actor_params, state))
+            action_mean, action_logstd = jax.lax.stop_gradient(self.policy.apply(params.policy_params, state))
             action_std = jnp.exp(action_logstd)
             key, subkey = jax.random.split(key)
             action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
@@ -112,7 +112,7 @@ class PPO:
 
         @jax.jit
         def get_action_and_value2(params: flax.core.FrozenDict, state: np.ndarray, action: np.ndarray):
-            action_mean, action_logstd = self.actor.apply(params.actor_params, state)
+            action_mean, action_logstd = self.policy.apply(params.policy_params, state)
             action_std = jnp.exp(action_logstd)
             logprob = -0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
             entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
@@ -306,7 +306,7 @@ class PPO:
                 self.writer.add_scalar("train/value_loss", np.mean(value_losses), global_step)
                 self.writer.add_scalar("train/entropy_loss", np.mean(entropy_losses), global_step)
                 self.writer.add_scalar("train/loss", np.mean(loss_losses), global_step)
-                self.writer.add_scalar("train/std", np.mean(np.asarray(jnp.exp(self.train_state.params.actor_params["params"]["actor_logstd"]))), global_step)
+                self.writer.add_scalar("train/std", np.mean(np.asarray(jnp.exp(self.train_state.params.policy_params["params"]["policy_logstd"]))), global_step)
                 self.writer.add_scalar("train/explained_variance", explained_var.item(), global_step)
 
             rlx_logger.info(f"Step: {global_step}")
@@ -359,7 +359,7 @@ class PPO:
     def test(self, episodes):
         @jax.jit
         def get_action(params: flax.core.FrozenDict, state: np.ndarray):
-            action_mean, action_logstd = jax.lax.stop_gradient(self.actor.apply(params.actor_params, state))
+            action_mean, action_logstd = jax.lax.stop_gradient(self.policy.apply(params.policy_params, state))
             return self.get_processed_action(action_mean)
         
         for i in range(episodes):

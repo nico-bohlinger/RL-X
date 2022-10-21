@@ -27,8 +27,8 @@ class Agent(nn.Module):
         self.clip_range = clip_range
         self.ent_coef = ent_coef
         self.vf_coef = vf_coef
-        self.actor_as_low = -1
-        self.actor_as_high = 1
+        self.policy_as_low = -1
+        self.policy_as_high = 1
         self.env_as_low = env_as_low
         self.env_as_high = env_as_high
         single_os_shape = env.observation_space.shape
@@ -37,14 +37,14 @@ class Agent(nn.Module):
         if nr_hidden_units < 1:
             raise ValueError("nr_hidden_units must be >= 1")
 
-        self.actor_mean = nn.Sequential(
+        self.policy_mean = nn.Sequential(
             self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),
             nn.Tanh(),
             self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),
             self.layer_init(nn.Linear(nr_hidden_units, single_as_shape.item()), std=0.01),
         )
-        self.actor_logstd = nn.Parameter(torch.full((1, single_as_shape.item()), np.log(std_dev).item()))
+        self.policy_logstd = nn.Parameter(torch.full((1, single_as_shape.item()), np.log(std_dev).item()))
 
         self.critic = nn.Sequential(
             self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),
@@ -63,20 +63,20 @@ class Agent(nn.Module):
 
     @torch.jit.export
     def get_action_logprob(self, x):
-        action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
+        action_mean = self.policy_mean(x)
+        action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         action = probs.sample()
-        clipped_action = torch.clip(action, self.actor_as_low, self.actor_as_high)
+        clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)
         clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
         return action, clipped_and_scaled_action, probs.log_prob(action).sum(1)
     
 
     @torch.jit.export
     def get_logprob_entropy(self, x, action):
-        action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
+        action_mean = self.policy_mean(x)
+        action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         return probs.log_prob(action).sum(1), probs.entropy().sum(1)
@@ -85,8 +85,8 @@ class Agent(nn.Module):
     @torch.jit.export
     def get_deterministic_action(self, x):
         with torch.no_grad():
-            action = self.actor_mean(x)
-        clipped_action = torch.clip(action, self.actor_as_low, self.actor_as_high)
+            action = self.policy_mean(x)
+        clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)
         clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
         return clipped_and_scaled_action
     

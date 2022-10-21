@@ -217,7 +217,7 @@ class ESPO:
                 self.writer.add_scalar("train/value_loss", np.mean(value_losses), global_step)
                 self.writer.add_scalar("train/entropy_loss", np.mean(entropy_losses), global_step)
                 self.writer.add_scalar("train/loss", np.mean(loss_losses), global_step)
-                self.writer.add_scalar("train/std", np.mean(np.exp(self.agent.actor_logstd.data.cpu().numpy())), global_step)
+                self.writer.add_scalar("train/std", np.mean(np.exp(self.agent.policy_logstd.data.cpu().numpy())), global_step)
                 self.writer.add_scalar("train/explained_variance", explained_var, global_step)
 
             rlx_logger.info(f"Step: {global_step}")
