@@ -58,11 +58,12 @@ class Policy(nn.Module):
 
 
     def get_deterministic_action(self, x):
-        latent = self.torso(x)
-        mean = self.mean(latent)
-        action_tanh = torch.tanh(mean)
-        scaled_action = self.env_as_low + (0.5 * (action_tanh + 1.0) * (self.env_as_high - self.env_as_low))
-        return scaled_action
+        with torch.no_grad():
+            latent = self.torso(x)
+            mean = self.mean(latent)
+            action_tanh = torch.tanh(mean)
+            scaled_action = self.env_as_low + (0.5 * (action_tanh + 1.0) * (self.env_as_high - self.env_as_low))
+            return scaled_action
     
 
     def get_random_actions(self, env, nr_envs):

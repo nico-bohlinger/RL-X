@@ -331,7 +331,7 @@ class SAC():
             "q1_target_state_dict": self.q1_target.state_dict(),
             "q2_target_state_dict": self.q2_target.state_dict(),
             "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
-            "q_optimizer_state_dict": self.q1_optimizer.state_dict(),
+            "q_optimizer_state_dict": self.q_optimizer.state_dict(),
         }
         if self.entropy_coef == "auto":
             save_dict["entropy_optimizer_state_dict"] = self.entropy_optimizer.state_dict()
