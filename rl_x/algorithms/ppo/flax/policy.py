@@ -31,8 +31,8 @@ class Policy(nn.Module):
         policy_mean = nn.tanh(policy_mean)
         policy_mean = nn.Dense(self.nr_hidden_units, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(policy_mean)
         policy_mean = nn.tanh(policy_mean)
-        policy_mean = nn.Dense(self.as_shape, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(policy_mean)
-        policy_logstd = self.param("policy_logstd", constant(jnp.log(self.std_dev)), (1, self.as_shape))
+        policy_mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=orthogonal(0.01), bias_init=constant(0.0))(policy_mean)
+        policy_logstd = self.param("policy_logstd", constant(jnp.log(self.std_dev)), (1, np.prod(self.as_shape).item()))
         return policy_mean, policy_logstd
 
 

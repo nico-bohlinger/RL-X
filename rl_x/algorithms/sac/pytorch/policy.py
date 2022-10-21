@@ -32,8 +32,8 @@ class Policy(nn.Module):
             nn.Linear(nr_hidden_units, nr_hidden_units),
             nn.ReLU(),
         )
-        self.mean = nn.Linear(nr_hidden_units, single_as_shape)
-        self.log_std = nn.Linear(nr_hidden_units, single_as_shape)
+        self.mean = nn.Linear(nr_hidden_units, np.prod(single_as_shape))
+        self.log_std = nn.Linear(nr_hidden_units, np.prod(single_as_shape))
 
 
     def get_action(self, x):

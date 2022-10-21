@@ -63,7 +63,7 @@ class RLXInfo(gym.Wrapper):
 
     
     def get_single_action_space_shape(self):
-        return np.prod(self.action_space.shape)
+        return self.action_space.shape
     
 
     def get_observation_space_type(self):

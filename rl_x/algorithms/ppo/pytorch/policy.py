@@ -41,7 +41,7 @@ class ContinuousFlatValuesPolicy(nn.Module):
             raise ValueError("nr_hidden_units must be >= 1")
         
         if nr_hidden_layers == 0:
-            self.policy_mean = nn.Sequential(self.layer_init(nn.Linear(np.prod(single_os_shape), single_as_shape), std=0.01))
+            self.policy_mean = nn.Sequential(self.layer_init(nn.Linear(np.prod(single_os_shape), np.prod(single_as_shape)), std=0.01))
         else:
             layers = []
             layers.extend([
@@ -53,10 +53,10 @@ class ContinuousFlatValuesPolicy(nn.Module):
                     (f"fc_{int(len(layers) / 2) + 1}", self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units))),
                     (f"tanh_{int(len(layers) / 2) + 1}", nn.Tanh())
                 ])
-            layers.append((f"fc_{int(len(layers) / 2) + 1}", self.layer_init(nn.Linear(nr_hidden_units, single_as_shape), std=0.01)))
+            layers.append((f"fc_{int(len(layers) / 2) + 1}", self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape)), std=0.01)))
             self.policy_mean = nn.Sequential(OrderedDict(layers))
 
-        self.policy_logstd = nn.Parameter(torch.full((1, single_as_shape), np.log(std_dev)))
+        self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape)), np.log(std_dev)))
     
 
     def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
@@ -104,7 +104,7 @@ class DiscreteFlatValuesPolicy(nn.Module):
             raise ValueError("nr_hidden_units must be >= 1")
         
         if nr_hidden_layers == 0:
-            self.policy_mean = nn.Sequential(self.layer_init(nn.Linear(np.prod(single_os_shape), single_as_shape), std=0.01))
+            self.policy_mean = nn.Sequential(self.layer_init(nn.Linear(np.prod(single_os_shape), np.prod(single_as_shape)), std=0.01))
         else:
             layers = []
             layers.extend([
@@ -116,7 +116,7 @@ class DiscreteFlatValuesPolicy(nn.Module):
                     (f"fc_{int(len(layers) / 2) + 1}", self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units))),
                     (f"tanh_{int(len(layers) / 2) + 1}", nn.Tanh())
                 ])
-            layers.append((f"fc_{int(len(layers) / 2) + 1}", self.layer_init(nn.Linear(nr_hidden_units, single_as_shape), std=0.01)))
+            layers.append((f"fc_{int(len(layers) / 2) + 1}", self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape)), std=0.01)))
             self.policy_mean = nn.Sequential(OrderedDict(layers))
     
 
@@ -163,10 +163,10 @@ class ContinuousImagesPolicy(nn.Module):
             nn.Flatten(),
             nn.LazyLinear(512),
             nn.ReLU(),
-            self.layer_init(nn.Linear(512, single_as_shape), std=0.01)
+            self.layer_init(nn.Linear(512, np.prod(single_as_shape)), std=0.01)
         )
         self.policy_mean(torch.zeros(1, *env.observation_space.shape))  # Init the lazy linear layer
-        self.policy_logstd = nn.Parameter(torch.full((1, single_as_shape), np.log(std_dev)))
+        self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape)), np.log(std_dev)))
     
 
     def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
@@ -217,7 +217,7 @@ class DiscreteImagesPolicy(nn.Module):
             nn.Flatten(),
             nn.LazyLinear(512),
             nn.ReLU(),
-            self.layer_init(nn.Linear(512, single_as_shape), std=0.01)
+            self.layer_init(nn.Linear(512, np.prod(single_as_shape)), std=0.01)
         )
         self.policy_mean(torch.zeros(1, *env.observation_space.shape))  # Init the lazy linear layer
     

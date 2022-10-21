@@ -41,9 +41,9 @@ class Agent(nn.Module):
             nn.Tanh(),
             self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),
-            self.layer_init(nn.Linear(nr_hidden_units, single_as_shape.item()), std=0.01),
+            self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape).item()), std=0.01),
         )
-        self.policy_logstd = nn.Parameter(torch.full((1, single_as_shape.item()), np.log(std_dev).item()))
+        self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape).item()), np.log(std_dev).item()))
 
         self.critic = nn.Sequential(
             self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),

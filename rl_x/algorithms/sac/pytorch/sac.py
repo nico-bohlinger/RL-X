@@ -68,7 +68,7 @@ class SAC():
 
         if self.entropy_coef == "auto":
             if self.target_entropy == "auto":
-                self.target_entropy = -torch.prod(torch.tensor(env.get_single_action_space_shape(), dtype=torch.float32).to(self.device)).item()
+                self.target_entropy = -torch.prod(torch.tensor(np.prod(env.get_single_action_space_shape()), dtype=torch.float32).to(self.device)).item()
             else:
                 self.target_entropy = float(self.target_entropy)
             self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
