@@ -175,13 +175,13 @@ class SAC():
 
                     with torch.no_grad():
                         next_actions, _, next_log_probs = self.policy.get_action(next_states)
-                        next_q1_target = self.q1_target(next_states, next_actions).squeeze()
-                        next_q2_target = self.q2_target(next_states, next_actions).squeeze()
+                        next_q1_target = self.q1_target(next_states, next_actions)
+                        next_q2_target = self.q2_target(next_states, next_actions)
                         min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
-                        y = rewards + self.gamma * (1 - dones) * (min_next_q_target - self.alpha.detach() * next_log_probs.squeeze())
+                        y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (min_next_q_target - self.alpha.detach() * next_log_probs)
 
-                    q1 = self.q1(states, actions).squeeze()
-                    q2 = self.q2(states, actions).squeeze()
+                    q1 = self.q1(states, actions)
+                    q2 = self.q2(states, actions)
                     q1_loss = F.mse_loss(q1, y)
                     q2_loss = F.mse_loss(q2, y)
                     q_loss = (q1_loss + q2_loss) / 2
@@ -213,10 +213,10 @@ class SAC():
 
                     current_actions, _, current_log_probs = self.policy.get_action(states)
                     
-                    q1 = self.q1(states, current_actions).squeeze()
-                    q2 = self.q2(states, current_actions).squeeze()
+                    q1 = self.q1(states, current_actions)
+                    q2 = self.q2(states, current_actions)
                     min_q = torch.minimum(q1, q2)
-                    policy_loss = (self.alpha.detach() * current_log_probs.squeeze() - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+                    policy_loss = (self.alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
 
                     self.policy_optimizer.zero_grad()
                     policy_loss.backward()
