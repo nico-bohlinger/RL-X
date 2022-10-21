@@ -75,6 +75,7 @@ class PPO:
             log_probs = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device)
         )
 
+        state = torch.tensor(self.env.reset(), dtype=torch.float32).to(self.device)
         saving_return_buffer = deque(maxlen=100)
         global_step = 0
         while global_step < self.total_timesteps:
@@ -82,7 +83,6 @@ class PPO:
         
 
             # Acting
-            state = torch.tensor(self.env.reset(), dtype=torch.float32).to(self.device)
             episode_info_buffer = deque(maxlen=100)
             for step in range(self.nr_steps):
                 with torch.no_grad():
