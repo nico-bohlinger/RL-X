@@ -29,5 +29,5 @@ class QNetwork(nn.Module):
         )
 
 
-    def get_value(self, x, a):
+    def forward(self, x, a):
         return self.critic(torch.cat([x, a], dim=1))

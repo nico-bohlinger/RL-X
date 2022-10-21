@@ -1,11 +1,14 @@
 import os
 import logging
 import random
+import time
+from collections import deque
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torch.optim as optim
 
-from rl_x.algorithms.sac.pytorch.actor import get_actor
+from rl_x.algorithms.sac.pytorch.policy import get_policy
 from rl_x.algorithms.sac.pytorch.critic import get_critic
 from rl_x.algorithms.sac.pytorch.replay_buffer import ReplayBuffer
 
@@ -26,16 +29,22 @@ class SAC():
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.algorithm.nr_envs
         self.learning_rate = config.algorithm.learning_rate
+        self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
-        self.train_freq = config.algorithm.train_freq
-        self.gradient_steps = config.algorithm.gradient_steps
-        self.ent_coef = config.algorithm.ent_coef
+        self.q_update_freq = config.algorithm.q_update_freq
+        self.q_update_steps = config.algorithm.q_update_steps
+        self.q_target_update_freq = config.algorithm.q_target_update_freq
+        self.policy_update_freq = config.algorithm.policy_update_freq
+        self.policy_update_steps = config.algorithm.policy_update_steps
+        self.entropy_update_freq = config.algorithm.entropy_update_freq
+        self.entropy_update_steps = config.algorithm.entropy_update_steps
+        self.entropy_coef = config.algorithm.entropy_coef
         self.target_entropy = config.algorithm.target_entropy
-        self.target_update_interval = config.algorithm.target_update_interval
+        self.log_freq = config.algorithm.log_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
 
         self.device = torch.device("cuda" if config.algorithm.device == "cuda" and torch.cuda.is_available() else "cpu")
@@ -48,7 +57,7 @@ class SAC():
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
 
-        self.actor = get_actor(config, env, self.device).to(self.device)
+        self.policy = get_policy(config, env, self.device).to(self.device)
         self.q1 = get_critic(config, env).to(self.device)
         self.q2 = get_critic(config, env).to(self.device)
         self.q1_target = get_critic(config, env).to(self.device)
@@ -56,18 +65,19 @@ class SAC():
         self.q1_target.load_state_dict(self.q1.state_dict())
         self.q2_target.load_state_dict(self.q2.state_dict())
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate)
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
         self.q_optimizer = optim.Adam(list(self.q1.parameters()) + list(self.q2.parameters()), lr=self.learning_rate)
 
-        if self.ent_coef == "auto":
+        if self.entropy_coef == "auto":
             if self.target_entropy == "auto":
                 self.target_entropy = -torch.prod(torch.tensor(env.get_single_action_space_shape(), dtype=torch.float32).to(self.device)).item()
-                log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-                self.alpha = log_alpha.exp()
-                self.alpha_optimizer = optim.Adam([log_alpha], lr=self.learning_rate)
-            
+            else:
+                self.target_entropy = float(self.target_entropy)
+            self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+            self.alpha = self.log_alpha.exp()
+            self.entropy_optimizer = optim.Adam([self.log_alpha], lr=self.learning_rate)
         else:
-            self.alpha = self.ent_coef
+            self.alpha = torch.tensor(float(self.entropy_coef)).to(self.device)
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -77,12 +87,238 @@ class SAC():
     def train(self):
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.os_shape, self.as_shape, self.device)
-        exit()
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.os_shape, self.as_shape, self.device)
+
+        saving_return_buffer = deque(maxlen=100)
+        episode_info_buffer = deque(maxlen=100)
+        acting_time_buffer = deque(maxlen=100)
+        q_update_time_buffer = deque(maxlen=100)
+        q_target_update_time_buffer = deque(maxlen=100)
+        policy_update_time_buffer = deque(maxlen=100)
+        entropy_update_time_buffer = deque(maxlen=100)
+        saving_time_buffer = deque(maxlen=100)
+        fps_buffer = deque(maxlen=100)
+        q_loss_buffer = deque(maxlen=100)
+        policy_loss_buffer = deque(maxlen=100)
+        entropy_loss_buffer = deque(maxlen=100)
+        entropy_buffer = deque(maxlen=100)
+        alpha_buffer = deque(maxlen=100)
+
+        state = torch.tensor(self.env.reset(), dtype=torch.float32).to(self.device)
+
+        global_step = 0
+        while global_step < self.total_timesteps:
+            start_time = time.time()
+
+
+            # What to do in this step
+            nr_steps = global_step + self.nr_envs
+            should_learning_start = nr_steps > self.learning_starts
+            should_update_q = should_learning_start and nr_steps % self.q_update_freq == 0
+            should_update_q_target = should_learning_start and nr_steps % self.q_target_update_freq == 0
+            should_update_policy = should_learning_start and nr_steps % self.policy_update_freq == 0
+            should_update_entropy = should_learning_start and self.entropy_coef == "auto" and nr_steps % self.entropy_update_freq == 0 
+            should_log = nr_steps % self.log_freq == 0
+
+
+            # Acting
+            if global_step < self.learning_starts:
+                action, processed_action = self.policy.get_random_actions(self.env, self.nr_envs)
+            else:
+                action, processed_action, _ = self.policy.get_action(state)
+                action = action.detach().cpu().numpy()
+                processed_action = processed_action.detach().cpu().numpy()
+            
+            next_state, reward, done, info = self.env.step(processed_action)
+            actual_next_state = next_state.copy()
+            for i, single_done in enumerate(done):
+                if single_done:
+                    maybe_terminal_observation = self.env.get_terminal_observation(info, i)
+                    if maybe_terminal_observation is not None:
+                        actual_next_state[i] = maybe_terminal_observation
+            
+            replay_buffer.add(state.cpu().numpy(), actual_next_state, action, reward, done)
+
+            state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
+            global_step += self.nr_envs
+
+            episode_infos = self.env.get_episode_infos(info)
+            episode_info_buffer.extend(episode_infos)
+            if len(episode_infos) > 0:
+                ep_info_returns = [ep_info["r"] for ep_info in episode_infos]
+                saving_return_buffer.extend(ep_info_returns)
+            should_try_to_save = self.save_model and self.learning_starts and episode_infos
+        
+            acting_end_time = time.time()
+            acting_time_buffer.append(acting_end_time - start_time)
+
+
+            # Optimizing - Anneal learning rate
+            learning_rate = self.learning_rate
+            if self.anneal_learning_rate:
+                fraction = 1 - (global_step / self.total_timesteps)
+                learning_rate = fraction * self.learning_rate
+                param_groups = self.policy_optimizer.param_groups + self.q_optimizer.param_groups
+                if self.entropy_coef == "auto":
+                    param_groups += self.entropy_optimizer.param_groups
+                for param_group in param_groups:
+                    param_group["lr"] = learning_rate
+
+            
+            # Optimizing - Prepare batches
+            if should_update_q or should_update_policy or should_update_entropy:
+                max_nr_batches_needed = max(should_update_q * self.q_update_freq, should_update_policy * self.policy_update_freq, should_update_entropy * self.entropy_update_freq)
+                batches = [(replay_buffer.sample(self.batch_size)) for _ in range(max_nr_batches_needed)]
+
+
+            # Optimizing - Q-functions
+            if should_update_q:
+                for i in range(self.q_update_steps):
+                    states, next_states, actions, rewards, dones = batches[i]
+
+                    with torch.no_grad():
+                        next_actions, _, next_log_probs = self.policy.get_action(next_states)
+                        next_q1_target = self.q1_target(next_states, next_actions).squeeze()
+                        next_q2_target = self.q2_target(next_states, next_actions).squeeze()
+                        min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
+                        y = rewards + self.gamma * (1 - dones) * (min_next_q_target - self.alpha.detach() * next_log_probs.squeeze())
+
+                    q1 = self.q1(states, actions).squeeze()
+                    q2 = self.q2(states, actions).squeeze()
+                    q1_loss = F.mse_loss(q1, y)
+                    q2_loss = F.mse_loss(q2, y)
+                    q_loss = q1_loss + q2_loss
+
+                    self.q_optimizer.zero_grad()
+                    q_loss.backward()
+                    self.q_optimizer.step()
+
+                    q_loss_buffer.append(q_loss.item())
+
+            q_update_end_time = time.time()
+            q_update_time_buffer.append(q_update_end_time - acting_end_time)
+
+
+            # Optimizing - Q-function targets
+            if should_update_q_target:
+                for param, target_param in zip(self.q1.parameters(), self.q1_target.parameters()):
+                    target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+                for param, target_param in zip(self.q2.parameters(), self.q2_target.parameters()):
+                    target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+            q_target_update_end_time = time.time()
+            q_target_update_time_buffer.append(q_target_update_end_time - q_update_end_time)
+            
+
+            # Optimizing - Policy
+            if should_update_policy:
+                for i in range(self.policy_update_steps):
+                    states, next_states, actions, rewards, dones = batches[i]
+
+                    current_actions, _, current_log_probs = self.policy.get_action(states)
+                    
+                    q1 = self.q1(states, current_actions)
+                    q2 = self.q2(states, current_actions)
+                    min_q = torch.minimum(q1, q2)
+                    policy_loss = (self.alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+
+                    self.policy_optimizer.zero_grad()
+                    policy_loss.backward()
+                    self.policy_optimizer.step()
+
+                    policy_loss_buffer.append(policy_loss.item())
+
+                    entropy = -current_log_probs.detach().mean()
+                    batches[i] = (states, next_states, actions, rewards, dones, entropy)
+                    entropy_buffer.append(entropy.item())
+
+            policy_update_end_time = time.time()
+            policy_update_time_buffer.append(policy_update_end_time - q_target_update_end_time)
+            
+
+            # Optimizing - Entropy
+            if should_update_entropy:
+                for i in range(self.entropy_update_steps):
+                    _, __, ___, ____, _____, entropy = batches[i]
+
+                    entropy_loss = self.alpha * (entropy - self.target_entropy)
+
+                    self.entropy_optimizer.zero_grad()
+                    entropy_loss.backward()
+                    self.entropy_optimizer.step()
+
+                    self.alpha = self.log_alpha.exp()
+
+                    entropy_loss_buffer.append(entropy_loss.item())
+                    alpha_buffer.append(self.alpha.item())
+
+            entropy_update_end_time = time.time()
+            entropy_update_time_buffer.append(entropy_update_end_time - policy_update_end_time)
+
+
+            # Saving
+            if should_try_to_save:
+                mean_return = np.mean(saving_return_buffer)
+                if mean_return > self.best_mean_return:
+                    self.best_mean_return = mean_return
+                    self.save()
+            
+            saving_end_time = time.time()
+            saving_time_buffer.append(saving_end_time - entropy_update_end_time)
+
+            fps_buffer.append(self.nr_envs / (saving_end_time - start_time))
+
+
+            # Logging                
+            if should_log:
+                if self.track_tb:
+                    if len(episode_info_buffer) > 0:
+                        self.writer.add_scalar("rollout/ep_rew_mean", np.mean(ep_info_returns), global_step)
+                        self.writer.add_scalar("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
+                        names = list(episode_info_buffer[0].keys())
+                        for name in names:
+                            if name != "r" and name != "l" and name != "t":
+                                self.writer.add_scalar(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
+                    self.writer.add_scalar("time/fps", np.mean(fps_buffer), global_step)
+                    self.writer.add_scalar("time/acting_time", np.mean(acting_time_buffer), global_step)
+                    self.writer.add_scalar("time/q_update_time", np.mean(q_update_time_buffer), global_step)
+                    self.writer.add_scalar("time/q_target_update_time", np.mean(q_target_update_time_buffer), global_step)
+                    self.writer.add_scalar("time/policy_update_time", np.mean(policy_update_time_buffer), global_step)
+                    self.writer.add_scalar("time/entropy_update_time", np.mean(entropy_update_time_buffer), global_step)
+                    self.writer.add_scalar("time/saving_time", np.mean(saving_time_buffer), global_step)
+                    self.writer.add_scalar("train/learning_rate", learning_rate, global_step)
+                    self.writer.add_scalar("train/q_loss", self.get_buffer_mean(q_loss_buffer), global_step)
+                    self.writer.add_scalar("train/policy_loss", self.get_buffer_mean(policy_loss_buffer), global_step)
+                    self.writer.add_scalar("train/entropy_loss", self.get_buffer_mean(entropy_loss_buffer), global_step)
+                    self.writer.add_scalar("train/entropy", self.get_buffer_mean(entropy_buffer), global_step)
+                    self.writer.add_scalar("train/alpha", self.get_buffer_mean(alpha_buffer), global_step)
+
+
+                episode_info_buffer.clear()
+                acting_time_buffer.clear()
+                q_update_time_buffer.clear()
+                q_target_update_time_buffer.clear()
+                policy_update_time_buffer.clear()
+                entropy_update_time_buffer.clear()
+                saving_time_buffer.clear()
+                fps_buffer.clear()
+                q_loss_buffer.clear()
+                policy_loss_buffer.clear()
+                entropy_loss_buffer.clear()
+                entropy_buffer.clear()
+                alpha_buffer.clear()
+
+                rlx_logger.info(f"Step: {global_step}, Return: {self.get_buffer_mean(saving_return_buffer)}")
     
 
+    def get_buffer_mean(self, buffer):
+        if len(buffer) > 0:
+            return np.mean(buffer)
+        else:
+            return 0.0
+
+
     def set_train_mode(self):
-        self.actor.train()
+        self.policy.train()
         self.q1.train()
         self.q2.train()
         self.q1_target.train()
@@ -90,7 +326,7 @@ class SAC():
 
 
     def set_eval_mode(self):
-        self.actor.eval()
+        self.policy.eval()
         self.q1.eval()
         self.q2.eval()
         self.q1_target.eval()

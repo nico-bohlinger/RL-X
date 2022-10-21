@@ -6,17 +6,17 @@ from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
-def get_actor(config, env, device):
+def get_policy(config, env, device):
     action_space_type = env.get_action_space_type()
     observation_space_type = env.get_observation_space_type()
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return Actor(env, config.algorithm.log_std_min, config.algorithm.log_std_max, config.algorithm.nr_hidden_units, device)
+        return Policy(env, config.algorithm.log_std_min, config.algorithm.log_std_max, config.algorithm.nr_hidden_units, device)
     else:
         raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
     
 
-class Actor(nn.Module):
+class Policy(nn.Module):
     def __init__(self, env, log_std_min, log_std_max, nr_hidden_units, device):
         super().__init__()
         self.log_std_min = log_std_min
@@ -66,3 +66,9 @@ class Actor(nn.Module):
         action_tanh = torch.tanh(mean)
         scaled_action = self.env_as_low + (0.5 * (action_tanh + 1.0) * (self.env_as_high - self.env_as_low))
         return scaled_action
+    
+
+    def get_random_actions(self, env, nr_envs):
+            scaled_action = np.array([env.action_space.sample() for _ in range(nr_envs)])
+            action = (scaled_action - self.env_as_low.cpu().numpy()) / (self.env_as_high.cpu().numpy() - self.env_as_low.cpu().numpy()) * 2.0 - 1.0
+            return action, scaled_action
