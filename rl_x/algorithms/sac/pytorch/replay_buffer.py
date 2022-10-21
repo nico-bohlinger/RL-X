@@ -6,11 +6,11 @@ class ReplayBuffer():
     def __init__(self, capacity, nr_envs, os_shape, as_shape, device):
         self.capacity = capacity // nr_envs
         self.nr_envs = nr_envs
-        self.states = np.zeros((capacity, nr_envs) + os_shape, dtype=np.float32)
-        self.next_states = np.zeros((capacity, nr_envs) + os_shape, dtype=np.float32)
-        self.actions = np.zeros((capacity, nr_envs) + as_shape, dtype=np.float32)
-        self.rewards = np.zeros((capacity, nr_envs), dtype=np.float32)
-        self.dones = np.zeros((capacity, nr_envs), dtype=np.float32)
+        self.states = np.zeros((self.capacity, nr_envs) + os_shape, dtype=np.float32)
+        self.next_states = np.zeros((self.capacity, nr_envs) + os_shape, dtype=np.float32)
+        self.actions = np.zeros((self.capacity, nr_envs) + as_shape, dtype=np.float32)
+        self.rewards = np.zeros((self.capacity, nr_envs), dtype=np.float32)
+        self.dones = np.zeros((self.capacity, nr_envs), dtype=np.float32)
         self.pos = 0
         self.size = 0
         self.device = device
@@ -31,7 +31,7 @@ class ReplayBuffer():
         idx2 = np.random.randint(self.nr_envs, size=n)
         states = torch.tensor(self.states[idx1, idx2], dtype=torch.float32).to(self.device)
         next_states = torch.tensor(self.next_states[idx1, idx2], dtype=torch.float32).to(self.device)
-        actions = torch.tensor(self.actions[idx1, idx2], dtype=torch.int64).to(self.device)
+        actions = torch.tensor(self.actions[idx1, idx2], dtype=torch.float32).to(self.device)
         rewards = torch.tensor(self.rewards[idx1, idx2], dtype=torch.float32).to(self.device)
         dones = torch.tensor(self.dones[idx1, idx2], dtype=torch.float32).to(self.device)
         return states, next_states, actions, rewards, dones

@@ -30,6 +30,6 @@ def get_config(algorithm_name):
     config.log_std_max = 2
     config.log_freq = 100
 
-    config.nr_hidden_units = 64
+    config.nr_hidden_units = 256
 
     return config

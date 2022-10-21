@@ -41,10 +41,7 @@ class Policy(nn.Module):
         mean = self.mean(latent)
         log_std = self.log_std(latent)
 
-        # Only CleanRL does it, not SBX or Jaxrl. They just clip log_std to min and max
-        log_std = torch.tanh(log_std)
-        log_std = self.log_std_min + 0.5 * (self.log_std_max - self.log_std_min) * (log_std + 1)
-
+        log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
         std = torch.exp(log_std)
 
         normal = torch.distributions.Normal(mean, std)
@@ -52,7 +49,7 @@ class Policy(nn.Module):
         action_tanh = torch.tanh(action)
 
         log_prob = normal.log_prob(action)
-        log_prob -= torch.log(1 - action_tanh.pow(2) + 1e-6)
+        log_prob -= torch.log((1 - action_tanh.pow(2)) + 1e-6)
         log_prob = log_prob.sum(1, keepdim=True)
 
         scaled_action = self.env_as_low + (0.5 * (action_tanh + 1.0) * (self.env_as_high - self.env_as_low))
@@ -69,6 +66,6 @@ class Policy(nn.Module):
     
 
     def get_random_actions(self, env, nr_envs):
-            scaled_action = np.array([env.action_space.sample() for _ in range(nr_envs)])
-            action = (scaled_action - self.env_as_low.cpu().numpy()) / (self.env_as_high.cpu().numpy() - self.env_as_low.cpu().numpy()) * 2.0 - 1.0
-            return action, scaled_action
+        scaled_action = np.array([env.action_space.sample() for _ in range(nr_envs)])
+        action = (scaled_action - self.env_as_low.cpu().numpy()) / (self.env_as_high.cpu().numpy() - self.env_as_low.cpu().numpy()) * 2.0 - 1.0
+        return action, scaled_action

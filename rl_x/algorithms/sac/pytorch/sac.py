@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+import wandb
 
 from rl_x.algorithms.sac.pytorch.policy import get_policy
 from rl_x.algorithms.sac.pytorch.critic import get_critic
@@ -54,9 +55,6 @@ class SAC():
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
 
-        self.os_shape = env.observation_space.shape
-        self.as_shape = env.action_space.shape
-
         self.policy = get_policy(config, env, self.device).to(self.device)
         self.q1 = get_critic(config, env).to(self.device)
         self.q2 = get_critic(config, env).to(self.device)
@@ -87,7 +85,7 @@ class SAC():
     def train(self):
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.os_shape, self.as_shape, self.device)
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.observation_space.shape, self.env.action_space.shape, self.device)
 
         saving_return_buffer = deque(maxlen=100)
         episode_info_buffer = deque(maxlen=100)
@@ -104,28 +102,18 @@ class SAC():
         entropy_buffer = deque(maxlen=100)
         alpha_buffer = deque(maxlen=100)
 
-        state = torch.tensor(self.env.reset(), dtype=torch.float32).to(self.device)
+        state = self.env.reset()
 
         global_step = 0
         while global_step < self.total_timesteps:
             start_time = time.time()
 
 
-            # What to do in this step
-            nr_steps = global_step + self.nr_envs
-            should_learning_start = nr_steps > self.learning_starts
-            should_update_q = should_learning_start and nr_steps % self.q_update_freq == 0
-            should_update_q_target = should_learning_start and nr_steps % self.q_target_update_freq == 0
-            should_update_policy = should_learning_start and nr_steps % self.policy_update_freq == 0
-            should_update_entropy = should_learning_start and self.entropy_coef == "auto" and nr_steps % self.entropy_update_freq == 0 
-            should_log = nr_steps % self.log_freq == 0
-
-
             # Acting
             if global_step < self.learning_starts:
                 action, processed_action = self.policy.get_random_actions(self.env, self.nr_envs)
             else:
-                action, processed_action, _ = self.policy.get_action(state)
+                action, processed_action, _ = self.policy.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 action = action.detach().cpu().numpy()
                 processed_action = processed_action.detach().cpu().numpy()
             
@@ -137,9 +125,9 @@ class SAC():
                     if maybe_terminal_observation is not None:
                         actual_next_state[i] = maybe_terminal_observation
             
-            replay_buffer.add(state.cpu().numpy(), actual_next_state, action, reward, done)
+            replay_buffer.add(state, actual_next_state, action, reward, done)
 
-            state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
+            state = next_state
             global_step += self.nr_envs
 
             episode_infos = self.env.get_episode_infos(info)
@@ -151,6 +139,15 @@ class SAC():
         
             acting_end_time = time.time()
             acting_time_buffer.append(acting_end_time - start_time)
+
+
+            # What to do in this step after acting
+            should_learning_start = global_step > self.learning_starts
+            should_update_q = should_learning_start and global_step % self.q_update_freq == 0
+            should_update_q_target = should_learning_start and global_step % self.q_target_update_freq == 0
+            should_update_policy = should_learning_start and global_step % self.policy_update_freq == 0
+            should_update_entropy = should_learning_start and self.entropy_coef == "auto" and global_step % self.entropy_update_freq == 0 
+            should_log = global_step % self.log_freq == 0
 
 
             # Optimizing - Anneal learning rate
@@ -187,7 +184,7 @@ class SAC():
                     q2 = self.q2(states, actions).squeeze()
                     q1_loss = F.mse_loss(q1, y)
                     q2_loss = F.mse_loss(q2, y)
-                    q_loss = q1_loss + q2_loss
+                    q_loss = (q1_loss + q2_loss) / 2
 
                     self.q_optimizer.zero_grad()
                     q_loss.backward()
@@ -216,10 +213,10 @@ class SAC():
 
                     current_actions, _, current_log_probs = self.policy.get_action(states)
                     
-                    q1 = self.q1(states, current_actions)
-                    q2 = self.q2(states, current_actions)
+                    q1 = self.q1(states, current_actions).squeeze()
+                    q2 = self.q2(states, current_actions).squeeze()
                     min_q = torch.minimum(q1, q2)
-                    policy_loss = (self.alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+                    policy_loss = (self.alpha.detach() * current_log_probs.squeeze() - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
 
                     self.policy_optimizer.zero_grad()
                     policy_loss.backward()
@@ -238,7 +235,14 @@ class SAC():
             # Optimizing - Entropy
             if should_update_entropy:
                 for i in range(self.entropy_update_steps):
-                    _, __, ___, ____, _____, entropy = batches[i]
+                    batch = batches[i]
+                    # Check if entropy was already calculated in policy optimization
+                    if len(batch) == 6:
+                        entropy = batch[5]
+                    else:
+                        with torch.no_grad():
+                            _, _, current_log_probs = self.policy.get_action(batch[0])
+                            entropy = -current_log_probs.detach().mean()
 
                     entropy_loss = self.alpha * (entropy - self.target_entropy)
 
@@ -307,7 +311,7 @@ class SAC():
                 entropy_buffer.clear()
                 alpha_buffer.clear()
 
-                rlx_logger.info(f"Step: {global_step}, Return: {self.get_buffer_mean(saving_return_buffer)}")
+                rlx_logger.info(f"Step: {global_step}")
     
 
     def get_buffer_mean(self, buffer):
@@ -315,6 +319,52 @@ class SAC():
             return np.mean(buffer)
         else:
             return 0.0
+
+
+    def save(self):
+        file_path = self.save_path + "/model_best.pt"
+        save_dict = {
+            "config_algorithm": self.config.algorithm,
+            "policy_state_dict": self.policy.state_dict(),
+            "q1_state_dict": self.q1.state_dict(),
+            "q2_state_dict": self.q2.state_dict(),
+            "q1_target_state_dict": self.q1_target.state_dict(),
+            "q2_target_state_dict": self.q2_target.state_dict(),
+            "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
+            "q_optimizer_state_dict": self.q1_optimizer.state_dict(),
+        }
+        if self.entropy_coef == "auto":
+            save_dict["entropy_optimizer_state_dict"] = self.entropy_optimizer.state_dict()
+        torch.save(save_dict, file_path)
+        if self.track_wandb:
+            wandb.save(file_path, base_path=os.path.dirname(file_path))
+    
+
+    def load(config, env, writer):
+        checkpoint = torch.load(config.runner.load_model)
+        config.algorithm = checkpoint["config_algorithm"]
+        model = SAC(config, env, writer)
+        model.policy.load_state_dict(checkpoint["policy_state_dict"])
+        model.q1.load_state_dict(checkpoint["q1_state_dict"])
+        model.q2.load_state_dict(checkpoint["q2_state_dict"])
+        model.q1_target.load_state_dict(checkpoint["q1_target_state_dict"])
+        model.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
+        if config.algorithm.entropy_coef == "auto":
+            model.entropy_optimizer.load_state_dict(checkpoint["entropy_optimizer_state_dict"])
+
+        return model
+
+    
+    def test(self, episodes):
+        self.set_eval_mode()
+        for i in range(episodes):
+            done = False
+            state = self.env.reset()
+            while not done:
+                processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                state, reward, done, info = self.env.step(processed_action.cpu().numpy())
+            return_val = self.env.get_episode_infos(info)[0]["r"]
+            rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
 
 
     def set_train_mode(self):
