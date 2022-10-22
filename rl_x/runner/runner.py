@@ -1,3 +1,4 @@
+import os
 import sys
 from absl import app
 from absl import flags
@@ -22,6 +23,9 @@ absl_logging.set_verbosity(absl_logging.ERROR)
 # Warning in CartPoleV1
 # https://github.com/openai/gym/issues/2216
 gym.logger.set_level(40)
+
+# tensorflow warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2" 
 
 rlx_logger = logging.getLogger("rl_x")
 
