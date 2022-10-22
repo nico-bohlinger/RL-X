@@ -69,13 +69,13 @@ class PPO:
         self.policy, self.get_processed_action = get_policy(config, env)
         self.critic = get_critic(config, env)
 
-        self.first_state = env.reset()
+        state = jnp.array([env.observation_space.sample()])
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
         self.train_state = TrainState.create(
             apply_fn=None,
             params=AgentParams(
-                self.policy.init(policy_key, self.first_state),
-                self.critic.init(critic_key, self.first_state),
+                self.policy.init(policy_key, state),
+                self.critic.init(critic_key, state),
             ),
             tx=optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
@@ -213,7 +213,7 @@ class PPO:
         dones = np.zeros((self.nr_steps, self.nr_envs))
         next_states = np.zeros((self.nr_steps, self.nr_envs) + self.os_shape)
 
-        state = self.first_state
+        state = self.env.reset()
         saving_return_buffer = deque(maxlen=100)
         global_step = 0
         while global_step < self.total_timesteps:
