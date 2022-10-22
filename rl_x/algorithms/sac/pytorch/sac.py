@@ -135,7 +135,6 @@ class SAC():
             if len(episode_infos) > 0:
                 ep_info_returns = [ep_info["r"] for ep_info in episode_infos]
                 saving_return_buffer.extend(ep_info_returns)
-            should_try_to_save = self.save_model and self.learning_starts and episode_infos
         
             acting_end_time = time.time()
             acting_time_buffer.append(acting_end_time - start_time)
@@ -146,7 +145,8 @@ class SAC():
             should_update_q = should_learning_start and global_step % self.q_update_freq == 0
             should_update_q_target = should_learning_start and global_step % self.q_target_update_freq == 0
             should_update_policy = should_learning_start and global_step % self.policy_update_freq == 0
-            should_update_entropy = should_learning_start and self.entropy_coef == "auto" and global_step % self.entropy_update_freq == 0 
+            should_update_entropy = should_learning_start and self.entropy_coef == "auto" and global_step % self.entropy_update_freq == 0
+            should_try_to_save = self.learning_starts and self.save_model and episode_infos 
             should_log = global_step % self.log_freq == 0
 
 

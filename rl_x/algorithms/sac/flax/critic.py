@@ -24,7 +24,7 @@ class Critic(nn.Module):
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
         x = nn.Dense(1)(x)
-        return x.squeeze()
+        return x
     
 
 class VectorCritic(nn.Module):
