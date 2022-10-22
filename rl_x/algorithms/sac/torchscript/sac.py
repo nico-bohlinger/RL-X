@@ -5,13 +5,13 @@ import time
 from collections import deque
 import numpy as np
 import torch
-import torch.nn.functional as F
 import torch.optim as optim
 import wandb
 
-from rl_x.algorithms.sac.pytorch.policy import get_policy
-from rl_x.algorithms.sac.pytorch.critic import get_critic
-from rl_x.algorithms.sac.pytorch.replay_buffer import ReplayBuffer
+from rl_x.algorithms.sac.torchscript.policy import get_policy
+from rl_x.algorithms.sac.torchscript.critic import get_critic
+from rl_x.algorithms.sac.torchscript.entropy_coefficient import EntropyCoefficient
+from rl_x.algorithms.sac.torchscript.replay_buffer import ReplayBuffer
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -55,25 +55,19 @@ class SAC():
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
 
-        self.policy = get_policy(config, env, self.device).to(self.device)
-        self.q1 = get_critic(config, env).to(self.device)
-        self.q2 = get_critic(config, env).to(self.device)
-        self.q1_target = get_critic(config, env).to(self.device)
-        self.q2_target = get_critic(config, env).to(self.device)
-        self.q1_target.load_state_dict(self.q1.state_dict())
-        self.q2_target.load_state_dict(self.q2.state_dict())
+        self.env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(self.device)
+        self.env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(self.device)
+
+        self.policy = torch.jit.script(get_policy(config, env, self.device).to(self.device))
+        self.critic = torch.jit.script(get_critic(config, env, self.device).to(self.device))
 
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
-        self.q_optimizer = optim.Adam(list(self.q1.parameters()) + list(self.q2.parameters()), lr=self.learning_rate)
+        self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate)
 
         if self.entropy_coef == "auto":
-            if self.target_entropy == "auto":
-                self.target_entropy = -torch.prod(torch.tensor(np.prod(env.get_single_action_space_shape()), dtype=torch.float32).to(self.device)).item()
-            else:
-                self.target_entropy = float(self.target_entropy)
-            self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-            self.alpha = self.log_alpha.exp()
-            self.entropy_optimizer = optim.Adam([self.log_alpha], lr=self.learning_rate)
+            self.entropy_coefficient = torch.jit.script(EntropyCoefficient(config, env, self.device).to(self.device))
+            self.alpha = self.entropy_coefficient()
+            self.entropy_optimizer = optim.Adam([self.entropy_coefficient.log_alpha], lr=self.learning_rate)
         else:
             self.alpha = torch.tensor(float(self.entropy_coef)).to(self.device)
 
@@ -111,7 +105,8 @@ class SAC():
 
             # Acting
             if global_step < self.learning_starts:
-                action, processed_action = self.policy.get_random_actions(self.env, self.nr_envs)
+                processed_action = np.array([self.env.action_space.sample() for _ in range(self.nr_envs)])
+                action = (processed_action - self.env_as_low.cpu().numpy()) / (self.env_as_high.cpu().numpy() - self.env_as_low.cpu().numpy()) * 2.0 - 1.0
             else:
                 action, processed_action, _ = self.policy.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 action = action.detach().cpu().numpy()
@@ -161,7 +156,7 @@ class SAC():
                 for param_group in param_groups:
                     param_group["lr"] = learning_rate
 
-            
+
             # Optimizing - Prepare batches
             if should_update_q or should_update_policy or should_update_entropy:
                 max_nr_batches_needed = max(should_update_q * self.q_update_freq, should_update_policy * self.policy_update_freq, should_update_entropy * self.entropy_update_freq)
@@ -175,16 +170,8 @@ class SAC():
 
                     with torch.no_grad():
                         next_actions, _, next_log_probs = self.policy.get_action(next_states)
-                        next_q1_target = self.q1_target(next_states, next_actions)
-                        next_q2_target = self.q2_target(next_states, next_actions)
-                        min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
-                        y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (min_next_q_target - self.alpha.detach() * next_log_probs)
-
-                    q1 = self.q1(states, actions)
-                    q2 = self.q2(states, actions)
-                    q1_loss = F.mse_loss(q1, y)
-                    q2_loss = F.mse_loss(q2, y)
-                    q_loss = (q1_loss + q2_loss) / 2
+                    
+                    q_loss = self.critic.loss(states, next_states, actions, next_actions, next_log_probs, rewards, dones, self.alpha)
 
                     self.q_optimizer.zero_grad()
                     q_loss.backward()
@@ -198,13 +185,14 @@ class SAC():
 
             # Optimizing - Q-function targets
             if should_update_q_target:
-                for param, target_param in zip(self.q1.parameters(), self.q1_target.parameters()):
+                for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
                     target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-                for param, target_param in zip(self.q2.parameters(), self.q2_target.parameters()):
+                for param, target_param in zip(self.critic.q2.parameters(), self.critic.q2_target.parameters()):
                     target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+
             q_target_update_end_time = time.time()
             q_target_update_time_buffer.append(q_target_update_end_time - q_update_end_time)
-            
+
 
             # Optimizing - Policy
             if should_update_policy:
@@ -212,11 +200,11 @@ class SAC():
                     states, next_states, actions, rewards, dones = batches[i]
 
                     current_actions, _, current_log_probs = self.policy.get_action(states)
+
+                    q1 = self.critic.q1(states, current_actions)
+                    q2 = self.critic.q2(states, current_actions)
                     
-                    q1 = self.q1(states, current_actions)
-                    q2 = self.q2(states, current_actions)
-                    min_q = torch.minimum(q1, q2)
-                    policy_loss = (self.alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+                    policy_loss = self.policy.loss(current_log_probs, q1, q2, self.alpha)
 
                     self.policy_optimizer.zero_grad()
                     policy_loss.backward()
@@ -244,13 +232,13 @@ class SAC():
                             _, _, current_log_probs = self.policy.get_action(batch[0])
                             entropy = -current_log_probs.detach().mean()
 
-                    entropy_loss = self.alpha * (entropy - self.target_entropy)
+                    entropy_loss = self.entropy_coefficient.loss(entropy)
 
                     self.entropy_optimizer.zero_grad()
                     entropy_loss.backward()
                     self.entropy_optimizer.step()
 
-                    self.alpha = self.log_alpha.exp()
+                    self.alpha = self.entropy_coefficient()
 
                     entropy_loss_buffer.append(entropy_loss.item())
                     alpha_buffer.append(self.alpha.item())
@@ -326,15 +314,15 @@ class SAC():
         save_dict = {
             "config_algorithm": self.config.algorithm,
             "policy_state_dict": self.policy.state_dict(),
-            "q1_state_dict": self.q1.state_dict(),
-            "q2_state_dict": self.q2.state_dict(),
-            "q1_target_state_dict": self.q1_target.state_dict(),
-            "q2_target_state_dict": self.q2_target.state_dict(),
+            "q1_state_dict": self.critic.q1.state_dict(),
+            "q2_state_dict": self.critic.q2.state_dict(),
+            "q1_target_state_dict": self.critic.q1_target.state_dict(),
+            "q2_target_state_dict": self.critic.q2_target.state_dict(),
             "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
             "q_optimizer_state_dict": self.q_optimizer.state_dict(),
         }
         if self.entropy_coef == "auto":
-            save_dict["log_alpha"] = self.log_alpha
+            save_dict["log_alpha"] = self.entropy_coefficient.log_alpha
             save_dict["entropy_optimizer_state_dict"] = self.entropy_optimizer.state_dict()
         torch.save(save_dict, file_path)
         if self.track_wandb:
@@ -346,12 +334,12 @@ class SAC():
         config.algorithm = checkpoint["config_algorithm"]
         model = SAC(config, env, writer)
         model.policy.load_state_dict(checkpoint["policy_state_dict"])
-        model.q1.load_state_dict(checkpoint["q1_state_dict"])
-        model.q2.load_state_dict(checkpoint["q2_state_dict"])
-        model.q1_target.load_state_dict(checkpoint["q1_target_state_dict"])
-        model.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
+        model.critic.q1.load_state_dict(checkpoint["q1_state_dict"])
+        model.critic.q2.load_state_dict(checkpoint["q2_state_dict"])
+        model.critic.q1_target.load_state_dict(checkpoint["q1_target_state_dict"])
+        model.critic.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
         if config.algorithm.entropy_coef == "auto":
-            model.log_alpha = checkpoint["log_alpha"]
+            model.entropy_coefficient.log_alpha = checkpoint["log_alpha"]
             model.entropy_optimizer.load_state_dict(checkpoint["entropy_optimizer_state_dict"])
 
         return model
@@ -371,15 +359,15 @@ class SAC():
 
     def set_train_mode(self):
         self.policy.train()
-        self.q1.train()
-        self.q2.train()
-        self.q1_target.train()
-        self.q2_target.train()
+        self.critic.q1.train()
+        self.critic.q2.train()
+        self.critic.q1_target.train()
+        self.critic.q2_target.train()
 
 
     def set_eval_mode(self):
         self.policy.eval()
-        self.q1.eval()
-        self.q2.eval()
-        self.q1_target.eval()
-        self.q2_target.eval()
+        self.critic.q1.eval()
+        self.critic.q2.eval()
+        self.critic.q1_target.eval()
+        self.critic.q2_target.eval()

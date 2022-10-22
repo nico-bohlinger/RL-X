@@ -2,13 +2,17 @@ from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.runner import Runner
 
 # Algorithms
+## PPO
 from rl_x.algorithms.ppo.pytorch import PPO_PYTORCH
 from rl_x.algorithms.ppo.torchscript import PPO_TORCHSCRIPT
 from rl_x.algorithms.ppo.flax import PPO_FLAX
+## ESPO
 from rl_x.algorithms.espo.pytorch import ESPO_PYTORCH
 from rl_x.algorithms.espo.torchscript import ESPO_TORCHSCRIPT
 from rl_x.algorithms.espo.flax import ESPO_FLAX
+## SAC
 from rl_x.algorithms.sac.pytorch import SAC_PYTORCH
+from rl_x.algorithms.sac.torchscript import SAC_TORCHSCRIPT
 from rl_x.algorithms.sac.flax import SAC_FLAX
 
 # Environments
