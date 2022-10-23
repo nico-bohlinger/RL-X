@@ -226,7 +226,6 @@ class SAC():
 
                     entropy = -current_log_probs.detach().mean()
                     batches[i] = (states, next_states, actions, rewards, dones, entropy)
-                    entropy_buffer.append(entropy.item())
 
             policy_update_end_time = time.time()
             policy_update_time_buffer.append(policy_update_end_time - q_target_update_end_time)
@@ -252,6 +251,7 @@ class SAC():
 
                     self.alpha = self.log_alpha.exp()
 
+                    entropy_buffer.append(entropy.item())
                     entropy_loss_buffer.append(entropy_loss.item())
                     alpha_buffer.append(self.alpha.item())
 

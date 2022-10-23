@@ -201,6 +201,8 @@ class PPO:
             return 1 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
         
 
+        self.set_train_mode()
+
         storage = Storage(
             states=jnp.zeros((self.nr_steps, self.nr_envs) + self.os_shape),
             actions=jnp.zeros((self.nr_steps, self.nr_envs) + self.as_shape),
@@ -362,6 +364,7 @@ class PPO:
             action_mean, action_logstd = jax.lax.stop_gradient(self.policy.apply(params.policy_params, state))
             return self.get_processed_action(action_mean)
         
+        self.set_eval_mode()
         for i in range(episodes):
             done = False
             state = self.env.reset()
@@ -370,3 +373,11 @@ class PPO:
                 state, reward, done, info = self.env.step(jax.device_get(processed_action))
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
+    
+            
+    def set_train_mode(self):
+        ...
+
+
+    def set_eval_mode(self):
+        ...
