@@ -165,7 +165,7 @@ class SAC():
             
             # Optimizing - Prepare batches
             if should_update_q or should_update_policy or should_update_entropy:
-                max_nr_batches_needed = max(should_update_q * self.q_update_freq, should_update_policy * self.policy_update_freq, should_update_entropy * self.entropy_update_freq)
+                max_nr_batches_needed = max(should_update_q * self.q_update_steps, should_update_policy * self.policy_update_steps, should_update_entropy * self.entropy_update_steps)
                 batches = [(replay_buffer.sample(self.batch_size)) for _ in range(max_nr_batches_needed)]
 
 

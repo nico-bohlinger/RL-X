@@ -14,6 +14,8 @@ from rl_x.algorithms.espo.flax import ESPO_FLAX
 from rl_x.algorithms.sac.pytorch import SAC_PYTORCH
 from rl_x.algorithms.sac.torchscript import SAC_TORCHSCRIPT
 from rl_x.algorithms.sac.flax import SAC_FLAX
+## REDQ
+from rl_x.algorithms.redq.flax import REDQ_FLAX
 
 # Environments
 from rl_x.environments.envpool.humanoid_v4 import ENVPOOL_HUMANOID_V4

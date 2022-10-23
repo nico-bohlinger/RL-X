@@ -13,16 +13,16 @@ from flax.training import checkpoints
 import optax
 import wandb
 
-from rl_x.algorithms.sac.flax.policy import get_policy
-from rl_x.algorithms.sac.flax.critic import get_critic
-from rl_x.algorithms.sac.flax.entropy_coefficient import EntropyCoefficient, ConstantEntropyCoefficient
-from rl_x.algorithms.sac.flax.replay_buffer import ReplayBuffer
-from rl_x.algorithms.sac.flax.rl_train_state import RLTrainState
+from rl_x.algorithms.redq.flax.policy import get_policy
+from rl_x.algorithms.redq.flax.critic import get_critic
+from rl_x.algorithms.redq.flax.entropy_coefficient import EntropyCoefficient, ConstantEntropyCoefficient
+from rl_x.algorithms.redq.flax.replay_buffer import ReplayBuffer
+from rl_x.algorithms.redq.flax.rl_train_state import RLTrainState
 
 rlx_logger = logging.getLogger("rl_x")
 
 
-class SAC():
+class REDQ():
     def __init__(self, config, env, writer) -> None:
         self.config = config
         self.env = env
@@ -42,12 +42,10 @@ class SAC():
         self.batch_size = config.algorithm.batch_size
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
-        self.q_update_freq = config.algorithm.q_update_freq
+        self.ensemble_size = config.algorithm.ensemble_size
+        self.in_target_minimization_size = config.algorithm.in_target_minimization_size
         self.q_update_steps = config.algorithm.q_update_steps
-        self.q_target_update_freq = config.algorithm.q_target_update_freq
-        self.policy_update_freq = config.algorithm.policy_update_freq
         self.policy_update_steps = config.algorithm.policy_update_steps
-        self.entropy_update_freq = config.algorithm.entropy_update_freq
         self.entropy_update_steps = config.algorithm.entropy_update_steps
         self.entropy_coef = config.algorithm.entropy_coef
         self.target_entropy = config.algorithm.target_entropy
@@ -81,19 +79,19 @@ class SAC():
         def q_linear_schedule(count):
             step = count - self.learning_starts
             total_steps = self.total_timesteps - self.learning_starts
-            fraction = 1.0 - (step / (total_steps / self.q_update_freq * self.q_update_steps))
+            fraction = 1.0 - (step / (total_steps * self.q_update_steps))
             return self.learning_rate * fraction
     
         def policy_linear_schedule(count):
             step = count - self.learning_starts
             total_steps = self.total_timesteps - self.learning_starts
-            fraction = 1.0 - (step / (total_steps / self.policy_update_freq * self.policy_update_steps))
+            fraction = 1.0 - (step / (total_steps * self.policy_update_steps))
             return self.learning_rate * fraction
 
         def entropy_linear_schedule(count):
             step = count - self.learning_starts
             total_steps = self.total_timesteps - self.learning_starts
-            fraction = 1.0 - (step / (total_steps / self.entropy_update_freq * self.entropy_update_steps))
+            fraction = 1.0 - (step / (total_steps * self.entropy_update_steps))
             return self.learning_rate * fraction
         
         self.q_learning_rate = q_linear_schedule if self.anneal_learning_rate else self.learning_rate
@@ -158,14 +156,19 @@ class SAC():
             q_losses = []
 
             for i in range(self.q_update_steps):
+                key, action_sample_key, critic_sample_key = jax.random.split(key, num=3)
+
                 dist = self.policy.apply(policy_state.params, next_states[i])
-                key, subkey = jax.random.split(key)
-                next_actions = dist.sample(seed=subkey)
+                next_actions = dist.sample(seed=action_sample_key)
                 next_log_probs = dist.log_prob(next_actions)
 
                 alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
 
-                next_q_targets = self.vector_critic.apply(vector_critic_state.target_params, next_states[i], next_actions)
+                all_indices = jnp.arange(self.ensemble_size)
+                m_indices = jax.random.choice(key=critic_sample_key, a=all_indices, shape=(self.in_target_minimization_size,), replace=False)
+                m_target_params = jax.tree_map(lambda x: x[m_indices], vector_critic_state.target_params)
+
+                next_q_targets = self.vector_critic.apply(m_target_params, next_states[i], next_actions)
                 min_next_q_target = jnp.min(next_q_targets, axis=0).reshape(-1, 1)
                 y = rewards[i].reshape(-1, 1) + self.gamma * (1 - dones[i].reshape(-1, 1)) * (min_next_q_target - alpha * next_log_probs.reshape(-1, 1))
 
@@ -177,12 +180,10 @@ class SAC():
                 vector_critic_state = vector_critic_state.apply_gradients(grads=grads)
                 q_losses.append(q_loss)
 
+                # Update targets
+                vector_critic_state = vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
+
             return jnp.array(q_losses), vector_critic_state, key
-
-
-        @jax.jit
-        def update_critic_targets(vector_critic_state):
-            return vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
 
 
         @jax.jit
@@ -212,20 +213,6 @@ class SAC():
                 entropies.append(entropy)
 
             return jnp.array(policy_losses), jnp.array(entropies), policy_state, key
-        
-
-        @jax.jit
-        def get_additional_entropies(policy_state: TrainState, states: jnp.ndarray, key: jax.random.PRNGKey):
-            entropies = []
-
-            for i in range(self.entropy_update_freq - self.policy_update_freq):
-                dist = self.policy.apply(policy_state.params, states[i + self.policy_update_freq])
-                key, subkey = jax.random.split(key)
-                current_actions = dist.sample(seed=subkey)
-                current_log_probs = dist.log_prob(current_actions)
-                entropies.append(-current_log_probs.mean())
-            
-            return jnp.array(entropies), key
 
 
         @jax.jit
@@ -254,7 +241,6 @@ class SAC():
         episode_info_buffer = deque(maxlen=100)
         acting_time_buffer = deque(maxlen=100)
         q_update_time_buffer = deque(maxlen=100)
-        q_target_update_time_buffer = deque(maxlen=100)
         policy_update_time_buffer = deque(maxlen=100)
         entropy_update_time_buffer = deque(maxlen=100)
         saving_time_buffer = deque(maxlen=100)
@@ -305,10 +291,9 @@ class SAC():
 
             # What to do in this step after acting
             should_learning_start = global_step > self.learning_starts
-            should_update_q = should_learning_start and global_step % self.q_update_freq == 0
-            should_update_q_target = should_learning_start and global_step % self.q_target_update_freq == 0
-            should_update_policy = should_learning_start and global_step % self.policy_update_freq == 0
-            should_update_entropy = should_learning_start and self.entropy_coef == "auto" and global_step % self.entropy_update_freq == 0
+            should_update_q = should_learning_start
+            should_update_policy = should_learning_start
+            should_update_entropy = should_learning_start and self.entropy_coef == "auto"
             should_try_to_save = self.learning_starts and self.save_model and episode_infos
             should_log = global_step % self.log_freq == 0
 
@@ -332,14 +317,6 @@ class SAC():
             q_update_time_buffer.append(q_update_end_time - acting_end_time)
 
 
-            # Optimizing - Q-function targets
-            if should_update_q_target:
-                self.vector_critic_state = update_critic_targets(self.vector_critic_state)
-
-            q_target_update_end_time = time.time()
-            q_target_update_time_buffer.append(q_target_update_end_time - q_update_end_time)
-
-
             # Optimizing - Policy
             if should_update_policy:
                 policy_losses, batch_entropies, self.policy_state, self.key = update_policy(
@@ -349,15 +326,11 @@ class SAC():
                 policy_loss_buffer.append(jax.device_get(policy_losses))
 
             policy_update_end_time = time.time()
-            policy_update_time_buffer.append(policy_update_end_time - q_target_update_end_time)
+            policy_update_time_buffer.append(policy_update_end_time - q_update_end_time)
 
 
             # Optimizing - Entropy
             if should_update_entropy:
-                if self.entropy_update_freq > self.policy_update_freq:
-                    additional_entropies, self.key = get_additional_entropies(self.policy_state, batch_states, self.key)
-                    batch_entropies = jnp.concatenate([batch_entropies, additional_entropies])
-
                 entropy_losses, alphas, self.entropy_coefficient_state, self.key = update_entropy_coefficient(self.entropy_coefficient_state, batch_entropies, self.key)
                 entropy_buffer.extend(jax.device_get(batch_entropies))
                 entropy_loss_buffer.append(jax.device_get(entropy_losses))
@@ -393,7 +366,6 @@ class SAC():
                     self.writer.add_scalar("time/fps", np.mean(fps_buffer), global_step)
                     self.writer.add_scalar("time/acting_time", np.mean(acting_time_buffer), global_step)
                     self.writer.add_scalar("time/q_update_time", np.mean(q_update_time_buffer), global_step)
-                    self.writer.add_scalar("time/q_target_update_time", np.mean(q_target_update_time_buffer), global_step)
                     self.writer.add_scalar("time/policy_update_time", np.mean(policy_update_time_buffer), global_step)
                     self.writer.add_scalar("time/entropy_update_time", np.mean(entropy_update_time_buffer), global_step)
                     self.writer.add_scalar("time/saving_time", np.mean(saving_time_buffer), global_step)
@@ -408,7 +380,6 @@ class SAC():
                 episode_info_buffer.clear()
                 acting_time_buffer.clear()
                 q_update_time_buffer.clear()
-                q_target_update_time_buffer.clear()
                 policy_update_time_buffer.clear()
                 entropy_update_time_buffer.clear()
                 saving_time_buffer.clear()
@@ -458,7 +429,7 @@ class SAC():
         config_file_name = "_".join(splitted_checkpoint_name[:-2]) + "_config_" + splitted_checkpoint_name[-1]
         with open(f"{checkpoint_dir}/{config_file_name}", "rb") as file:
             config.algorithm = pickle.load(file)["config_algorithm"]
-        model = SAC(config, env, writer)
+        model = REDQ(config, env, writer)
 
         jax_file_name = "_".join(splitted_checkpoint_name[:-1]) + "_"
         step = int(splitted_checkpoint_name[-1])
