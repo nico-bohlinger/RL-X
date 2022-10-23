@@ -44,6 +44,7 @@ class PPO:
         self.batch_size = config.algorithm.nr_envs * config.algorithm.nr_steps
 
         self.device = torch.device("cuda" if config.algorithm.device == "cuda" and torch.cuda.is_available() else "cpu")
+        rlx_logger.info(f"Using device: {self.device}")
 
         random.seed(self.seed)
         np.random.seed(self.seed)

@@ -49,6 +49,7 @@ class SAC():
         self.nr_hidden_units = config.algorithm.nr_hidden_units
 
         self.device = torch.device("cuda" if config.algorithm.device == "cuda" and torch.cuda.is_available() else "cpu")
+        rlx_logger.info(f"Using device: {self.device}")
 
         random.seed(self.seed)
         np.random.seed(self.seed)

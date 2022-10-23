@@ -53,6 +53,7 @@ class PPO:
 
         if config.algorithm.device == "cpu":
             jax.config.update("jax_platform_name", "cpu")
+        rlx_logger.info(f"Using device: {jax.default_backend()}")
         
         random.seed(self.seed)
         np.random.seed(self.seed)
