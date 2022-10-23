@@ -5,7 +5,8 @@ import jax.numpy as jnp
 import flax.linen as nn
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
-tfb = tfp.bijectors
+
+from rl_x.algorithms.sac.flax.tanh_transformed_distribution import TanhTransformedDistribution
 
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
@@ -40,8 +41,7 @@ class Policy(nn.Module):
         log_std = nn.Dense(np.prod(self.as_shape).item())(x)
         log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
 
-        base_dist = tfd.MultivariateNormalDiag(loc=mean, scale_diag=jnp.exp(log_std))
-        dist = tfd.TransformedDistribution(distribution=base_dist, bijector=tfb.Tanh())
+        dist = TanhTransformedDistribution(tfd.MultivariateNormalDiag(loc=mean, scale_diag=jnp.exp(log_std)))
 
         return dist
 

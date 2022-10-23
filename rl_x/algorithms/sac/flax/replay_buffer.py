@@ -28,9 +28,9 @@ class ReplayBuffer():
     def sample(self, n):
         idx1 = np.random.randint(self.size, size=n)
         idx2 = np.random.randint(self.nr_envs, size=n)
-        states = jnp.array(self.states[idx1, idx2])
-        next_states = jnp.array(self.next_states[idx1, idx2])
-        actions = jnp.array(self.actions[idx1, idx2])
-        rewards = jnp.array(self.rewards[idx1, idx2])
-        dones = jnp.array(self.dones[idx1, idx2])
+        states = self.states[idx1, idx2]
+        next_states = self.next_states[idx1, idx2]
+        actions = self.actions[idx1, idx2]
+        rewards = self.rewards[idx1, idx2]
+        dones = self.dones[idx1, idx2]
         return states, next_states, actions, rewards, dones
