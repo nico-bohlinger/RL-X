@@ -45,6 +45,7 @@ class TQC():
         self.ensemble_size = config.algorithm.ensemble_size
         self.nr_atoms_per_net = config.algorithm.nr_atoms_per_net
         self.nr_dropped_atoms_per_net = config.algorithm.nr_dropped_atoms_per_net
+        self.huber_kappa = config.algorithm.huber_kappa
         self.q_update_steps = config.algorithm.q_update_steps
         self.policy_update_steps = config.algorithm.policy_update_steps
         self.entropy_update_steps = config.algorithm.entropy_update_steps
@@ -52,6 +53,8 @@ class TQC():
         self.target_entropy = config.algorithm.target_entropy
         self.log_freq = config.algorithm.log_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.nr_total_atoms = self.nr_atoms_per_net * self.ensemble_size
+        self.nr_target_atoms = self.nr_total_atoms - (self.nr_dropped_atoms_per_net * self.ensemble_size)
 
         if config.algorithm.device == "cpu":
             jax.config.update("jax_platform_name", "cpu")
@@ -157,7 +160,7 @@ class TQC():
             q_losses = []
 
             for i in range(self.q_update_steps):
-                key, action_sample_key, critic_sample_key = jax.random.split(key, num=3)
+                key, action_sample_key = jax.random.split(key)
 
                 dist = self.policy.apply(policy_state.params, next_states[i])
                 next_actions = dist.sample(seed=action_sample_key)
@@ -165,19 +168,30 @@ class TQC():
 
                 alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
 
-                all_indices = jnp.arange(self.ensemble_size)
-                m_indices = jax.random.choice(key=critic_sample_key, a=all_indices, shape=(self.in_target_minimization_size,), replace=False)
-                m_target_params = jax.tree_map(lambda x: x[m_indices], vector_critic_state.target_params)
+                next_q_target_atoms = self.vector_critic.apply(vector_critic_state.target_params, next_states[i], next_actions)
+                next_q_target_atoms = jnp.transpose(next_q_target_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)  # (batch_size, nr_total_atoms)
+                next_q_target_atoms = jnp.sort(next_q_target_atoms)
+                next_q_target_atoms = next_q_target_atoms[:, :self.nr_target_atoms]
 
-                next_q_targets = self.vector_critic.apply(m_target_params, next_states[i], next_actions)
-                min_next_q_target = jnp.min(next_q_targets, axis=0).reshape(-1, 1)
-                y = rewards[i].reshape(-1, 1) + self.gamma * (1 - dones[i].reshape(-1, 1)) * (min_next_q_target - alpha * next_log_probs.reshape(-1, 1))
+                y = rewards[i].reshape(-1, 1) + self.gamma * (1 - dones[i].reshape(-1, 1)) * (next_q_target_atoms - alpha * next_log_probs.reshape(-1, 1))
+                y = jnp.expand_dims(y, axis=1)  # (batch_size, 1, nr_target_atoms)
 
-                def loss_fn(vector_critic_params: flax.core.FrozenDict):
-                    qs = self.vector_critic.apply(vector_critic_params, states[i], actions[i])
-                    return ((qs - y) ** 2).mean()
+                def huber_loss_fn(vector_critic_params: flax.core.FrozenDict):
+                    q_atoms = self.vector_critic.apply(vector_critic_params, states[i], actions[i])
+                    q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, -1)
+                    q_atoms = jnp.expand_dims(q_atoms, axis=2)  # (batch_size, nr_total_atoms, 1)
+                    
+                    cumulative_prob = (jnp.arange(self.nr_total_atoms, dtype=jnp.float32) + 0.5) / self.nr_total_atoms
+                    cumulative_prob = jnp.expand_dims(cumulative_prob, axis=(0, -1))  # (1, nr_total_atoms, 1)
+
+                    delta_i_j = y - q_atoms
+                    abs_delta_i_j = jnp.abs(delta_i_j)
+                    huber_loss = jnp.where(abs_delta_i_j <= self.huber_kappa, 0.5 * delta_i_j ** 2, self.huber_kappa * (abs_delta_i_j - 0.5 * self.huber_kappa))
+                    loss = jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa
+
+                    return loss.mean()
                 
-                q_loss, grads = jax.value_and_grad(loss_fn, has_aux=False)(vector_critic_state.params)
+                q_loss, grads = jax.value_and_grad(huber_loss_fn, has_aux=False)(vector_critic_state.params)
                 vector_critic_state = vector_critic_state.apply_gradients(grads=grads)
                 q_losses.append(q_loss)
 
@@ -200,12 +214,13 @@ class TQC():
                     current_actions = dist.sample(seed=subkey)
                     current_log_probs = dist.log_prob(current_actions).reshape(-1, 1)
 
-                    qs = self.vector_critic.apply(vector_critic_state.params, states[i], current_actions)
-                    min_q = jnp.min(qs, axis=0)
+                    q_atoms = self.vector_critic.apply(vector_critic_state.params, states[i], current_actions)
+                    q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)
+                    mean_q_atoms = jnp.mean(q_atoms, axis=1)
 
                     alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
 
-                    policy_loss = (alpha * current_log_probs - min_q).mean()
+                    policy_loss = (alpha * current_log_probs - mean_q_atoms).mean()
                     return policy_loss, -current_log_probs.mean()
                 
                 (policy_loss, entropy), grads = jax.value_and_grad(loss_fn, has_aux=True)(policy_state.params)

@@ -8,12 +8,13 @@ def get_critic(config, env):
     observation_space_type = env.get_observation_space_type()
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return VectorCritic(config.algorithm.nr_hidden_units, config.algorithm.ensemble_size)
+        return VectorCritic(config.algorithm.nr_atoms_per_net, config.algorithm.nr_hidden_units, config.algorithm.ensemble_size)
     else:
         raise ValueError(f"Unsupported observation_space_type: {observation_space_type}")
 
 
 class Critic(nn.Module):
+    nr_atoms: int
     nr_hidden_units: int
 
     @nn.compact
@@ -23,11 +24,12 @@ class Critic(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
-        x = nn.Dense(1)(x)
+        x = nn.Dense(self.nr_atoms)(x)
         return x
     
 
 class VectorCritic(nn.Module):
+    nr_atoms_per_net: int
     nr_hidden_units: int
     nr_critics: int
 
@@ -45,5 +47,5 @@ class VectorCritic(nn.Module):
             out_axes=0,
             axis_size=self.nr_critics,
         )
-        q_values = vmap_critic(nr_hidden_units=self.nr_hidden_units)(obs, action)
+        q_values = vmap_critic(nr_atoms=self.nr_atoms_per_net, nr_hidden_units=self.nr_hidden_units)(obs, action)
         return q_values

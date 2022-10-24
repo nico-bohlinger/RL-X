@@ -19,7 +19,8 @@ def get_config(algorithm_name):
     config.ensemble_size = 2
     config.nr_atoms_per_net = 25
     config.nr_dropped_atoms_per_net = 2
-    config.q_update_steps = 20
+    config.huber_kappa = 1.0
+    config.q_update_steps = 1
     config.policy_update_steps = 1
     config.entropy_update_steps = 1
     config.entropy_coef = "auto"
