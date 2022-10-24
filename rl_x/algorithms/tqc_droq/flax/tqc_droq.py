@@ -63,7 +63,7 @@ class TQC_DroQ():
         random.seed(self.seed)
         np.random.seed(self.seed)
         self.key = jax.random.PRNGKey(self.seed)
-        self.key, policy_key, critic_key, entropy_coefficient_key = jax.random.split(self.key, 4)
+        self.key, policy_key, critic_key, dropout_key, entropy_coefficient_key = jax.random.split(self.key, 5)
 
         self.env_as_low = env.action_space.low
         self.env_as_high = env.action_space.high
@@ -113,8 +113,8 @@ class TQC_DroQ():
 
         self.vector_critic_state = RLTrainState.create(
             apply_fn=self.vector_critic.apply,
-            params=self.vector_critic.init(critic_key, state, action),
-            target_params=self.vector_critic.init(critic_key, state, action),
+            params=self.vector_critic.init({"params": critic_key, "dropout": dropout_key}, state, action),
+            target_params=self.vector_critic.init({"params": critic_key, "dropout": dropout_key}, state, action),
             tx=optax.adam(learning_rate=self.q_learning_rate)
         )
 
@@ -160,7 +160,7 @@ class TQC_DroQ():
             q_losses = []
 
             for i in range(self.q_update_steps):
-                key, action_sample_key = jax.random.split(key)
+                key, action_sample_key, dropout_current_key, dropout_target_key = jax.random.split(key, num=4)
 
                 dist = self.policy.apply(policy_state.params, next_states[i])
                 next_actions = dist.sample(seed=action_sample_key)
@@ -168,7 +168,7 @@ class TQC_DroQ():
 
                 alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
 
-                next_q_target_atoms = self.vector_critic.apply(vector_critic_state.target_params, next_states[i], next_actions)
+                next_q_target_atoms = self.vector_critic.apply(vector_critic_state.target_params, next_states[i], next_actions, rngs={"dropout": dropout_target_key})
                 next_q_target_atoms = jnp.transpose(next_q_target_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)  # (batch_size, nr_total_atoms)
                 next_q_target_atoms = jnp.sort(next_q_target_atoms)
                 next_q_target_atoms = next_q_target_atoms[:, :self.nr_target_atoms]
@@ -177,7 +177,7 @@ class TQC_DroQ():
                 y = jnp.expand_dims(y, axis=1)  # (batch_size, 1, nr_target_atoms)
 
                 def huber_loss_fn(vector_critic_params: flax.core.FrozenDict):
-                    q_atoms = self.vector_critic.apply(vector_critic_params, states[i], actions[i])
+                    q_atoms = self.vector_critic.apply(vector_critic_params, states[i], actions[i], rngs={"dropout": dropout_current_key})
                     q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, -1)
                     q_atoms = jnp.expand_dims(q_atoms, axis=2)  # (batch_size, nr_total_atoms, 1)
                     
@@ -207,14 +207,14 @@ class TQC_DroQ():
             entropies = []
 
             for i in range(self.policy_update_steps):
-                key, subkey = jax.random.split(key)
+                key, action_sample_key, dropout_key = jax.random.split(key, num=3)
 
                 def loss_fn(policy_params: flax.core.FrozenDict):
                     dist = self.policy.apply(policy_params, states[i])
-                    current_actions = dist.sample(seed=subkey)
+                    current_actions = dist.sample(seed=action_sample_key)
                     current_log_probs = dist.log_prob(current_actions).reshape(-1, 1)
 
-                    q_atoms = self.vector_critic.apply(vector_critic_state.params, states[i], current_actions)
+                    q_atoms = self.vector_critic.apply(vector_critic_state.params, states[i], current_actions, rngs={"dropout": dropout_key})
                     q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)
                     mean_q_atoms = jnp.mean(q_atoms, axis=1)
 
