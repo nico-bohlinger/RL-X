@@ -16,6 +16,10 @@ from rl_x.algorithms.sac.torchscript import SAC_TORCHSCRIPT
 from rl_x.algorithms.sac.flax import SAC_FLAX
 ## REDQ
 from rl_x.algorithms.redq.flax import REDQ_FLAX
+## DroQ
+from rl_x.algorithms.droq.flax import DROQ_FLAX
+## TQC
+from rl_x.algorithms.tqc.flax import TQC_FLAX
 
 # Environments
 from rl_x.environments.envpool.humanoid_v4 import ENVPOOL_HUMANOID_V4
