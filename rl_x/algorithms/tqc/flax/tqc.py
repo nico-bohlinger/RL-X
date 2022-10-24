@@ -43,7 +43,8 @@ class TQC():
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
         self.ensemble_size = config.algorithm.ensemble_size
-        self.in_target_minimization_size = config.algorithm.in_target_minimization_size
+        self.nr_atoms_per_net = config.algorithm.nr_atoms_per_net
+        self.nr_dropped_atoms_per_net = config.algorithm.nr_dropped_atoms_per_net
         self.q_update_steps = config.algorithm.q_update_steps
         self.policy_update_steps = config.algorithm.policy_update_steps
         self.entropy_update_steps = config.algorithm.entropy_update_steps

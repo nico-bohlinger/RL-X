@@ -8,16 +8,17 @@ def get_config(algorithm_name):
 
     config.device = "cuda"  # cpu, cuda
     config.total_timesteps = 1e9
-    config.nr_envs = 2
+    config.nr_envs = 1
     config.learning_rate = 3e-4
-    config.anneal_learning_rate = True
+    config.anneal_learning_rate = False
     config.buffer_size = 1e6
     config.learning_starts = 5000
-    config.batch_size = 2048
+    config.batch_size = 256
     config.tau = 0.005
     config.gamma = 0.99
-    config.ensemble_size = 10
-    config.in_target_minimization_size = 2
+    config.ensemble_size = 2
+    config.nr_atoms_per_net = 25
+    config.nr_dropped_atoms_per_net = 2
     config.q_update_steps = 20
     config.policy_update_steps = 1
     config.entropy_update_steps = 1
@@ -27,6 +28,6 @@ def get_config(algorithm_name):
     config.log_std_max = 2
     config.log_freq = 100
 
-    config.nr_hidden_units = 256
+    config.nr_hidden_units = 256  # paper uses 256 for policy and 512 for critics
 
     return config

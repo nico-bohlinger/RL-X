@@ -8,12 +8,12 @@ def get_config(algorithm_name):
 
     config.device = "cuda"  # cpu, cuda
     config.total_timesteps = 1e9
-    config.nr_envs = 2
+    config.nr_envs = 1
     config.learning_rate = 3e-4
-    config.anneal_learning_rate = True
+    config.anneal_learning_rate = False
     config.buffer_size = 1e6
     config.learning_starts = 5000
-    config.batch_size = 2048
+    config.batch_size = 256
     config.tau = 0.005
     config.gamma = 0.99
     config.ensemble_size = 2
