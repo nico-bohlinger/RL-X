@@ -1,0 +1,14 @@
+absl-py
+ml_collections
+wandb
+torch
+gym[all]==0.21.0
+envpool
+numpy
+stable_baselines3
+tensorboard
+flax
+jax
+jaxlib
+optaxtyping_extensions
+tensorflow_probability
