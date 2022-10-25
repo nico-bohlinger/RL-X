@@ -10,5 +10,5 @@ tensorboard
 flax
 jax
 jaxlib
-optaxtyping_extensions
+optax
 tensorflow_probability
