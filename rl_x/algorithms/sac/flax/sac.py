@@ -23,13 +23,13 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class SAC():
-    def __init__(self, config, env, writer) -> None:
+    def __init__(self, config, env, run_path, writer) -> None:
         self.config = config
         self.env = env
         self.writer = writer
 
         self.save_model = config.runner.save_model
-        self.save_path = os.path.join(config.runner.run_path, "models")
+        self.save_path = os.path.join(run_path, "models")
         self.track_tb = config.runner.track_tb
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed

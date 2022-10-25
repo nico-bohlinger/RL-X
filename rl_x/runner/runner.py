@@ -106,9 +106,10 @@ class Runner:
                 save_code=True,
             )
 
+        run_path = f"runs/{self._config.runner.project_name}/{self._config.runner.exp_name}/{self._config.runner.run_name}"
         writer = None
         if self._config.runner.track_tb:
-            writer = SummaryWriter(self._config.runner.run_path)
+            writer = SummaryWriter(run_path)
             all_config_items = self._config.runner.items() + self._config.algorithm.items() + self._config.environment.items()
             writer.add_text(
                 "hyperparameters",
@@ -118,9 +119,9 @@ class Runner:
         env = self._create_env(self._config)
         
         if self._config.runner.load_model:
-            model = self._model_class.load(self._config, env, writer)
+            model = self._model_class.load(self._config, env, run_path, writer)
         else:
-            model = self._model_class(self._config, env, writer)
+            model = self._model_class(self._config, env, run_path, writer)
 
         try:
             model.train()
@@ -141,13 +142,15 @@ class Runner:
             raise ValueError("Saving model is not supported in test mode")
         if self._config.algorithm.nr_envs > 1:
             raise ValueError("nr_envs > 1 is not supported in test mode")
+        
+        run_path = f"runs/{self._config.runner.project_name}/{self._config.runner.exp_name}/{self._config.runner.run_name}"
 
         env = self._create_env(self._config)
         
         if self._config.runner.load_model:
-            model = self._model_class.load(self._config, env, None)
+            model = self._model_class.load(self._config, env, run_path, None)
         else:
-            model = self._model_class(self._config, env, None)
+            model = self._model_class(self._config, env, run_path, None)
         
         try:
             model.test(self._config.runner.test_episodes)

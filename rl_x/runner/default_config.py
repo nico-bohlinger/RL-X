@@ -17,7 +17,6 @@ def get_config():
     config.project_name = "placeholder"
     config.exp_name = "placeholder"
     config.run_name = f"{int(time.time())}"
-    config.run_path = f"runs/{config.project_name}/{config.exp_name}/{config.run_name}"
     config.notes = "placeholder"
 
     return config
