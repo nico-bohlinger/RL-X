@@ -8,6 +8,8 @@ def create_env(config):
     env.num_envs = config.algorithm.nr_envs
     env = RecordEpisodeStatistics(env)
     env = RLXInfo(env)
+    env.action_space = env.action_space
+    env.observation_space = env.observation_space
     env.action_space.seed(config.environment.seed)
     env.observation_space.seed(config.environment.seed)
     return env
