@@ -22,6 +22,8 @@ from rl_x.algorithms.droq.flax import DROQ_FLAX
 from rl_x.algorithms.tqc.flax import TQC_FLAX
 ## TQC+DroQ
 from rl_x.algorithms.tqc_droq.flax import TQC_DROQ_FLAX
+## TQC+ELU
+from rl_x.algorithms.tqc_elu.flax import TQC_ELU_FLAX
 
 # Environments
 from rl_x.environments.envpool.humanoid_v4 import ENVPOOL_HUMANOID_V4
