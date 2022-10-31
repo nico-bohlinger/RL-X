@@ -9,6 +9,7 @@ A framework for Reinforcement Learning research.
 - [Randomized Ensembled Double Q-Learning (REDQ)](https://arxiv.org/abs/2101.05982) in Flax
 - [Dropout Q-Functions (DroQ)](https://arxiv.org/abs/2110.02034) in Flax
 - [Truncated Quantile Critics (TQC)](https://arxiv.org/abs/2005.04269) in Flax
+- [Aggressive Q-Learning with Ensembles (AQE)](https://arxiv.org/abs/2111.09159) in Flax
 
 
 ## Install

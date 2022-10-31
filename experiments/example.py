@@ -20,6 +20,8 @@ from rl_x.algorithms.redq.flax import REDQ_FLAX
 from rl_x.algorithms.droq.flax import DROQ_FLAX
 ## TQC
 from rl_x.algorithms.tqc.flax import TQC_FLAX
+## AQE
+from rl_x.algorithms.aqe.flax import AQE_FLAX
 
 # Environments
 from rl_x.environments.envpool.humanoid_v4 import ENVPOOL_HUMANOID_V4
