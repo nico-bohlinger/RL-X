@@ -1,5 +1,6 @@
 #!/bin/bash
 python example.py \
+    --config.runner.track_console=False \
     --config.runner.track_tb=True \
     --config.runner.track_wandb=True \
     --config.runner.save_model=True \
