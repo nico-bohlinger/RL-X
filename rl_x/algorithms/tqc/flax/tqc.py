@@ -30,6 +30,7 @@ class TQC():
 
         self.save_model = config.runner.save_model
         self.save_path = os.path.join(run_path, "models")
+        self.track_console = config.runner.track_console
         self.track_tb = config.runner.track_tb
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
@@ -297,9 +298,7 @@ class TQC():
 
             episode_infos = self.env.get_episode_infos(info)
             episode_info_buffer.extend(episode_infos)
-            if len(episode_infos) > 0:
-                ep_info_returns = [ep_info["r"] for ep_info in episode_infos]
-                saving_return_buffer.extend(ep_info_returns)
+            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos])
 
             acting_end_time = time.time()
             acting_time_buffer.append(acting_end_time - start_time)
@@ -371,27 +370,34 @@ class TQC():
 
             # Logging                
             if should_log:
-                if self.track_tb:
-                    if len(episode_info_buffer) > 0:
-                        self.writer.add_scalar("rollout/ep_rew_mean", np.mean(ep_info_returns), global_step)
-                        self.writer.add_scalar("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
-                        names = list(episode_info_buffer[0].keys())
-                        for name in names:
-                            if name != "r" and name != "l" and name != "t":
-                                self.writer.add_scalar(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
-                    self.writer.add_scalar("time/fps", np.mean(fps_buffer), global_step)
-                    self.writer.add_scalar("time/acting_time", np.mean(acting_time_buffer), global_step)
-                    self.writer.add_scalar("time/q_update_time", np.mean(q_update_time_buffer), global_step)
-                    self.writer.add_scalar("time/policy_update_time", np.mean(policy_update_time_buffer), global_step)
-                    self.writer.add_scalar("time/entropy_update_time", np.mean(entropy_update_time_buffer), global_step)
-                    self.writer.add_scalar("time/saving_time", np.mean(saving_time_buffer), global_step)
-                    self.writer.add_scalar("train/learning_rate", self.policy_learning_rate if isinstance(self.policy_learning_rate, float) else self.policy_learning_rate(global_step), global_step)
-                    self.writer.add_scalar("train/q_loss", self.get_buffer_mean(q_loss_buffer), global_step)
-                    self.writer.add_scalar("train/policy_loss", self.get_buffer_mean(policy_loss_buffer), global_step)
-                    self.writer.add_scalar("train/entropy_loss", self.get_buffer_mean(entropy_loss_buffer), global_step)
-                    self.writer.add_scalar("train/entropy", self.get_buffer_mean(entropy_buffer), global_step)
-                    self.writer.add_scalar("train/alpha", self.get_buffer_mean(alpha_buffer), global_step)
+                if self.track_console:
+                    rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
+                    self.log_console("global_step", global_step)
+                else:
+                    rlx_logger.info(f"Step: {global_step}")
 
+                if len(episode_info_buffer) > 0:
+                    self.log("rollout/ep_rew_mean", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
+                    self.log("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
+                    names = list(episode_info_buffer[0].keys())
+                    for name in names:
+                        if name != "r" and name != "l" and name != "t":
+                            self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
+                self.log("time/fps", np.mean(fps_buffer), global_step)
+                self.log("time/acting_time", np.mean(acting_time_buffer), global_step)
+                self.log("time/q_update_time", np.mean(q_update_time_buffer), global_step)
+                self.log("time/policy_update_time", np.mean(policy_update_time_buffer), global_step)
+                self.log("time/entropy_update_time", np.mean(entropy_update_time_buffer), global_step)
+                self.log("time/saving_time", np.mean(saving_time_buffer), global_step)
+                self.log("train/learning_rate", self.policy_learning_rate if isinstance(self.policy_learning_rate, float) else self.policy_learning_rate(global_step), global_step)
+                self.log("train/q_loss", self.get_buffer_mean(q_loss_buffer), global_step)
+                self.log("train/policy_loss", self.get_buffer_mean(policy_loss_buffer), global_step)
+                self.log("train/entropy_loss", self.get_buffer_mean(entropy_loss_buffer), global_step)
+                self.log("train/entropy", self.get_buffer_mean(entropy_buffer), global_step)
+                self.log("train/alpha", self.get_buffer_mean(alpha_buffer), global_step)
+
+                if self.track_console:
+                    rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
                 episode_info_buffer.clear()
                 acting_time_buffer.clear()
@@ -406,14 +412,24 @@ class TQC():
                 entropy_buffer.clear()
                 alpha_buffer.clear()
 
-                rlx_logger.info(f"Step: {global_step}")
-
 
     def get_buffer_mean(self, buffer):
         if len(buffer) > 0:
             return np.mean(buffer)
         else:
             return 0.0
+
+
+    def log(self, name, value, step):
+        if self.track_tb:
+            self.writer.add_scalar(name, value, step)
+        if self.track_console:
+            self.log_console(name, value)
+    
+
+    def log_console(self, name, value):
+        value = np.format_float_positional(value, trim="-")
+        rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │")
         
 
     def save(self):

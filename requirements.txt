@@ -2,13 +2,15 @@ absl-py
 ml_collections
 wandb
 torch
-gym[all]==0.21.0
+gym==0.21.0
+mujoco_py
 envpool
 numpy
 stable_baselines3
+tensorflow
 tensorboard
-flax
 jax
 jaxlib
+flax
 optax
 tensorflow_probability

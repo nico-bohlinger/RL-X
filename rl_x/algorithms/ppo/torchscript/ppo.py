@@ -23,6 +23,7 @@ class PPO:
 
         self.save_model = config.runner.save_model
         self.save_path = os.path.join(run_path, "models")
+        self.track_console = config.runner.track_console
         self.track_tb = config.runner.track_tb
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
@@ -108,17 +109,16 @@ class PPO:
                 state = next_state
                 global_step += self.nr_envs
 
-                episode_info_buffer.extend(self.env.get_episode_infos(info))
-                if len(episode_info_buffer) > 0:
-                    ep_info_returns = [ep_info["r"] for ep_info in episode_info_buffer]
-                    saving_return_buffer.extend(ep_info_returns)
+                episode_infos = self.env.get_episode_infos(info)
+                episode_info_buffer.extend(episode_infos)
+            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_info_buffer])
             
             acting_end_time = time.time()
 
 
             # Calculating advantages and returns
             with torch.no_grad():
-                next_values = self.agent.get_value(batch.next_states).squeeze()
+                next_values = self.agent.get_value(batch.next_states).reshape(-1, 1)
             advantages, returns = calculate_gae_advantages_and_returns(batch.rewards, batch.dones, batch.values, next_values, self.gamma, self.gae_lambda)
             
             calc_adv_return_end_time = time.time()
@@ -189,31 +189,49 @@ class PPO:
 
 
             # Logging
-            if self.track_tb:
-                if len(episode_info_buffer) > 0:
-                    self.writer.add_scalar("rollout/ep_rew_mean", np.mean(ep_info_returns), global_step)
-                    self.writer.add_scalar("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
-                    names = list(episode_info_buffer[0].keys())
-                    for name in names:
-                        if name != "r" and name != "l" and name != "t":
-                            self.writer.add_scalar(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
-                self.writer.add_scalar("time/fps", int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time)), global_step)
-                self.writer.add_scalar("time/acting_time", acting_end_time - start_time, global_step)
-                self.writer.add_scalar("time/calc_advantages_and_return_time", calc_adv_return_end_time - acting_end_time, global_step)
-                self.writer.add_scalar("time/optimizing_time", optimizing_end_time - calc_adv_return_end_time, global_step)
-                self.writer.add_scalar("time/saving_time", saving_end_time - optimizing_end_time, global_step)
-                self.writer.add_scalar("train/learning_rate", learning_rate, global_step)
-                self.writer.add_scalar("train/clip_range", self.clip_range, global_step)
-                self.writer.add_scalar("train/clip_fraction", np.mean(clip_fractions), global_step)
-                self.writer.add_scalar("train/approx_kl", np.mean(approx_kl_divs), global_step)
-                self.writer.add_scalar("train/policy_gradient_loss", np.mean(pg_losses), global_step)
-                self.writer.add_scalar("train/value_loss", np.mean(value_losses), global_step)
-                self.writer.add_scalar("train/entropy_loss", np.mean(entropy_losses), global_step)
-                self.writer.add_scalar("train/loss", np.mean(loss_losses), global_step)
-                self.writer.add_scalar("train/std", np.mean(np.exp(self.agent.policy_logstd.data.cpu().numpy())), global_step)
-                self.writer.add_scalar("train/explained_variance", explained_var, global_step)
+            if self.track_console:
+                rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
+                self.log_console("global_step", global_step)
+            else:
+                rlx_logger.info(f"Step: {global_step}")
 
-            rlx_logger.info(f"Step: {global_step}")
+            if len(episode_info_buffer) > 0:
+                self.log("rollout/ep_rew_mean", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
+                self.log("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
+                names = list(episode_info_buffer[0].keys())
+                for name in names:
+                    if name != "r" and name != "l" and name != "t":
+                        self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
+            self.log("time/fps", int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time)), global_step)
+            self.log("time/acting_time", acting_end_time - start_time, global_step)
+            self.log("time/calc_adv_and_return_time", calc_adv_return_end_time - acting_end_time, global_step)
+            self.log("time/optimizing_time", optimizing_end_time - calc_adv_return_end_time, global_step)
+            self.log("time/saving_time", saving_end_time - optimizing_end_time, global_step)
+            self.log("train/learning_rate", learning_rate, global_step)
+            self.log("train/clip_range", self.clip_range, global_step)
+            self.log("train/clip_fraction", np.mean(clip_fractions), global_step)
+            self.log("train/approx_kl", np.mean(approx_kl_divs), global_step)
+            self.log("train/policy_gradient_loss", np.mean(pg_losses), global_step)
+            self.log("train/value_loss", np.mean(value_losses), global_step)
+            self.log("train/entropy_loss", np.mean(entropy_losses), global_step)
+            self.log("train/loss", np.mean(loss_losses), global_step)
+            self.log("train/std", np.mean(np.exp(self.agent.policy_logstd.data.cpu().numpy())), global_step)
+            self.log("train/explained_variance", explained_var, global_step)
+
+            if self.track_console:
+                rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
+
+
+    def log(self, name, value, step):
+        if self.track_tb:
+            self.writer.add_scalar(name, value, step)
+        if self.track_console:
+            self.log_console(name, value)
+    
+
+    def log_console(self, name, value):
+        value = np.format_float_positional(value, trim="-")
+        rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │")
 
 
     def set_train_mode(self):

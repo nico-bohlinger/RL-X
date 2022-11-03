@@ -11,6 +11,7 @@ def get_config():
     config.save_model = False
     config.load_model = ""
 
+    config.track_console = False
     config.track_tb = False
     config.track_wandb = False
     config.wandb_entity = "placeholder"
