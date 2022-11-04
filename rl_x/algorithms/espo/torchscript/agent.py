@@ -33,9 +33,6 @@ class Agent(nn.Module):
         single_os_shape = env.observation_space.shape
         single_as_shape = env.get_single_action_space_shape()
 
-        if nr_hidden_units < 1:
-            raise ValueError("nr_hidden_units must be >= 1")
-
         self.policy_mean = nn.Sequential(
             self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),
             nn.Tanh(),

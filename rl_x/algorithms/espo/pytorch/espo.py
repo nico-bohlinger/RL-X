@@ -43,7 +43,6 @@ class ESPO:
         self.vf_coef = config.algorithm.vf_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
-        self.nr_hidden_layers = config.algorithm.nr_hidden_layers
         self.nr_hidden_units = config.algorithm.nr_hidden_units
         self.batch_size = config.algorithm.nr_envs * config.algorithm.nr_steps
 

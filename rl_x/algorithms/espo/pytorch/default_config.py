@@ -23,7 +23,6 @@ def get_config(algorithm_name):
     config.max_grad_norm = 0.5
     config.std_dev = 1.0
     
-    config.nr_hidden_layers = 2
     config.nr_hidden_units = 64
 
     return config
