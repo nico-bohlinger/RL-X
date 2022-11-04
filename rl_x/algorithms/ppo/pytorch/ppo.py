@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 import wandb
 
+from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.algorithms.ppo.pytorch.policy import get_policy
 from rl_x.algorithms.ppo.pytorch.critic import get_critic
 from rl_x.algorithms.ppo.pytorch.batch import Batch
@@ -43,7 +44,6 @@ class PPO:
         self.vf_coef = config.algorithm.vf_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
-        self.nr_hidden_layers = config.algorithm.nr_hidden_layers
         self.nr_hidden_units = config.algorithm.nr_hidden_units
         self.batch_size = config.algorithm.nr_envs * config.algorithm.nr_steps
 
@@ -255,7 +255,7 @@ class PPO:
             self.log("train/value_loss", np.mean(value_losses), global_step)
             self.log("train/entropy_loss", np.mean(entropy_losses), global_step)
             self.log("train/loss", np.mean(loss_losses), global_step)
-            self.log("train/std", np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy())), global_step)
+            self.log("train/std", 0 if self.env.get_action_space_type() == ActionSpaceType.DISCRETE else np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy())), global_step)
             self.log("train/explained_variance", explained_var, global_step)
 
             if self.track_console:
