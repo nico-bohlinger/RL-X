@@ -465,7 +465,7 @@ class SAC():
             wandb.save(config_file_path, base_path=os.path.dirname(config_file_path))
     
             
-    def load(config, env, writer):
+    def load(config, env, run_path, writer):
         splitted_path = config.runner.load_model.split("/")
         checkpoint_dir = "/".join(splitted_path[:-1])
         checkpoint_name = splitted_path[-1]
@@ -474,7 +474,7 @@ class SAC():
         config_file_name = "_".join(splitted_checkpoint_name[:-2]) + "_config_" + splitted_checkpoint_name[-1]
         with open(f"{checkpoint_dir}/{config_file_name}", "rb") as file:
             config.algorithm = pickle.load(file)["config_algorithm"]
-        model = SAC(config, env, writer)
+        model = SAC(config, env, run_path, writer)
 
         jax_file_name = "_".join(splitted_checkpoint_name[:-1]) + "_"
         step = int(splitted_checkpoint_name[-1])
