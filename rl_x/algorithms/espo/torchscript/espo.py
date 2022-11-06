@@ -261,10 +261,10 @@ class ESPO:
             wandb.save(file_path, base_path=os.path.dirname(file_path))
     
 
-    def load(config, env, writer):
+    def load(config, env, run_path, writer):
         checkpoint = torch.load(config.runner.load_model)
         config.algorithm = checkpoint["config_algorithm"]
-        model = ESPO(config, env, writer)
+        model = ESPO(config, env, run_path, writer)
         model.agent.load_state_dict(checkpoint["agent_state_dict"])
         model.agent_optimizer.load_state_dict(checkpoint["agent_optimizer_state_dict"])
 
