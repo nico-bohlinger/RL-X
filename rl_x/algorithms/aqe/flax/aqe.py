@@ -138,16 +138,6 @@ class AQE():
             key, subkey = jax.random.split(key)
             action = dist.sample(seed=subkey)
             return action, key
-        
-
-        @jax.jit
-        def convert_batches(batches):
-            batch_states = jnp.array([batch[0] for batch in batches])
-            batch_next_states = jnp.array([batch[1] for batch in batches])
-            batch_actions = jnp.array([batch[2] for batch in batches])
-            batch_rewards = jnp.array([batch[3] for batch in batches])
-            batch_dones = jnp.array([batch[4] for batch in batches])
-            return batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones
 
 
         @jax.jit
@@ -303,8 +293,7 @@ class AQE():
             # Optimizing - Prepare batches
             if should_update_q or should_update_policy or should_update_entropy:
                 max_nr_batches_needed = max(should_update_q * self.q_update_steps, should_update_policy * self.policy_update_steps, should_update_entropy * self.entropy_update_steps)
-                batches = [(replay_buffer.sample(self.batch_size)) for _ in range(max_nr_batches_needed)]
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = convert_batches(batches)
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, max_nr_batches_needed)
 
             
             # Optimizing - Q-functions
