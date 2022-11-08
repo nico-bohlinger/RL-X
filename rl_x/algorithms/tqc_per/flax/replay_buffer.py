@@ -5,7 +5,7 @@ from rl_x.algorithms.tqc_per.flax.priority_tree import PriorityTree
 
 
 class ReplayBuffer():
-    def __init__(self, capacity, os_shape, as_shape, per_alpha, per_beta, per_epsilon):
+    def __init__(self, capacity, os_shape, as_shape, per_alpha, per_beta, per_epsilon, per_start_priority):
         self.os_shape = os_shape
         self.as_shape = as_shape
         self.per_alpha = per_alpha
@@ -19,7 +19,7 @@ class ReplayBuffer():
         self.dones = np.zeros((self.capacity, ), dtype=np.float32)
         self.pos = 0
         self.size = 0
-        self.highest_priority = self.per_epsilon
+        self.highest_priority = per_start_priority
         self.priority_tree = PriorityTree(self.capacity)
     
 
@@ -51,4 +51,6 @@ class ReplayBuffer():
     
 
     def update_priorities(self, idx, td_error):
-        self.priority_tree.update(idx, (np.abs(td_error) + self.per_epsilon) ** self.per_alpha)
+        priority = (np.abs(td_error) + self.per_epsilon) ** self.per_alpha
+        self.highest_priority = max(self.highest_priority, priority.max())
+        self.priority_tree.update(idx, priority)

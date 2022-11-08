@@ -46,6 +46,7 @@ class TQC_PER():
         self.per_alpha = config.algorithm.per_alpha
         self.per_beta = config.algorithm.per_beta
         self.per_epsilon = config.algorithm.per_epsilon
+        self.per_start_priority = config.algorithm.per_start_priority
         self.ensemble_size = config.algorithm.ensemble_size
         self.nr_atoms_per_net = config.algorithm.nr_atoms_per_net
         self.nr_dropped_atoms_per_net = config.algorithm.nr_dropped_atoms_per_net
@@ -251,7 +252,7 @@ class TQC_PER():
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.env.observation_space.shape, self.env.action_space.shape, self.per_alpha, self.per_beta, self.per_epsilon)
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.env.observation_space.shape, self.env.action_space.shape, self.per_alpha, self.per_beta, self.per_epsilon, self.per_start_priority)
 
         saving_return_buffer = deque(maxlen=100)
         episode_info_buffer = deque(maxlen=self.log_freq)

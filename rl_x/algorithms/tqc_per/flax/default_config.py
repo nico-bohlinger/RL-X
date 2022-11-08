@@ -19,6 +19,7 @@ def get_config(algorithm_name):
     config.per_alpha = 0.6
     config.per_beta = 0.4
     config.per_epsilon = 1e-6
+    config.per_start_priority = 20.0
     config.ensemble_size = 2
     config.nr_atoms_per_net = 25
     config.nr_dropped_atoms_per_net = 2
