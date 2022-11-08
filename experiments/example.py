@@ -28,6 +28,8 @@ from rl_x.algorithms.tqc_droq.flax import TQC_DROQ_FLAX
 from rl_x.algorithms.tqc_elu.flax import TQC_ELU_FLAX
 ## TQC+MultiHead
 from rl_x.algorithms.tqc_multihead.flax import TQC_MULTIHEAD_FLAX
+## TQC+PER
+from rl_x.algorithms.tqc_per.flax import TQC_PER_FLAX
 
 # Environments
 from rl_x.environments.envpool.humanoid_v4 import ENVPOOL_HUMANOID_V4
