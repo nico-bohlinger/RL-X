@@ -43,6 +43,9 @@ class TQC_SoftWatkinsQLambda():
         self.batch_size = config.algorithm.batch_size
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
+        self.trace_length = config.algorithm.trace_length
+        self.q_lambda = config.algorithm.q_lambda
+        self.soft_watkins_kappa = config.algorithm.soft_watkins_kappa
         self.ensemble_size = config.algorithm.ensemble_size
         self.nr_atoms_per_net = config.algorithm.nr_atoms_per_net
         self.nr_dropped_atoms_per_net = config.algorithm.nr_dropped_atoms_per_net
@@ -164,6 +167,7 @@ class TQC_SoftWatkinsQLambda():
                 next_q_target_atoms = jnp.sort(next_q_target_atoms)
                 next_q_target_atoms = next_q_target_atoms[:, :self.nr_target_atoms]
 
+                # TODO:
                 y = rewards[i].reshape(-1, 1) + self.gamma * (1 - dones[i].reshape(-1, 1)) * (next_q_target_atoms - alpha * next_log_probs.reshape(-1, 1))
                 y = jnp.expand_dims(y, axis=1)  # (batch_size, 1, nr_target_atoms)
 
@@ -242,7 +246,14 @@ class TQC_SoftWatkinsQLambda():
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.observation_space.shape, self.env.action_space.shape)
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.trace_length, self.env.observation_space.shape, self.env.action_space.shape)
+
+        state_stack = np.zeros((self.trace_length, self.nr_envs) + self.env.observation_space.shape, dtype=self.env.observation_space.dtype)
+        next_state_stack = np.zeros((self.trace_length, self.nr_envs) + self.env.observation_space.shape, dtype=self.env.observation_space.dtype)
+        action_stack = np.zeros((self.trace_length, self.nr_envs) + self.env.action_space.shape, dtype=self.env.action_space.dtype)
+        reward_stack = np.zeros((self.trace_length, self.nr_envs), dtype=np.float32)
+        done_stack = np.zeros((self.trace_length, self.nr_envs), dtype=np.float32)
+        step_in_env = np.zeros(self.nr_envs, dtype=np.int32)
 
         saving_return_buffer = deque(maxlen=100)
         episode_info_buffer = deque(maxlen=self.log_freq)
@@ -281,7 +292,24 @@ class TQC_SoftWatkinsQLambda():
                     if maybe_terminal_observation is not None:
                         actual_next_state[i] = maybe_terminal_observation
             
-            replay_buffer.add(state, actual_next_state, action, reward, done)
+            state_stack = np.roll(state_stack, shift=-1, axis=0)
+            next_state_stack = np.roll(next_state_stack, shift=-1, axis=0)
+            action_stack = np.roll(action_stack, shift=-1, axis=0)
+            reward_stack = np.roll(reward_stack, shift=-1, axis=0)
+            done_stack = np.roll(done_stack, shift=-1, axis=0)
+
+            state_stack[-1, :, :] = state
+            next_state_stack[-1, :, :] = actual_next_state
+            action_stack[-1, :, :] = processed_action
+            reward_stack[-1, :] = reward
+            done_stack[-1, :] = done
+
+            for i in range(self.nr_envs):
+                if step_in_env[i] >= self.trace_length - 1:
+                    replay_buffer.add(state_stack[:, i, :], next_state_stack[:, i, :], action_stack[:, i, :], reward_stack[:, i], done_stack[:, i])
+            
+            step_in_env += 1
+            step_in_env *= (1 - done)
 
             state = next_state
             global_step += self.nr_envs
@@ -311,6 +339,8 @@ class TQC_SoftWatkinsQLambda():
             
             # Optimizing - Q-functions
             if should_update_q:
+                print(batch_states.shape)
+                exit()
                 q_losses, self.vector_critic_state, self.key = update_critics(
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key
@@ -323,6 +353,7 @@ class TQC_SoftWatkinsQLambda():
 
             # Optimizing - Policy
             if should_update_policy:
+                # TODO:
                 policy_losses, batch_entropies, self.policy_state, self.key = update_policy(
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, self.key
@@ -335,6 +366,7 @@ class TQC_SoftWatkinsQLambda():
 
             # Optimizing - Entropy
             if should_update_entropy:
+                # TODO:
                 entropy_losses, alphas, self.entropy_coefficient_state, self.key = update_entropy_coefficient(self.entropy_coefficient_state, batch_entropies, self.key)
                 entropy_buffer.extend(jax.device_get(batch_entropies))
                 entropy_loss_buffer.append(jax.device_get(entropy_losses))

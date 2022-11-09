@@ -16,6 +16,9 @@ def get_config(algorithm_name):
     config.batch_size = 256
     config.tau = 0.005
     config.gamma = 0.99
+    config.trace_length = 32
+    config.q_lambda = 0.95
+    config.soft_watkins_kappa = 0.01
     config.ensemble_size = 2
     config.nr_atoms_per_net = 25
     config.nr_dropped_atoms_per_net = 2
