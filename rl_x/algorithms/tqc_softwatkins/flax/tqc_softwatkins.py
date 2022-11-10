@@ -172,7 +172,7 @@ class TQC_SoftWatkinsQLambda():
                 current_q_target_atoms = jnp.sort(current_q_target_atoms)
                 current_q_target_atoms = current_q_target_atoms[:, :, :self.nr_target_atoms]
 
-                traces = self.q_lambda * jnp.where(current_q_target_atoms[:, 1:, :] >= next_q_target_atoms[:, :-1, :], 1.0, 0.0)  # (batch_size, trace_length - 1, nr_target_atoms)
+                traces = self.q_lambda * jnp.where(current_q_target_atoms[:, 1:, :] >= next_q_target_atoms[:, :-1, :] - self.soft_watkins_kappa * jnp.abs(next_q_target_atoms[:, :-1, :]), 1.0, 0.0)  # (batch_size, trace_length - 1, nr_target_atoms)
                 traces = jnp.concatenate([jnp.ones((self.batch_size, 1, self.nr_target_atoms)), traces], axis=1)  # (batch_size, trace_length, nr_target_atoms)
                 idx = jnp.tril(jnp.ones((self.trace_length, self.trace_length), dtype=jnp.int32)) * np.arange(self.trace_length)  # (trace_length, trace_length) -> like: [[0, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 1, 2, 0, 0], [0, 1, 2, 3, 0], [0, 1, 2, 3, 4]]
                 traces = traces[:, idx, :]
@@ -314,7 +314,7 @@ class TQC_SoftWatkinsQLambda():
 
             state_stack[-1, :, :] = state
             next_state_stack[-1, :, :] = actual_next_state
-            action_stack[-1, :, :] = processed_action
+            action_stack[-1, :, :] = action
             reward_stack[-1, :] = reward
             done_stack[-1, :] = done
 
