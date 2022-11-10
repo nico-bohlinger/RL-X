@@ -174,20 +174,19 @@ class TQC_SoftWatkinsQLambda():
 
                 traces = self.q_lambda * jnp.where(current_q_target_atoms[:, 1:, :] >= next_q_target_atoms[:, :-1, :], 1.0, 0.0)  # (batch_size, trace_length - 1, nr_target_atoms)
                 traces = jnp.concatenate([jnp.ones((self.batch_size, 1, self.nr_target_atoms)), traces], axis=1)  # (batch_size, trace_length, nr_target_atoms)
-                
+                idx = jnp.tril(jnp.ones((self.trace_length, self.trace_length), dtype=jnp.int32)) * np.arange(self.trace_length)  # (trace_length, trace_length) -> like: [[0, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 1, 2, 0, 0], [0, 1, 2, 3, 0], [0, 1, 2, 3, 4]]
+                traces = traces[:, idx, :]
+
                 gamma = self.gamma ** jnp.arange(self.trace_length).reshape(1, -1, 1)  # (1, trace_length, 1)
-                print(gamma.shape, reward[i].shape, next_q_target_atoms.shape, traces.shape, alpha.shape, next_log_probs.shape)
-                exit()
-                delta = ...
-                # tmp = self.gamma ** jnp.arange(self.trace_length) * jnp.prod(traces[:, jnp.arange]
-                # y = current_q_target_atoms + jnp.sum(self.gamma ** jnp.arange(self.trace_length) * (jnp.prod()))
+                rewards_ = rewards[i].reshape(self.batch_size, self.trace_length, 1)  # (batch_size, trace_length, 1)
+                dones_ = dones[i].reshape(self.batch_size, self.trace_length, 1)  # (batch_size, trace_length, 1)
+                next_log_probs = next_log_probs.reshape(self.batch_size, self.trace_length, 1)  # (batch_size, trace_length, 1)
 
-
-                y = rewards[i].reshape(-1, 1) + self.gamma * (1 - dones[i].reshape(-1, 1)) * (next_q_target_atoms - alpha * next_log_probs.reshape(-1, 1))
+                y = current_q_target_atoms[:, 0, :] + jnp.sum(gamma * jnp.prod(traces, axis=2) * (rewards_ + (self.gamma * (1 - dones_) * (next_q_target_atoms - alpha * next_log_probs)) - current_q_target_atoms), axis=1)  # (batch_size, nr_target_atoms)
                 y = jnp.expand_dims(y, axis=1)  # (batch_size, 1, nr_target_atoms)
 
                 def huber_loss_fn(vector_critic_params: flax.core.FrozenDict):
-                    q_atoms = self.vector_critic.apply(vector_critic_params, states[i], actions[i])
+                    q_atoms = self.vector_critic.apply(vector_critic_params, states[i], actions[i])[:, :, 0, :]
                     q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, -1)
                     q_atoms = jnp.expand_dims(q_atoms, axis=2)  # (batch_size, nr_total_atoms, 1)
                     
@@ -220,11 +219,11 @@ class TQC_SoftWatkinsQLambda():
                 key, subkey = jax.random.split(key)
 
                 def loss_fn(policy_params: flax.core.FrozenDict):
-                    dist = self.policy.apply(policy_params, states[i])
+                    dist = self.policy.apply(policy_params, states[i][:, 0, :])
                     current_actions = dist.sample(seed=subkey)
                     current_log_probs = dist.log_prob(current_actions).reshape(-1, 1)
 
-                    q_atoms = self.vector_critic.apply(vector_critic_state.params, states[i], current_actions)
+                    q_atoms = self.vector_critic.apply(vector_critic_state.params, states[i][:, 0, :], current_actions)
                     q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)
                     mean_q_atoms = jnp.mean(q_atoms, axis=1)
 
@@ -358,7 +357,6 @@ class TQC_SoftWatkinsQLambda():
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key
                 )
-                exit()
                 q_loss_buffer.extend(jax.device_get(q_losses))
 
             q_update_end_time = time.time()
@@ -367,7 +365,6 @@ class TQC_SoftWatkinsQLambda():
 
             # Optimizing - Policy
             if should_update_policy:
-                # TODO:
                 policy_losses, batch_entropies, self.policy_state, self.key = update_policy(
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, self.key
@@ -380,7 +377,6 @@ class TQC_SoftWatkinsQLambda():
 
             # Optimizing - Entropy
             if should_update_entropy:
-                # TODO:
                 entropy_losses, alphas, self.entropy_coefficient_state, self.key = update_entropy_coefficient(self.entropy_coefficient_state, batch_entropies, self.key)
                 entropy_buffer.extend(jax.device_get(batch_entropies))
                 entropy_loss_buffer.append(jax.device_get(entropy_losses))
