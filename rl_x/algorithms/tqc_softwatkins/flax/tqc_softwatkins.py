@@ -146,7 +146,7 @@ class TQC_SoftWatkinsQLambda():
             return action, key
 
 
-        @jax.jit
+        # @jax.jit
         def update_critics(
                 policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState,
                 states: jnp.ndarray, next_states: jnp.ndarray, actions: jnp.ndarray, rewards: jnp.ndarray, dones: jnp.ndarray, key: jax.random.PRNGKey
@@ -161,13 +161,28 @@ class TQC_SoftWatkinsQLambda():
                 next_log_probs = dist.log_prob(next_actions)
 
                 alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
-
+                
                 next_q_target_atoms = self.vector_critic.apply(vector_critic_state.target_params, next_states[i], next_actions)
-                next_q_target_atoms = jnp.transpose(next_q_target_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)  # (batch_size, nr_total_atoms)
+                next_q_target_atoms = jnp.transpose(next_q_target_atoms, (1, 2, 0, 3)).reshape(self.batch_size, self.trace_length, self.nr_total_atoms)  # (batch_size, trace_length, nr_total_atoms)
                 next_q_target_atoms = jnp.sort(next_q_target_atoms)
-                next_q_target_atoms = next_q_target_atoms[:, :self.nr_target_atoms]
+                next_q_target_atoms = next_q_target_atoms[:, :, :self.nr_target_atoms]
 
-                # TODO:
+                current_q_target_atoms = self.vector_critic.apply(vector_critic_state.target_params, states[i], actions[i])
+                current_q_target_atoms = jnp.transpose(current_q_target_atoms, (1, 2, 0, 3)).reshape(self.batch_size, self.trace_length, self.nr_total_atoms)  # (batch_size, trace_length, nr_total_atoms)
+                current_q_target_atoms = jnp.sort(current_q_target_atoms)
+                current_q_target_atoms = current_q_target_atoms[:, :, :self.nr_target_atoms]
+
+                traces = self.q_lambda * jnp.where(current_q_target_atoms[:, 1:, :] >= next_q_target_atoms[:, :-1, :], 1.0, 0.0)  # (batch_size, trace_length - 1, nr_target_atoms)
+                traces = jnp.concatenate([jnp.ones((self.batch_size, 1, self.nr_target_atoms)), traces], axis=1)  # (batch_size, trace_length, nr_target_atoms)
+                
+                gamma = self.gamma ** jnp.arange(self.trace_length).reshape(1, -1, 1)  # (1, trace_length, 1)
+                print(gamma.shape, reward[i].shape, next_q_target_atoms.shape, traces.shape, alpha.shape, next_log_probs.shape)
+                exit()
+                delta = ...
+                # tmp = self.gamma ** jnp.arange(self.trace_length) * jnp.prod(traces[:, jnp.arange]
+                # y = current_q_target_atoms + jnp.sum(self.gamma ** jnp.arange(self.trace_length) * (jnp.prod()))
+
+
                 y = rewards[i].reshape(-1, 1) + self.gamma * (1 - dones[i].reshape(-1, 1)) * (next_q_target_atoms - alpha * next_log_probs.reshape(-1, 1))
                 y = jnp.expand_dims(y, axis=1)  # (batch_size, 1, nr_target_atoms)
 
@@ -339,12 +354,11 @@ class TQC_SoftWatkinsQLambda():
             
             # Optimizing - Q-functions
             if should_update_q:
-                print(batch_states.shape)
-                exit()
                 q_losses, self.vector_critic_state, self.key = update_critics(
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key
                 )
+                exit()
                 q_loss_buffer.extend(jax.device_get(q_losses))
 
             q_update_end_time = time.time()
