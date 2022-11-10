@@ -17,11 +17,11 @@ class ReplayBuffer():
     
 
     def add(self, states, next_states, actions, rewards, dones):
-        self.states[self.pos] = states.copy()
-        self.next_states[self.pos] = next_states.copy()
-        self.actions[self.pos] = actions.copy()
-        self.rewards[self.pos] = rewards.copy()
-        self.dones[self.pos] = dones.copy()
+        self.states[self.pos] = states
+        self.next_states[self.pos] = next_states
+        self.actions[self.pos] = actions
+        self.rewards[self.pos] = rewards
+        self.dones[self.pos] = dones
         self.pos = (self.pos + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
     
