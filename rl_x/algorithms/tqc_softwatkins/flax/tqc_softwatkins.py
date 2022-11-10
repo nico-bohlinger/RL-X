@@ -146,7 +146,7 @@ class TQC_SoftWatkinsQLambda():
             return action, key
 
 
-        # @jax.jit
+        @jax.jit
         def update_critics(
                 policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState,
                 states: jnp.ndarray, next_states: jnp.ndarray, actions: jnp.ndarray, rewards: jnp.ndarray, dones: jnp.ndarray, key: jax.random.PRNGKey
