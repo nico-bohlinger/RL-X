@@ -26,7 +26,7 @@ def get_config(algorithm_name):
     config.entropy_update_steps = 1
     config.entropy_coef = "auto"
     config.target_entropy = "auto"
-    config.log_std_min = -5
+    config.log_std_min = -20
     config.log_std_max = 2
     config.log_freq = 100
 

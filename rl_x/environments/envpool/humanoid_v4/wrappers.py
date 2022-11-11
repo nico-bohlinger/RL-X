@@ -38,6 +38,7 @@ class RecordEpisodeStatistics(gym.Wrapper):
                 self.episode_count += 1
                 self.episode_returns[i] = 0
                 self.episode_lengths[i] = 0
+                observations[i] = self.env.reset(np.array([i]))
         return (observations, rewards, dones, infos)
     
 
