@@ -4,6 +4,8 @@ import torch
 
 class ReplayBuffer():
     def __init__(self, capacity, nr_envs, os_shape, as_shape, device):
+        self.os_shape = os_shape
+        self.as_shape = as_shape
         self.capacity = capacity // nr_envs
         self.nr_envs = nr_envs
         self.states = np.zeros((self.capacity, nr_envs) + os_shape, dtype=np.float32)
@@ -26,12 +28,12 @@ class ReplayBuffer():
         self.size = min(self.size + 1, self.capacity)
     
 
-    def sample(self, n):
-        idx1 = np.random.randint(self.size, size=n)
-        idx2 = np.random.randint(self.nr_envs, size=n)
-        states = torch.tensor(self.states[idx1, idx2], dtype=torch.float32).to(self.device)
-        next_states = torch.tensor(self.next_states[idx1, idx2], dtype=torch.float32).to(self.device)
-        actions = torch.tensor(self.actions[idx1, idx2], dtype=torch.float32).to(self.device)
-        rewards = torch.tensor(self.rewards[idx1, idx2], dtype=torch.float32).to(self.device)
-        dones = torch.tensor(self.dones[idx1, idx2], dtype=torch.float32).to(self.device)
+    def sample(self, nr_samples, nr_batches):
+        idx1 = np.random.randint(self.size, size=nr_samples * nr_batches)
+        idx2 = np.random.randint(self.nr_envs, size=nr_samples * nr_batches)
+        states = torch.tensor(self.states[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_batches, nr_samples) + self.os_shape)
+        next_states = torch.tensor(self.next_states[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_batches, nr_samples) + self.os_shape)
+        actions = torch.tensor(self.actions[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_batches, nr_samples) + self.as_shape)
+        rewards = torch.tensor(self.rewards[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_batches, nr_samples))
+        dones = torch.tensor(self.dones[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_batches, nr_samples))
         return states, next_states, actions, rewards, dones

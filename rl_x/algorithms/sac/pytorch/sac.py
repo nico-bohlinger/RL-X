@@ -165,23 +165,21 @@ class SAC():
             # Optimizing - Prepare batches
             if should_update_q or should_update_policy or should_update_entropy:
                 max_nr_batches_needed = max(should_update_q * self.q_update_steps, should_update_policy * self.policy_update_steps, should_update_entropy * self.entropy_update_steps)
-                batches = [(replay_buffer.sample(self.batch_size)) for _ in range(max_nr_batches_needed)]
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, max_nr_batches_needed)
 
 
             # Optimizing - Q-functions
             if should_update_q:
                 for i in range(self.q_update_steps):
-                    states, next_states, actions, rewards, dones = batches[i]
-
                     with torch.no_grad():
-                        next_actions, _, next_log_probs = self.policy.get_action(next_states)
-                        next_q1_target = self.q1_target(next_states, next_actions)
-                        next_q2_target = self.q2_target(next_states, next_actions)
+                        next_actions, _, next_log_probs = self.policy.get_action(batch_next_states[i])
+                        next_q1_target = self.q1_target(batch_next_states[i], next_actions)
+                        next_q2_target = self.q2_target(batch_next_states[i], next_actions)
                         min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
-                        y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (min_next_q_target - self.alpha.detach() * next_log_probs)
+                        y = batch_rewards[i].reshape(-1, 1) + self.gamma * (1 - batch_dones[i].reshape(-1, 1)) * (min_next_q_target - self.alpha.detach() * next_log_probs)
 
-                    q1 = self.q1(states, actions)
-                    q2 = self.q2(states, actions)
+                    q1 = self.q1(batch_states[i], batch_actions[i])
+                    q2 = self.q2(batch_states[i], batch_actions[i])
                     q1_loss = F.mse_loss(q1, y)
                     q2_loss = F.mse_loss(q2, y)
                     q_loss = (q1_loss + q2_loss) / 2
@@ -208,13 +206,13 @@ class SAC():
 
             # Optimizing - Policy
             if should_update_policy:
-                for i in range(self.policy_update_steps):
-                    states, next_states, actions, rewards, dones = batches[i]
+                batch_entropies = []
 
-                    current_actions, _, current_log_probs = self.policy.get_action(states)
+                for i in range(self.policy_update_steps):
+                    current_actions, _, current_log_probs = self.policy.get_action(batch_states[i])
                     
-                    q1 = self.q1(states, current_actions)
-                    q2 = self.q2(states, current_actions)
+                    q1 = self.q1(batch_states[i], current_actions)
+                    q2 = self.q2(batch_states[i], current_actions)
                     min_q = torch.minimum(q1, q2)
                     policy_loss = (self.alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
 
@@ -225,7 +223,7 @@ class SAC():
                     policy_loss_buffer.append(policy_loss.item())
 
                     entropy = -current_log_probs.detach().mean()
-                    batches[i] = (states, next_states, actions, rewards, dones, entropy)
+                    batch_entropies.append(entropy)
 
             policy_update_end_time = time.time()
             policy_update_time_buffer.append(policy_update_end_time - q_target_update_end_time)
@@ -234,13 +232,12 @@ class SAC():
             # Optimizing - Entropy
             if should_update_entropy:
                 for i in range(self.entropy_update_steps):
-                    batch = batches[i]
                     # Check if entropy was already calculated in policy optimization
-                    if len(batch) == 6:
-                        entropy = batch[5]
+                    if len(batch_entropies) >= i + 1:
+                        entropy = batch_entropies[i]
                     else:
                         with torch.no_grad():
-                            _, _, current_log_probs = self.policy.get_action(batch[0])
+                            _, _, current_log_probs = self.policy.get_action(batch_actions[i])
                             entropy = -current_log_probs.detach().mean()
 
                     entropy_loss = self.alpha * (entropy - self.target_entropy)
