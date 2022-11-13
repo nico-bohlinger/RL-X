@@ -221,6 +221,7 @@ class SAC():
                     self.policy_optimizer.step()
 
                     policy_loss_buffer.append(policy_loss.item())
+                    alpha_buffer.append(self.alpha.item())
 
                     entropy = -current_log_probs.detach().mean()
                     batch_entropies.append(entropy)
@@ -250,7 +251,6 @@ class SAC():
 
                     entropy_buffer.append(entropy.item())
                     entropy_loss_buffer.append(entropy_loss.item())
-                    alpha_buffer.append(self.alpha.item())
 
             entropy_update_end_time = time.time()
             entropy_update_time_buffer.append(entropy_update_end_time - policy_update_end_time)
