@@ -173,6 +173,7 @@ class TQC_SoftWatkinsQLambda():
                 current_q_target_atoms = current_q_target_atoms[:, :, :self.nr_target_atoms]
 
                 traces = self.q_lambda * jnp.where(current_q_target_atoms[:, 1:, :] >= next_q_target_atoms[:, :-1, :] - self.soft_watkins_kappa * jnp.abs(next_q_target_atoms[:, :-1, :]), 1.0, 0.0)  # (batch_size, trace_length - 1, nr_target_atoms)
+                traces *= (1 - dones[i][:, :-1].reshape(self.batch_size, self.trace_length-1, 1))  # set trace to 0 if previous state was terminal
                 traces = jnp.concatenate([jnp.ones((self.batch_size, 1, self.nr_target_atoms)), traces], axis=1)  # (batch_size, trace_length, nr_target_atoms)
                 idx = jnp.tril(jnp.ones((self.trace_length, self.trace_length), dtype=jnp.int32)) * np.arange(self.trace_length)  # (trace_length, trace_length) -> like: [[0, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 1, 2, 0, 0], [0, 1, 2, 3, 0], [0, 1, 2, 3, 4]]
                 traces = traces[:, idx, :]
@@ -267,7 +268,6 @@ class TQC_SoftWatkinsQLambda():
         action_stack = np.zeros((self.trace_length, self.nr_envs) + self.env.action_space.shape, dtype=self.env.action_space.dtype)
         reward_stack = np.zeros((self.trace_length, self.nr_envs), dtype=np.float32)
         done_stack = np.zeros((self.trace_length, self.nr_envs), dtype=np.float32)
-        step_in_env = np.zeros(self.nr_envs, dtype=np.int32)
 
         saving_return_buffer = deque(maxlen=100)
         episode_info_buffer = deque(maxlen=self.log_freq)
@@ -319,11 +319,8 @@ class TQC_SoftWatkinsQLambda():
             done_stack[-1, :] = done
 
             for i in range(self.nr_envs):
-                if step_in_env[i] >= self.trace_length - 1:
+                if global_step / self.nr_envs >= self.trace_length - 1:
                     replay_buffer.add(state_stack[:, i, :], next_state_stack[:, i, :], action_stack[:, i, :], reward_stack[:, i], done_stack[:, i])
-            
-            step_in_env += 1
-            step_in_env *= (1 - done)
 
             state = next_state
             global_step += self.nr_envs
