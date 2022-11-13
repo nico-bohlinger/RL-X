@@ -183,6 +183,7 @@ class AQE():
         def update_policy(policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState, states: jnp.ndarray, key: jax.random.PRNGKey):
             policy_losses = []
             entropies = []
+            alphas = []
 
             for i in range(self.policy_update_steps):
                 key, subkey = jax.random.split(key)
@@ -199,32 +200,31 @@ class AQE():
                     alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
 
                     policy_loss = (alpha * current_log_probs - mean_qs).mean()
-                    return policy_loss, -current_log_probs.mean()
+                    return policy_loss, (-current_log_probs.mean(), alpha)
                 
-                (policy_loss, entropy), grads = jax.value_and_grad(loss_fn, has_aux=True)(policy_state.params)
+                (policy_loss, (entropy, alpha)), grads = jax.value_and_grad(loss_fn, has_aux=True)(policy_state.params)
                 policy_state = policy_state.apply_gradients(grads=grads)
                 policy_losses.append(policy_loss)
                 entropies.append(entropy)
+                alphas.append(alpha)
 
-            return jnp.array(policy_losses), jnp.array(entropies), policy_state, key
+            return jnp.array(policy_losses), jnp.array(entropies), jnp.array(alphas), policy_state, key
 
 
         @jax.jit
         def update_entropy_coefficient(entropy_coefficient_state: TrainState, entropies: jnp.ndarray, key: jax.random.PRNGKey):
             entropy_losses = []
-            alphas = []
 
             for i in range(self.entropy_update_steps):
                 def loss_fn(entropy_coefficient_params: flax.core.FrozenDict):
                     alpha = self.entropy_coefficient.apply(entropy_coefficient_params)
-                    return alpha * (entropies[i] - self.target_entropy), alpha
+                    return alpha * (entropies[i] - self.target_entropy)
             
-                (entropy_loss, alpha), grads = jax.value_and_grad(loss_fn, has_aux=True)(entropy_coefficient_state.params)
+                entropy_loss, grads = jax.value_and_grad(loss_fn, has_aux=False)(entropy_coefficient_state.params)
                 entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=grads)
                 entropy_losses.append(entropy_loss)
-                alphas.append(alpha)
 
-            return jnp.array(entropy_losses), jnp.array(alphas), entropy_coefficient_state, key
+            return jnp.array(entropy_losses), entropy_coefficient_state, key
 
 
         self.set_train_mode()
@@ -310,11 +310,12 @@ class AQE():
 
             # Optimizing - Policy
             if should_update_policy:
-                policy_losses, batch_entropies, self.policy_state, self.key = update_policy(
+                policy_losses, batch_entropies, alphas, self.policy_state, self.key = update_policy(
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, self.key
                 )
                 policy_loss_buffer.append(jax.device_get(policy_losses))
+                alpha_buffer.append(jax.device_get(alphas))
 
             policy_update_end_time = time.time()
             policy_update_time_buffer.append(policy_update_end_time - q_update_end_time)
@@ -322,10 +323,9 @@ class AQE():
 
             # Optimizing - Entropy
             if should_update_entropy:
-                entropy_losses, alphas, self.entropy_coefficient_state, self.key = update_entropy_coefficient(self.entropy_coefficient_state, batch_entropies, self.key)
+                entropy_losses, self.entropy_coefficient_state, self.key = update_entropy_coefficient(self.entropy_coefficient_state, batch_entropies, self.key)
                 entropy_buffer.extend(jax.device_get(batch_entropies))
                 entropy_loss_buffer.append(jax.device_get(entropy_losses))
-                alpha_buffer.append(jax.device_get(alphas))
 
             entropy_update_end_time = time.time()
             entropy_update_time_buffer.append(entropy_update_end_time - policy_update_end_time)
