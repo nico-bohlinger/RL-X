@@ -26,6 +26,7 @@ class RecordEpisodeStatistics(gym.Wrapper):
         self.episode_returns += rewards
         self.episode_lengths += 1
         infos["episode"] = [None] * self.num_envs
+        infos["terminal_observation"] = [None] * self.num_envs
         for i in range(len(dones)):
             if dones[i]:
                 episode_return = self.episode_returns[i]
@@ -38,6 +39,7 @@ class RecordEpisodeStatistics(gym.Wrapper):
                 self.episode_count += 1
                 self.episode_returns[i] = 0
                 self.episode_lengths[i] = 0
+                infos["terminal_observation"][i] = np.array(observations[i])
                 observations[i] = self.env.reset(np.array([i]))
         return (observations, rewards, dones, infos)
     
@@ -56,7 +58,7 @@ class RLXInfo(gym.Wrapper):
     
 
     def get_terminal_observation(self, info, id):
-        return None
+        return info["terminal_observation"][id]
     
 
     def get_action_space_type(self):
