@@ -45,7 +45,6 @@ class TQC_Retrace():
         self.gamma = config.algorithm.gamma
         self.trace_length = config.algorithm.trace_length
         self.q_lambda = config.algorithm.q_lambda
-        self.soft_watkins_kappa = config.algorithm.soft_watkins_kappa
         self.ensemble_size = config.algorithm.ensemble_size
         self.nr_atoms_per_net = config.algorithm.nr_atoms_per_net
         self.nr_dropped_atoms_per_net = config.algorithm.nr_dropped_atoms_per_net
@@ -139,26 +138,35 @@ class TQC_Retrace():
     
     def train(self):
         @jax.jit
+        def get_log_prob_for_action(policy_state: TrainState, state: np.ndarray, action: np.ndarray):
+            return self.policy.apply(policy_state.params, state).log_prob(action)
+
+
+        @jax.jit
         def get_action(policy_state: TrainState, state: np.ndarray, key: jax.random.PRNGKey):
             dist = self.policy.apply(policy_state.params, state)
             key, subkey = jax.random.split(key)
             action = dist.sample(seed=subkey)
-            return action, key
+            log_prob = dist.log_prob(action)
+            return action, log_prob, key
 
 
         @jax.jit
         def update_critics(
                 policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState,
-                states: jnp.ndarray, next_states: jnp.ndarray, actions: jnp.ndarray, rewards: jnp.ndarray, dones: jnp.ndarray, key: jax.random.PRNGKey
+                states: jnp.ndarray, next_states: jnp.ndarray, actions: jnp.ndarray, rewards: jnp.ndarray, dones: jnp.ndarray, log_probs: jnp.ndarray, key: jax.random.PRNGKey
             ):
             q_losses = []
 
             for i in range(self.q_update_steps):
-                key, action_sample_key = jax.random.split(key)
+                key, next_actions_sample_key, actions_sample_key = jax.random.split(key, num=3)
 
                 dist = self.policy.apply(policy_state.params, next_states[i])
-                next_actions = dist.sample(seed=action_sample_key)
+                next_actions = dist.sample(seed=next_actions_sample_key)
                 next_log_probs = dist.log_prob(next_actions)
+
+                dist = self.policy.apply(policy_state.params, states[i])
+                pi_log_probs = dist.log_prob(dist.sample(seed=actions_sample_key))
 
                 alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
                 
@@ -172,12 +180,13 @@ class TQC_Retrace():
                 current_q_target_atoms = jnp.sort(current_q_target_atoms)
                 current_q_target_atoms = current_q_target_atoms[:, :, :self.nr_target_atoms]
 
-                traces = self.q_lambda * jnp.where(current_q_target_atoms[:, 1:, :] >= next_q_target_atoms[:, :-1, :] - self.soft_watkins_kappa * jnp.abs(next_q_target_atoms[:, :-1, :]), 1.0, 0.0)  # (batch_size, trace_length - 1, nr_target_atoms)
-                traces *= (1 - dones[i][:, :-1].reshape(self.batch_size, self.trace_length-1, 1))  # set trace to 0 if previous state was terminal
-                traces = jnp.concatenate([jnp.ones((self.batch_size, 1, self.nr_target_atoms)), traces], axis=1)  # (batch_size, trace_length, nr_target_atoms)
-                idx = jnp.tril(jnp.ones((self.trace_length, self.trace_length), dtype=jnp.int32)) * np.arange(self.trace_length)  # (trace_length, trace_length) -> like: [[0, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 1, 2, 0, 0], [0, 1, 2, 3, 0], [0, 1, 2, 3, 4]]
-                traces = traces[:, idx, :]
+                traces = self.q_lambda * jnp.clip(pi_log_probs[:, 1:] / log_probs[i][:, 1:], 1e-8, 1.0)
+                traces *= (1 - dones[i][:, :-1])  # set trace to 0 if previous state was terminal
+                traces = jnp.concatenate([jnp.ones((self.batch_size, 1)), traces], axis=1)  # (batch_size, trace_length)
+                idx = jnp.tril(jnp.ones((self.trace_length, self.trace_length), dtype=jnp.int32)) * np.arange(self.trace_length)
+                traces = traces[:, idx]
 
+                traces = traces.reshape(self.batch_size, self.trace_length, self.trace_length, 1)  # (batch_size, trace_length, trace_length, 1)
                 gamma = self.gamma ** jnp.arange(self.trace_length).reshape(1, -1, 1)  # (1, trace_length, 1)
                 rewards_ = rewards[i].reshape(self.batch_size, self.trace_length, 1)  # (batch_size, trace_length, 1)
                 dones_ = dones[i].reshape(self.batch_size, self.trace_length, 1)  # (batch_size, trace_length, 1)
@@ -268,6 +277,7 @@ class TQC_Retrace():
         action_stack = np.zeros((self.trace_length, self.nr_envs) + self.env.action_space.shape, dtype=self.env.action_space.dtype)
         reward_stack = np.zeros((self.trace_length, self.nr_envs), dtype=np.float32)
         done_stack = np.zeros((self.trace_length, self.nr_envs), dtype=np.float32)
+        log_prob_stack = np.zeros((self.trace_length, self.nr_envs), dtype=np.float32)
 
         saving_return_buffer = deque(maxlen=100)
         episode_info_buffer = deque(maxlen=self.log_freq)
@@ -294,8 +304,9 @@ class TQC_Retrace():
             if global_step < self.learning_starts:
                 processed_action = np.array([self.env.action_space.sample() for _ in range(self.nr_envs)])
                 action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
+                log_prob = get_log_prob_for_action(self.policy_state, state, action)
             else:
-                action, self.key = get_action(self.policy_state, state, self.key)
+                action, log_prob, self.key = get_action(self.policy_state, state, self.key)
                 processed_action = self.get_processed_action(action)
             
             next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
@@ -311,16 +322,18 @@ class TQC_Retrace():
             action_stack = np.roll(action_stack, shift=-1, axis=0)
             reward_stack = np.roll(reward_stack, shift=-1, axis=0)
             done_stack = np.roll(done_stack, shift=-1, axis=0)
+            log_prob_stack = np.roll(log_prob_stack, shift=-1, axis=0)
 
             state_stack[-1, :, :] = state
             next_state_stack[-1, :, :] = actual_next_state
             action_stack[-1, :, :] = action
             reward_stack[-1, :] = reward
             done_stack[-1, :] = done
+            log_prob_stack[-1, :] = log_prob
 
             for i in range(self.nr_envs):
                 if global_step / self.nr_envs >= self.trace_length - 1:
-                    replay_buffer.add(state_stack[:, i, :], next_state_stack[:, i, :], action_stack[:, i, :], reward_stack[:, i], done_stack[:, i])
+                    replay_buffer.add(state_stack[:, i, :], next_state_stack[:, i, :], action_stack[:, i, :], reward_stack[:, i], done_stack[:, i], log_prob_stack[:, i])
 
             state = next_state
             global_step += self.nr_envs
@@ -345,14 +358,14 @@ class TQC_Retrace():
             # Optimizing - Prepare batches
             if should_update_q or should_update_policy or should_update_entropy:
                 max_nr_batches_needed = max(should_update_q * self.q_update_steps, should_update_policy * self.policy_update_steps, should_update_entropy * self.entropy_update_steps)
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, max_nr_batches_needed)
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_log_probs = replay_buffer.sample(self.batch_size, max_nr_batches_needed)
 
             
             # Optimizing - Q-functions
             if should_update_q:
                 q_losses, self.vector_critic_state, self.key = update_critics(
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
-                        batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key
+                        batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_log_probs, self.key
                 )
                 q_loss_buffer.extend(jax.device_get(q_losses))
 

@@ -12,16 +12,18 @@ class ReplayBuffer():
         self.actions = np.zeros((self.capacity, trace_length) + as_shape, dtype=np.float32)
         self.rewards = np.zeros((self.capacity, trace_length), dtype=np.float32)
         self.dones = np.zeros((self.capacity, trace_length), dtype=np.float32)
+        self.log_probs = np.zeros((self.capacity, trace_length), dtype=np.float32)
         self.pos = 0
         self.size = 0
     
 
-    def add(self, states, next_states, actions, rewards, dones):
+    def add(self, states, next_states, actions, rewards, dones, log_probs):
         self.states[self.pos] = states
         self.next_states[self.pos] = next_states
         self.actions[self.pos] = actions
         self.rewards[self.pos] = rewards
         self.dones[self.pos] = dones
+        self.log_probs[self.pos] = log_probs
         self.pos = (self.pos + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
     
@@ -33,4 +35,5 @@ class ReplayBuffer():
         actions = self.actions[idx1].reshape((nr_batches, nr_samples, self.trace_length) + self.as_shape)
         rewards = self.rewards[idx1].reshape((nr_batches, nr_samples, self.trace_length))
         dones = self.dones[idx1].reshape((nr_batches, nr_samples, self.trace_length))
-        return states, next_states, actions, rewards, dones
+        log_probs = self.log_probs[idx1].reshape((nr_batches, nr_samples, self.trace_length))
+        return states, next_states, actions, rewards, dones, log_probs
