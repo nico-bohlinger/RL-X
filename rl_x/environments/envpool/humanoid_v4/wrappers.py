@@ -6,12 +6,13 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
 class RecordEpisodeStatistics(gym.Wrapper):
-    def __init__(self, env):
+    def __init__(self, env, dones_at_timeout):
         super(RecordEpisodeStatistics, self).__init__(env)
         self.num_envs = getattr(env, "num_envs", 1)
         self.episode_count = 0
         self.episode_returns = None
         self.episode_lengths = None
+        self.dones_at_timeout = dones_at_timeout
 
     def reset(self, **kwargs):
         observations = super(RecordEpisodeStatistics, self).reset(**kwargs)
@@ -41,6 +42,8 @@ class RecordEpisodeStatistics(gym.Wrapper):
                 self.episode_lengths[i] = 0
                 infos["terminal_observation"][i] = np.array(observations[i])
                 observations[i] = self.env.reset(np.array([i]))
+                if not self.dones_at_timeout:
+                    dones[i] = not infos["TimeLimit.truncated"][i]
         return (observations, rewards, dones, infos)
     
 
