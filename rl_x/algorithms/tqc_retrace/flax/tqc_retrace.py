@@ -157,6 +157,7 @@ class TQC_Retrace():
                 states: jnp.ndarray, next_states: jnp.ndarray, actions: jnp.ndarray, rewards: jnp.ndarray, dones: jnp.ndarray, log_probs: jnp.ndarray, key: jax.random.PRNGKey
             ):
             q_losses = []
+            avg_trace_coefficients = []
 
             for i in range(self.q_update_steps):
                 key, next_actions_sample_key, actions_sample_key = jax.random.split(key, num=3)
@@ -180,19 +181,17 @@ class TQC_Retrace():
                 current_q_target_atoms = jnp.sort(current_q_target_atoms)
                 current_q_target_atoms = current_q_target_atoms[:, :, :self.nr_target_atoms]
 
-                traces = self.q_lambda * jnp.clip(pi_log_probs[:, 1:] / log_probs[i][:, 1:], 1e-8, 1.0)
-                traces *= (1 - dones[i][:, :-1])  # set trace to 0 if previous state was terminal
-                traces = jnp.concatenate([jnp.ones((self.batch_size, 1)), traces], axis=1)  # (batch_size, trace_length)
-                idx = jnp.tril(jnp.ones((self.trace_length, self.trace_length), dtype=jnp.int32)) * np.arange(self.trace_length)
-                traces = traces[:, idx]
+                traces_ = self.q_lambda * jnp.clip(pi_log_probs[:, 1:] / log_probs[i][:, 1:], 1e-8, 1.0)
+                traces_ *= (1 - dones[i][:, :-1])  # set trace to 0 if previous state was terminal
+                traces = jnp.concatenate([jnp.ones((self.batch_size, 1)), traces_], axis=1)  # (batch_size, trace_length)
 
-                traces = traces.reshape(self.batch_size, self.trace_length, self.trace_length, 1)  # (batch_size, trace_length, trace_length, 1)
+                traces = traces.reshape(self.batch_size, self.trace_length, 1)  # (batch_size, trace_length, 1)
                 gamma = self.gamma ** jnp.arange(self.trace_length).reshape(1, -1, 1)  # (1, trace_length, 1)
                 rewards_ = rewards[i].reshape(self.batch_size, self.trace_length, 1)  # (batch_size, trace_length, 1)
                 dones_ = dones[i].reshape(self.batch_size, self.trace_length, 1)  # (batch_size, trace_length, 1)
                 next_log_probs = next_log_probs.reshape(self.batch_size, self.trace_length, 1)  # (batch_size, trace_length, 1)
 
-                y = current_q_target_atoms[:, 0, :] + jnp.sum(gamma * jnp.prod(traces, axis=2) * (rewards_ + (self.gamma * (1 - dones_) * (next_q_target_atoms - alpha * next_log_probs)) - current_q_target_atoms), axis=1)  # (batch_size, nr_target_atoms)
+                y = current_q_target_atoms[:, 0, :] + jnp.sum(gamma * jnp.cumprod(traces, axis=1) * (rewards_ + (self.gamma * (1 - dones_) * (next_q_target_atoms - alpha * next_log_probs)) - current_q_target_atoms), axis=1)  # (batch_size, nr_target_atoms)
                 y = jnp.expand_dims(y, axis=1)  # (batch_size, 1, nr_target_atoms)
 
                 def huber_loss_fn(vector_critic_params: flax.core.FrozenDict):
@@ -213,11 +212,12 @@ class TQC_Retrace():
                 q_loss, grads = jax.value_and_grad(huber_loss_fn, has_aux=False)(vector_critic_state.params)
                 vector_critic_state = vector_critic_state.apply_gradients(grads=grads)
                 q_losses.append(q_loss)
+                avg_trace_coefficients.append(jnp.mean(traces_))
 
                 # Update targets
                 vector_critic_state = vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
 
-            return jnp.array(q_losses), vector_critic_state, key
+            return jnp.array(q_losses), jnp.array(avg_trace_coefficients), vector_critic_state, key
 
 
         @jax.jit
@@ -292,6 +292,7 @@ class TQC_Retrace():
         entropy_loss_buffer = deque(maxlen=self.log_freq)
         entropy_buffer = deque(maxlen=self.log_freq)
         alpha_buffer = deque(maxlen=self.log_freq)
+        avg_trace_coefficient_buffer = deque(maxlen=self.log_freq)
 
         state = self.env.reset()
 
@@ -363,11 +364,12 @@ class TQC_Retrace():
             
             # Optimizing - Q-functions
             if should_update_q:
-                q_losses, self.vector_critic_state, self.key = update_critics(
+                q_losses, avg_trace_coeffiecients, self.vector_critic_state, self.key = update_critics(
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_log_probs, self.key
                 )
                 q_loss_buffer.extend(jax.device_get(q_losses))
+                avg_trace_coefficient_buffer.extend(jax.device_get(avg_trace_coeffiecients))
 
             q_update_end_time = time.time()
             q_update_time_buffer.append(q_update_end_time - acting_end_time)
@@ -436,6 +438,7 @@ class TQC_Retrace():
                 self.log("train/entropy_loss", self.get_buffer_mean(entropy_loss_buffer), global_step)
                 self.log("train/entropy", self.get_buffer_mean(entropy_buffer), global_step)
                 self.log("train/alpha", self.get_buffer_mean(alpha_buffer), global_step)
+                self.log("train/avg_trace_coefficient", self.get_buffer_mean(avg_trace_coefficient_buffer), global_step)
 
                 if self.track_console:
                     rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
@@ -452,6 +455,7 @@ class TQC_Retrace():
                 entropy_loss_buffer.clear()
                 entropy_buffer.clear()
                 alpha_buffer.clear()
+                avg_trace_coefficient_buffer.clear()
 
 
     def get_buffer_mean(self, buffer):
