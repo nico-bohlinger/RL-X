@@ -53,7 +53,6 @@ class TQC_SoftWatkinsQLambda():
         self.q_update_steps = config.algorithm.q_update_steps
         self.policy_update_steps = config.algorithm.policy_update_steps
         self.entropy_update_steps = config.algorithm.entropy_update_steps
-        self.entropy_coef = config.algorithm.entropy_coef
         self.target_entropy = config.algorithm.target_entropy
         self.log_freq = config.algorithm.log_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
@@ -75,14 +74,11 @@ class TQC_SoftWatkinsQLambda():
         self.policy, self.get_processed_action = get_policy(config, env)
         self.vector_critic = get_critic(config, env)
         
-        if self.entropy_coef == "auto":
-            if self.target_entropy == "auto":
-                self.target_entropy = -np.prod(env.get_single_action_space_shape()).item()
-            else:
-                self.target_entropy = float(self.target_entropy)
-            self.entropy_coefficient = EntropyCoefficient(1.0)
+        if self.target_entropy == "auto":
+            self.target_entropy = -np.prod(env.get_single_action_space_shape()).item()
         else:
-            self.entropy_coefficient = ConstantEntropyCoefficient(float(self.entropy_coef))
+            self.target_entropy = float(self.target_entropy)
+        self.entropy_coefficient = EntropyCoefficient(1.0)
 
         def q_linear_schedule(count):
             step = count - self.learning_starts
@@ -147,10 +143,11 @@ class TQC_SoftWatkinsQLambda():
 
 
         @jax.jit
-        def update_critics(
+        def update(
                 policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState,
                 states: jnp.ndarray, next_states: jnp.ndarray, actions: jnp.ndarray, rewards: jnp.ndarray, dones: jnp.ndarray, key: jax.random.PRNGKey
             ):
+            # Update critic
             q_losses = []
             avg_trace_coefficients = []
 
@@ -208,11 +205,8 @@ class TQC_SoftWatkinsQLambda():
                 # Update targets
                 vector_critic_state = vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
 
-            return jnp.array(q_losses), jnp.array(avg_trace_coefficients), vector_critic_state, key
-
-
-        @jax.jit
-        def update_policy(policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState, states: jnp.ndarray, key: jax.random.PRNGKey):
+            
+            # Update policy
             policy_losses = []
             entropies = []
             alphas = []
@@ -240,11 +234,8 @@ class TQC_SoftWatkinsQLambda():
                 entropies.append(entropy)
                 alphas.append(alpha)
 
-            return jnp.array(policy_losses), jnp.array(entropies), jnp.array(alphas), policy_state, key
-
-
-        @jax.jit
-        def update_entropy_coefficient(entropy_coefficient_state: TrainState, entropies: jnp.ndarray, key: jax.random.PRNGKey):
+            
+            # Update entropy coefficient
             entropy_losses = []
 
             for i in range(self.entropy_update_steps):
@@ -256,7 +247,7 @@ class TQC_SoftWatkinsQLambda():
                 entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=grads)
                 entropy_losses.append(entropy_loss)
 
-            return jnp.array(entropy_losses), entropy_coefficient_state, key
+            return jnp.array(q_losses), jnp.array(avg_trace_coefficients), jnp.array(policy_losses), jnp.array(entropies), jnp.array(alphas), jnp.array(entropy_losses), policy_state, vector_critic_state, entropy_coefficient_state, key
 
 
         self.set_train_mode()
@@ -272,9 +263,7 @@ class TQC_SoftWatkinsQLambda():
         saving_return_buffer = deque(maxlen=100)
         episode_info_buffer = deque(maxlen=self.log_freq)
         acting_time_buffer = deque(maxlen=self.log_freq)
-        q_update_time_buffer = deque(maxlen=self.log_freq)
-        policy_update_time_buffer = deque(maxlen=self.log_freq)
-        entropy_update_time_buffer = deque(maxlen=self.log_freq)
+        optimize_time_buffer = deque(maxlen=self.log_freq)
         saving_time_buffer = deque(maxlen=self.log_freq)
         fps_buffer = deque(maxlen=self.log_freq)
         q_loss_buffer = deque(maxlen=self.log_freq)
@@ -336,53 +325,36 @@ class TQC_SoftWatkinsQLambda():
 
             # What to do in this step after acting
             should_learning_start = global_step > self.learning_starts
-            should_update_q = should_learning_start
-            should_update_policy = should_learning_start
-            should_update_entropy = should_learning_start and self.entropy_coef == "auto"
+            should_optimize = should_learning_start
+            should_try_to_save = self.learning_starts and self.save_model and episode_infos
+            should_log = global_step % self.log_freq == 0
+
+
+            # What to do in this step after acting
+            should_learning_start = global_step > self.learning_starts
+            should_optimize = should_learning_start
             should_try_to_save = self.learning_starts and self.save_model and episode_infos
             should_log = global_step % self.log_freq == 0
 
 
             # Optimizing - Prepare batches
-            if should_update_q or should_update_policy or should_update_entropy:
-                max_nr_batches_needed = max(should_update_q * self.q_update_steps, should_update_policy * self.policy_update_steps, should_update_entropy * self.entropy_update_steps)
+            if should_optimize:
+                max_nr_batches_needed = max(self.q_update_steps, self.policy_update_steps, self.entropy_update_steps)
                 batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, max_nr_batches_needed)
 
+
+            # Optimizing - Q-functions, policy and entropy coefficient
+            if should_optimize:
+                q_loss, avg_trace_coefficients, policy_loss, entropies, alphas, entropy_loss, self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
+                q_loss_buffer.append(q_loss)
+                policy_loss_buffer.append(policy_loss)
+                entropy_loss_buffer.append(entropy_loss)
+                entropy_buffer.append(entropies)
+                alpha_buffer.append(alphas)
+                avg_trace_coefficient_buffer.append(avg_trace_coefficients)
             
-            # Optimizing - Q-functions
-            if should_update_q:
-                q_losses, avg_trace_coeffiecients, self.vector_critic_state, self.key = update_critics(
-                        self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
-                        batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key
-                )
-                q_loss_buffer.extend(jax.device_get(q_losses))
-                avg_trace_coefficient_buffer.extend(jax.device_get(avg_trace_coeffiecients))
-
-            q_update_end_time = time.time()
-            q_update_time_buffer.append(q_update_end_time - acting_end_time)
-
-
-            # Optimizing - Policy
-            if should_update_policy:
-                policy_losses, batch_entropies, alphas, self.policy_state, self.key = update_policy(
-                        self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
-                        batch_states, self.key
-                )
-                policy_loss_buffer.append(jax.device_get(policy_losses))
-                alpha_buffer.append(jax.device_get(alphas))
-
-            policy_update_end_time = time.time()
-            policy_update_time_buffer.append(policy_update_end_time - q_update_end_time)
-
-
-            # Optimizing - Entropy
-            if should_update_entropy:
-                entropy_losses, self.entropy_coefficient_state, self.key = update_entropy_coefficient(self.entropy_coefficient_state, batch_entropies, self.key)
-                entropy_buffer.extend(jax.device_get(batch_entropies))
-                entropy_loss_buffer.append(jax.device_get(entropy_losses))
-
-            entropy_update_end_time = time.time()
-            entropy_update_time_buffer.append(entropy_update_end_time - policy_update_end_time)
+            optimize_end_time = time.time()
+            optimize_time_buffer.append(optimize_end_time - acting_end_time)
 
 
             # Saving
@@ -393,7 +365,7 @@ class TQC_SoftWatkinsQLambda():
                     self.save()
             
             saving_end_time = time.time()
-            saving_time_buffer.append(saving_end_time - entropy_update_end_time)
+            saving_time_buffer.append(saving_end_time - optimize_end_time)
 
             fps_buffer.append(self.nr_envs / (saving_end_time - start_time))
 
@@ -415,9 +387,7 @@ class TQC_SoftWatkinsQLambda():
                             self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
                 self.log("time/fps", np.mean(fps_buffer), global_step)
                 self.log("time/acting_time", np.mean(acting_time_buffer), global_step)
-                self.log("time/q_update_time", np.mean(q_update_time_buffer), global_step)
-                self.log("time/policy_update_time", np.mean(policy_update_time_buffer), global_step)
-                self.log("time/entropy_update_time", np.mean(entropy_update_time_buffer), global_step)
+                self.log("time/optimize_time", np.mean(optimize_time_buffer), global_step)
                 self.log("time/saving_time", np.mean(saving_time_buffer), global_step)
                 self.log("train/learning_rate", self.policy_learning_rate if isinstance(self.policy_learning_rate, float) else self.policy_learning_rate(global_step), global_step)
                 self.log("train/q_loss", self.get_buffer_mean(q_loss_buffer), global_step)
@@ -432,9 +402,7 @@ class TQC_SoftWatkinsQLambda():
 
                 episode_info_buffer.clear()
                 acting_time_buffer.clear()
-                q_update_time_buffer.clear()
-                policy_update_time_buffer.clear()
-                entropy_update_time_buffer.clear()
+                optimize_time_buffer.clear()
                 saving_time_buffer.clear()
                 fps_buffer.clear()
                 q_loss_buffer.clear()
