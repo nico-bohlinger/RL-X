@@ -301,11 +301,11 @@ class TQC():
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
                 q_loss, policy_loss, entropies, alphas, entropy_loss, self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
-                q_loss_buffer.append(q_loss)
-                policy_loss_buffer.append(policy_loss)
-                entropy_loss_buffer.append(entropy_loss)
-                entropy_buffer.append(entropies)
-                alpha_buffer.append(alphas)
+                q_loss_buffer.extend(q_loss)
+                policy_loss_buffer.extend(policy_loss)
+                entropy_loss_buffer.extend(entropy_loss)
+                entropy_buffer.extend(entropies)
+                alpha_buffer.extend(alphas)
             
             optimize_end_time = time.time()
             optimize_time_buffer.append(optimize_end_time - acting_end_time)
