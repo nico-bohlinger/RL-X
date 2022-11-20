@@ -36,6 +36,8 @@ from rl_x.algorithms.tqc_tanhinitfix.flax import TQC_TANHINITFIX_FLAX
 from rl_x.algorithms.tqc_softwatkins.flax import TQC_SOFTWATKINS_FLAX
 # TQC+Retrace
 from rl_x.algorithms.tqc_retrace.flax import TQC_RETRACE_FLAX
+# TQC+QdivQ
+from rl_x.algorithms.tqc_qdivq.flax import TQC_QDIVQ_FLAX
 
 # Environments
 from rl_x.environments.envpool.humanoid_v4 import ENVPOOL_HUMANOID_V4
