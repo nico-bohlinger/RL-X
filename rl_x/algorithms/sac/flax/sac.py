@@ -298,7 +298,7 @@ class SAC():
             should_update_q_target = should_learning_start and global_step % self.q_target_update_freq == 0
             should_update_policy = should_learning_start and global_step % self.policy_update_freq == 0
             should_update_entropy = should_learning_start and self.entropy_coef == "auto" and global_step % self.entropy_update_freq == 0
-            should_try_to_save = self.learning_starts and self.save_model and episode_infos
+            should_try_to_save = should_learning_start and self.save_model and episode_infos
             should_log = global_step % self.log_freq == 0
 
 

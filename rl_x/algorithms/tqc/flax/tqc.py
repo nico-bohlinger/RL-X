@@ -288,7 +288,7 @@ class TQC():
             # What to do in this step after acting
             should_learning_start = global_step > self.learning_starts
             should_optimize = should_learning_start
-            should_try_to_save = self.learning_starts and self.save_model and episode_infos
+            should_try_to_save = should_learning_start and self.save_model and episode_infos
             should_log = global_step % self.log_freq == 0
 
 
