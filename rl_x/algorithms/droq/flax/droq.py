@@ -283,7 +283,7 @@ class DroQ():
             should_update_q = should_learning_start
             should_update_policy = should_learning_start
             should_update_entropy = should_learning_start and self.entropy_coef == "auto"
-            should_try_to_save = self.learning_starts and self.save_model and episode_infos
+            should_try_to_save = should_learning_start and self.save_model and episode_infos
             should_log = global_step % self.log_freq == 0
 
 
