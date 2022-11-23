@@ -10,6 +10,8 @@ from rl_x.algorithms.ppo.flax import PPO_FLAX
 from rl_x.algorithms.espo.pytorch import ESPO_PYTORCH
 from rl_x.algorithms.espo.torchscript import ESPO_TORCHSCRIPT
 from rl_x.algorithms.espo.flax import ESPO_FLAX
+## V-MPO
+from rl_x.algorithms.vmpo.flax import VMPO_FLAX
 ## SAC
 from rl_x.algorithms.sac.pytorch import SAC_PYTORCH
 from rl_x.algorithms.sac.torchscript import SAC_TORCHSCRIPT
