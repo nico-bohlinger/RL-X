@@ -20,6 +20,6 @@ def create_env(config):
             env.observation_space.seed(seed)
             return env
         return thunk
-    env = SubprocVecEnv([make_env(config.environment.seed + i) for i in range(config.algorithm.nr_envs)])
+    env = SubprocVecEnv([make_env(config.environment.seed + i) for i in range(config.environment.nr_envs)])
     env = RLXInfo(env)
     return env

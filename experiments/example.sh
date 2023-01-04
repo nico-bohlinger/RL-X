@@ -8,7 +8,7 @@ python example.py \
     --config.runner.project_name="placeholder" \
     --config.runner.exp_name="placeholder" \
     --config.algorithm.total_timesteps=10000 \
-    --config.algorithm.nr_envs=2 \
+    --config.environment.nr_envs=1 \
     --config.environment.seed=0
 
 echo "finished"

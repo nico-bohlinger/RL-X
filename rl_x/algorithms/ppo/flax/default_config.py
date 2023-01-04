@@ -8,7 +8,6 @@ def get_config(algorithm_name):
     
     config.device = "cuda"  # cpu, cuda
     config.total_timesteps = 1e9
-    config.nr_envs = 1
     config.learning_rate = 3e-4
     config.anneal_learning_rate = False
     config.nr_steps = 2048
