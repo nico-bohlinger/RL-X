@@ -29,7 +29,7 @@ class SAC():
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
         self.total_timesteps = config.algorithm.total_timesteps
-        self.nr_envs = config.algorithm.nr_envs
+        self.nr_envs = config.environment.nr_envs
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.buffer_size = config.algorithm.buffer_size
@@ -46,7 +46,7 @@ class SAC():
         self.entropy_update_steps = config.algorithm.entropy_update_steps
         self.entropy_coef = config.algorithm.entropy_coef
         self.target_entropy = config.algorithm.target_entropy
-        self.log_freq = config.algorithm.log_freq
+        self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
 
         self.device = torch.device("cuda" if config.algorithm.device == "cuda" and torch.cuda.is_available() else "cpu")
@@ -90,19 +90,19 @@ class SAC():
         replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.observation_space.shape, self.env.action_space.shape, self.device)
 
         saving_return_buffer = deque(maxlen=100)
-        episode_info_buffer = deque(maxlen=self.log_freq)
-        acting_time_buffer = deque(maxlen=self.log_freq)
-        q_update_time_buffer = deque(maxlen=self.log_freq)
-        q_target_update_time_buffer = deque(maxlen=self.log_freq)
-        policy_update_time_buffer = deque(maxlen=self.log_freq)
-        entropy_update_time_buffer = deque(maxlen=self.log_freq)
-        saving_time_buffer = deque(maxlen=self.log_freq)
-        fps_buffer = deque(maxlen=self.log_freq)
-        q_loss_buffer = deque(maxlen=self.log_freq)
-        policy_loss_buffer = deque(maxlen=self.log_freq)
-        entropy_loss_buffer = deque(maxlen=self.log_freq)
-        entropy_buffer = deque(maxlen=self.log_freq)
-        alpha_buffer = deque(maxlen=self.log_freq)
+        episode_info_buffer = deque(maxlen=self.logging_freq)
+        acting_time_buffer = deque(maxlen=self.logging_freq)
+        q_update_time_buffer = deque(maxlen=self.logging_freq)
+        q_target_update_time_buffer = deque(maxlen=self.logging_freq)
+        policy_update_time_buffer = deque(maxlen=self.logging_freq)
+        entropy_update_time_buffer = deque(maxlen=self.logging_freq)
+        saving_time_buffer = deque(maxlen=self.logging_freq)
+        fps_buffer = deque(maxlen=self.logging_freq)
+        q_loss_buffer = deque(maxlen=self.logging_freq)
+        policy_loss_buffer = deque(maxlen=self.logging_freq)
+        entropy_loss_buffer = deque(maxlen=self.logging_freq)
+        entropy_buffer = deque(maxlen=self.logging_freq)
+        alpha_buffer = deque(maxlen=self.logging_freq)
 
         state = self.env.reset()
 
@@ -147,7 +147,7 @@ class SAC():
             should_update_policy = should_learning_start and global_step % self.policy_update_freq == 0
             should_update_entropy = should_learning_start and self.entropy_coef == "auto" and global_step % self.entropy_update_freq == 0
             should_try_to_save = should_learning_start and self.save_model and episode_infos 
-            should_log = global_step % self.log_freq == 0
+            should_log = global_step % self.logging_freq == 0
 
 
             # Optimizing - Anneal learning rate

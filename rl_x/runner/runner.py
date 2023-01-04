@@ -140,7 +140,7 @@ class Runner:
             raise ValueError("Tensorboard is not supported in test mode")
         if self._config.runner.save_model:
             raise ValueError("Saving model is not supported in test mode")
-        if self._config.algorithm.nr_envs > 1:
+        if self._config.environment.nr_envs > 1:
             raise ValueError("nr_envs > 1 is not supported in test mode")
         
         run_path = f"runs/{self._config.runner.project_name}/{self._config.runner.exp_name}/{self._config.runner.run_name}"

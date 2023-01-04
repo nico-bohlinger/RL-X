@@ -4,7 +4,7 @@ from rl_x.environments.envpool.cart_pole_v1.wrappers import RecordEpisodeStatist
 
 
 def create_env(config):
-    env = envpool.make("CartPole-v1", env_type="gym", seed=config.environment.seed, num_envs=config.algorithm.nr_envs)
+    env = envpool.make("CartPole-v1", env_type="gym", seed=config.environment.seed, num_envs=config.environment.nr_envs)
     env.num_envs = config.environment.nr_envs
     env = RecordEpisodeStatistics(env)
     env = RLXInfo(env)

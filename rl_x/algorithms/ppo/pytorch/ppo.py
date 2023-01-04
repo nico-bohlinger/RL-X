@@ -30,7 +30,7 @@ class PPO:
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
         self.total_timesteps = config.algorithm.total_timesteps
-        self.nr_envs = config.algorithm.nr_envs
+        self.nr_envs = config.environment.nr_envs
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.nr_steps = config.algorithm.nr_steps
@@ -45,7 +45,7 @@ class PPO:
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
         self.nr_hidden_units = config.algorithm.nr_hidden_units
-        self.batch_size = config.algorithm.nr_envs * config.algorithm.nr_steps
+        self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
 
         self.device = torch.device("cuda" if config.algorithm.device == "cuda" and torch.cuda.is_available() else "cpu")
         rlx_logger.info(f"Using device: {self.device}")

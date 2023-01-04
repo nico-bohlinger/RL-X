@@ -27,8 +27,7 @@ def get_config(algorithm_name):
     config.target_entropy = "auto"
     config.log_std_min = -20
     config.log_std_max = 2
-    config.log_freq = 100
-
     config.nr_hidden_units = 256
+    config.logging_freq = 3000
 
     return config
