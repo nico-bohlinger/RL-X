@@ -8,24 +8,22 @@ from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
-def get_agent(config, env, device):
+def get_policy(config, env, device):
     action_space_type = env.get_action_space_type()
     observation_space_type = env.get_observation_space_type()
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
         env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(device)
         env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(device)
-        return Agent(env, config.algorithm.std_dev, config.algorithm.nr_hidden_units, env_as_low, env_as_high,
-                     config.algorithm.ent_coef, config.algorithm.vf_coef)
+        return Policy(env, config.algorithm.std_dev, config.algorithm.nr_hidden_units, env_as_low, env_as_high, config.algorithm.ent_coef)
     else:
         raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
 
 
-class Agent(nn.Module):
-    def __init__(self, env, std_dev, nr_hidden_units, env_as_low, env_as_high, ent_coef: float, vf_coef: float):
+class Policy(nn.Module):
+    def __init__(self, env, std_dev, nr_hidden_units, env_as_low, env_as_high, ent_coef: float):
         super().__init__()
         self.ent_coef = ent_coef
-        self.vf_coef = vf_coef
         self.policy_as_low = -1
         self.policy_as_high = 1
         self.env_as_low = env_as_low
@@ -41,14 +39,6 @@ class Agent(nn.Module):
             self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape).item()), std=0.01),
         )
         self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape).item()), np.log(std_dev).item()))
-
-        self.critic = nn.Sequential(
-            self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),
-            nn.Tanh(),
-            self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
-            nn.Tanh(),
-            self.layer_init(nn.Linear(nr_hidden_units, 1), std=1.0),
-        )
 
 
     def layer_init(self, layer, std=np.sqrt(2).item(), bias_const=(0.0)):
@@ -85,17 +75,11 @@ class Agent(nn.Module):
         clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)
         clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
         return clipped_and_scaled_action
-    
+
 
     @torch.jit.export
-    def get_value(self, x):
-        return self.critic(x)
-    
-
-    @torch.jit.export
-    def loss(self, states, actions, log_probs, returns, advantages):
+    def loss(self, states, actions, log_probs, advantages):
         new_log_prob, entropy = self.get_logprob_entropy(states, actions)
-        new_value = self.get_value(states).reshape(-1)
         logratio = new_log_prob - log_probs
         ratio = logratio.exp()
 
@@ -107,8 +91,8 @@ class Agent(nn.Module):
         minibatch_advantages = (minibatch_advantages - minibatch_advantages.mean()) / (minibatch_advantages.std() + 1e-8)
 
         pg_loss = (-minibatch_advantages * ratio).mean()
-        v_loss = (0.5 * (new_value - returns) ** 2).mean()
-        entropy_loss = entropy.mean()
-        loss = pg_loss + self.vf_coef * v_loss - self.ent_coef * entropy_loss
 
-        return ratio, loss, pg_loss, v_loss, entropy_loss, approx_kl_div
+        entropy_loss = entropy.mean()
+        loss = pg_loss - self.ent_coef * entropy_loss
+
+        return ratio, loss, pg_loss, entropy_loss, approx_kl_div

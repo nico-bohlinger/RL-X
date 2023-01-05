@@ -30,7 +30,7 @@ from rl_x.environments.envpool.pong_v5 import ENVPOOL_PONG_V5
 from rl_x.environments.gym.humanoid_v3 import GYM_HUMANOID_V3
 
 
-ALGORITHM = ESPO_FLAX
+ALGORITHM = PPO_PYTORCH
 ENVIRONMENT = ENVPOOL_HUMANOID_V4
 RUNNER_MODE = RunnerMode.RUN_EXPERIMENT
 

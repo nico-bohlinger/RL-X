@@ -10,7 +10,8 @@ import torch.nn as nn
 import torch.optim as optim
 import wandb
 
-from rl_x.algorithms.espo.torchscript.agent import get_agent
+from rl_x.algorithms.espo.torchscript.policy import get_policy
+from rl_x.algorithms.espo.torchscript.critic import get_critic
 from rl_x.algorithms.espo.torchscript.batch import Batch
 
 rlx_logger = logging.getLogger("rl_x")
@@ -63,9 +64,12 @@ class ESPO:
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
 
-        self.agent = get_agent(config, env, self.device).to(self.device)
-        self.agent = torch.jit.script(self.agent)
-        self.agent_optimizer = optim.Adam(self.agent.parameters(), lr=self.learning_rate)
+        self.policy = get_policy(config, env, self.device).to(self.device)
+        self.critic = get_critic(config, env).to(self.device)
+        self.policy = torch.jit.script(self.policy)
+        self.critic = torch.jit.script(self.critic)
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate)
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -97,8 +101,8 @@ class ESPO:
             episode_info_buffer = deque(maxlen=100)
             for step in range(self.nr_steps):
                 with torch.no_grad():
-                    action, processed_action, log_prob = self.agent.get_action_logprob(state)
-                    value = self.agent.get_value(state)
+                    action, processed_action, log_prob = self.policy.get_action_logprob(state)
+                    value = self.critic.get_value(state)
                 next_state, reward, done, info = self.env.step(processed_action.cpu().numpy())
                 next_state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
                 actual_next_state = next_state.clone()
@@ -127,7 +131,7 @@ class ESPO:
 
             # Calculating advantages and returns
             with torch.no_grad():
-                next_values = self.agent.get_value(batch.next_states).reshape(-1, 1)
+                next_values = self.critic.get_value(batch.next_states).reshape(-1, 1)
             advantages, returns = calculate_gae_advantages_and_returns(batch.rewards, batch.dones, batch.values, next_values, self.gamma, self.gae_lambda)
             
             calc_adv_return_end_time = time.time()
@@ -138,7 +142,9 @@ class ESPO:
             if self.anneal_learning_rate:
                 fraction = 1 - (global_step / self.total_timesteps)
                 learning_rate = fraction * self.learning_rate
-                for param_group in self.agent_optimizer.param_groups:
+                for param_group in self.policy_optimizer.param_groups:
+                    param_group["lr"] = learning_rate
+                for param_group in self.critic_optimizer.param_groups:
                     param_group["lr"] = learning_rate
             
             batch_states = batch.states.reshape((-1,) + self.os_shape)
@@ -157,21 +163,25 @@ class ESPO:
             for epoch in range(self.max_epochs):
                 minibatch_indices = rng.choice(self.batch_size, size=self.minibatch_size, replace=False)
 
-                ratio, loss, pg_loss, v_loss, entropy_loss, approx_kl_div = self.agent.loss(batch_states[minibatch_indices], batch_actions[minibatch_indices],
-                                                                                            batch_log_probs[minibatch_indices], batch_returns[minibatch_indices],
-                                                                                            batch_advantages[minibatch_indices])
+                ratio, loss1, pg_loss, entropy_loss, approx_kl_div = self.policy.loss(batch_states[minibatch_indices], batch_actions[minibatch_indices],
+                                                                                                    batch_log_probs[minibatch_indices], batch_advantages[minibatch_indices])
+                loss2, v_loss = self.critic.loss(batch_states[minibatch_indices], batch_returns[minibatch_indices])
 
-                self.agent_optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(self.agent.parameters(), self.max_grad_norm)
-                self.agent_optimizer.step()
+                self.policy_optimizer.zero_grad()
+                self.critic_optimizer.zero_grad()
+                loss1.backward()
+                loss2.backward()
+                nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
+                self.policy_optimizer.step()
+                self.critic_optimizer.step()
 
                 episode_ratio_delta = self.delta_calc_operator(torch.abs(ratio - 1))
 
                 pg_losses.append(pg_loss.item())
                 value_losses.append(v_loss.item())
                 entropy_losses.append(entropy_loss.item())
-                loss_losses.append(loss.item())
+                loss_losses.append(loss1.item() + loss2.item())
                 ratio_deltas.append(episode_ratio_delta.item())
 
                 if episode_ratio_delta > self.max_ratio_delta:
@@ -223,7 +233,7 @@ class ESPO:
             self.log("train/value_loss", np.mean(value_losses), global_step)
             self.log("train/entropy_loss", np.mean(entropy_losses), global_step)
             self.log("train/loss", np.mean(loss_losses), global_step)
-            self.log("train/std", np.mean(np.exp(self.agent.policy_logstd.data.cpu().numpy())), global_step)
+            self.log("train/std", np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy())), global_step)
             self.log("train/explained_variance", explained_var, global_step)
 
             if self.track_console:
@@ -243,19 +253,23 @@ class ESPO:
 
 
     def set_train_mode(self):
-        self.agent.train()
+        self.policy.train()
+        self.critic.train()
 
 
     def set_eval_mode(self):
-        self.agent.eval()
+        self.policy.eval()
+        self.critic.eval()
 
 
     def save(self):
         file_path = self.save_path + "/model_best.pt"
         torch.save({
             "config_algorithm": self.config.algorithm,
-            "agent_state_dict": self.agent.state_dict(),
-            "agent_optimizer_state_dict": self.agent_optimizer.state_dict(),
+            "policy_state_dict": self.policy.state_dict(),
+            "critic_state_dict": self.critic.state_dict(),
+            "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
+            "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
         }, file_path)
         if self.track_wandb:
             wandb.save(file_path, base_path=os.path.dirname(file_path))
@@ -265,8 +279,10 @@ class ESPO:
         checkpoint = torch.load(config.runner.load_model)
         config.algorithm = checkpoint["config_algorithm"]
         model = ESPO(config, env, run_path, writer)
-        model.agent.load_state_dict(checkpoint["agent_state_dict"])
-        model.agent_optimizer.load_state_dict(checkpoint["agent_optimizer_state_dict"])
+        model.policy.load_state_dict(checkpoint["policy_state_dict"])
+        model.critic.load_state_dict(checkpoint["critic_state_dict"])
+        model.policy_optimizer.load_state_dict(checkpoint["policy_optimizer_state_dict"])
+        model.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
 
         return model
 
@@ -277,7 +293,7 @@ class ESPO:
             done = False
             state = self.env.reset()
             while not done:
-                processed_action = self.agent.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, done, info = self.env.step(processed_action.cpu().numpy())
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
