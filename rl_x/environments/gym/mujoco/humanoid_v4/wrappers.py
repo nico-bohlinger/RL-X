@@ -1,5 +1,4 @@
-import gym
-import numpy as np
+import gymnasium as gym
 
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
@@ -8,6 +7,10 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 class RLXInfo(gym.Wrapper):
     def __init__(self, env):
         super(RLXInfo, self).__init__(env)
+    
+
+    def reset(self):
+        return self.env.reset()
 
 
     def get_episode_infos(self, info):

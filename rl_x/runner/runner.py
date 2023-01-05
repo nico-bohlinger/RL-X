@@ -7,7 +7,7 @@ import logging
 from ml_collections import config_dict, config_flags
 import wandb
 from torch.utils.tensorboard import SummaryWriter
-import gym
+import gymnasium as gym
 
 from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.default_config import get_config as get_runner_config
@@ -15,17 +15,17 @@ from rl_x.algorithms.algorithm_manager import get_algorithm_config, get_algorith
 from rl_x.environments.environment_manager import get_environment_config, get_environment_create_env
 
 
-# Change with newer jax version
-# https://github.com/google/jax/issues/10070
-# https://github.com/google/jax/pull/12769
+# Silence jax logging
 absl_logging.set_verbosity(absl_logging.ERROR)
 
-# Warning in CartPoleV1
-# https://github.com/openai/gym/issues/2216
+# Silences the box bound precision warning for cartpole
 gym.logger.set_level(40)
 
-# tensorflow warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2" 
+# Silence tensorflow warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+# Guarantee enough memory for CUBLAS to initialize when using jax
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -81,7 +81,7 @@ class Runner:
         try:
             app.run(self._main)
         except KeyboardInterrupt:
-            rlx_logger.warn("KeyboardInterrupt")
+            rlx_logger.warning("KeyboardInterrupt")
 
 
     def _main(self, _):

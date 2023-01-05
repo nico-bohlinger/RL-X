@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 
 from rl_x.environments.action_space_type import ActionSpaceType
@@ -13,16 +13,17 @@ class RecordEpisodeStatistics(gym.Wrapper):
         self.episode_returns = None
         self.episode_lengths = None
 
-    def reset(self, **kwargs):
-        observations = super(RecordEpisodeStatistics, self).reset(**kwargs)
+    def reset(self):
+        observations, infos = self.env.reset()
         self.episode_returns = np.zeros(self.num_envs, dtype=np.float32)
         self.episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
         return observations
 
     def step(self, action):
-        observations, rewards, dones, infos = super(RecordEpisodeStatistics, self).step(
+        observations, rewards, terminated, truncated, infos = super(RecordEpisodeStatistics, self).step(
             action
         )
+        dones = terminated or truncated
         self.episode_returns += rewards
         self.episode_lengths += 1
         infos["episode"] = [None] * self.num_envs
@@ -40,13 +41,17 @@ class RecordEpisodeStatistics(gym.Wrapper):
                 self.episode_returns[i] = 0
                 self.episode_lengths[i] = 0
                 infos["terminal_observation"][i] = np.array(observations[i])
-                observations[i] = self.env.reset(np.array([i]))
+                observations[i], _ = self.env.reset(np.array([i]))
         return (observations, rewards, dones, infos)
     
 
 class RLXInfo(gym.Wrapper):
     def __init__(self, env):
         super(RLXInfo, self).__init__(env)
+    
+
+    def reset(self):
+        return self.env.reset()
 
 
     def get_episode_infos(self, info):
@@ -63,11 +68,11 @@ class RLXInfo(gym.Wrapper):
 
     def get_action_space_type(self):
         return ActionSpaceType.DISCRETE
-
     
+
     def get_single_action_space_shape(self):
         return self.action_space.n
-    
+
 
     def get_observation_space_type(self):
-        return ObservationSpaceType.IMAGES
+        return ObservationSpaceType.FLAT_VALUES

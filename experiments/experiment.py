@@ -24,14 +24,15 @@ from rl_x.algorithms.tqc.flax import TQC_FLAX
 from rl_x.algorithms.aqe.flax import AQE_FLAX
 
 # Environments
-from rl_x.environments.envpool.humanoid_v4 import ENVPOOL_HUMANOID_V4
-from rl_x.environments.envpool.cart_pole_v1 import ENVPOOL_CART_POLE_V1
-from rl_x.environments.envpool.pong_v5 import ENVPOOL_PONG_V5
-from rl_x.environments.gym.humanoid_v3 import GYM_HUMANOID_V3
+from rl_x.environments.envpool.mujoco.humanoid_v4 import ENVPOOL_MUJOCO_HUMANOID_V4
+from rl_x.environments.envpool.dmc.humanoid_run_v1 import ENVPOOL_DMC_HUMANOID_RUN_V1
+from rl_x.environments.envpool.classic.cart_pole_v1 import ENVPOOL_CLASSIC_CART_POLE_V1
+from rl_x.environments.envpool.atari.pong_v5 import ENVPOOL_ATARI_PONG_V5
+from rl_x.environments.gym.mujoco.humanoid_v4 import GYM_MUJOCO_HUMANOID_V4
 
 
 ALGORITHM = PPO_PYTORCH
-ENVIRONMENT = ENVPOOL_HUMANOID_V4
+ENVIRONMENT = ENVPOOL_MUJOCO_HUMANOID_V4
 RUNNER_MODE = RunnerMode.RUN_EXPERIMENT
 
 
