@@ -78,6 +78,10 @@ class TQC():
             self.target_entropy = float(self.target_entropy)
         self.entropy_coefficient = EntropyCoefficient(1.0)
 
+        self.policy.apply = jax.jit(self.policy.apply)
+        self.vector_critic.apply = jax.jit(self.vector_critic.apply)
+        self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
+
         def q_linear_schedule(step):
             total_steps = self.total_timesteps
             fraction = 1.0 - (step / (total_steps * self.q_update_steps))
@@ -119,10 +123,6 @@ class TQC():
             tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.entropy_learning_rate)
         )
 
-        self.policy.apply = jax.jit(self.policy.apply)
-        self.vector_critic.apply = jax.jit(self.vector_critic.apply)
-        self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
-
         if self.save_model:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
@@ -140,7 +140,7 @@ class TQC():
         @jax.jit
         def update(
                 policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState,
-                states: jnp.ndarray, next_states: jnp.ndarray, actions: jnp.ndarray, rewards: jnp.ndarray, dones: jnp.ndarray, key: jax.random.PRNGKey
+                states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, key: jax.random.PRNGKey
             ):
             # Update critic
             q_losses = []

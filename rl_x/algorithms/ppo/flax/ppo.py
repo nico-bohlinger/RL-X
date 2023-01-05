@@ -15,7 +15,6 @@ import wandb
 
 from rl_x.algorithms.ppo.flax.policy import get_policy
 from rl_x.algorithms.ppo.flax.critic import get_critic
-from rl_x.algorithms.ppo.flax.agent_params import AgentParams
 from rl_x.algorithms.ppo.flax.storage import Storage
 
 rlx_logger = logging.getLogger("rl_x")
@@ -63,30 +62,38 @@ class PPO:
 
         self.os_shape = env.observation_space.shape
         self.as_shape = env.action_space.shape
-
-        def linear_schedule(count):
-            fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates
-            return self.learning_rate * fraction
         
         self.policy, self.get_processed_action = get_policy(config, env)
         self.critic = get_critic(config, env)
 
-        state = jnp.array([env.observation_space.sample()])
+        self.policy.apply = jax.jit(self.policy.apply)
+        self.critic.apply = jax.jit(self.critic.apply)
+
+        def linear_schedule(count):
+            fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates
+            return self.learning_rate * fraction
+
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
-        self.train_state = TrainState.create(
-            apply_fn=None,
-            params=AgentParams(
-                self.policy.init(policy_key, state),
-                self.critic.init(critic_key, state),
-            ),
+
+        state = jnp.array([env.observation_space.sample()])
+
+        self.policy_state = TrainState.create(
+            apply_fn=self.policy.apply,
+            params=self.policy.init(policy_key, state),
             tx=optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
                 optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
-            ),
+            )
         )
-        
-        self.policy.apply = jax.jit(self.policy.apply)
-        self.critic.apply = jax.jit(self.critic.apply)
+
+        self.critic_state = TrainState.create(
+            apply_fn=self.critic.apply,
+            params=self.critic.init(critic_key, state),
+            tx=optax.chain(
+                optax.clip_by_global_norm(self.max_grad_norm),
+                optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
+            )
+        )
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -95,13 +102,13 @@ class PPO:
     
     def train(self):
         @jax.jit
-        def get_action_and_value(params: flax.core.FrozenDict, state: np.ndarray, storage: Storage, step: int, key: jax.random.PRNGKey):
-            action_mean, action_logstd = jax.lax.stop_gradient(self.policy.apply(params.policy_params, state))
+        def get_action_and_value(policy_state: TrainState, critic_state: TrainState, state: np.ndarray, storage: Storage, step: int, key: jax.random.PRNGKey):
+            action_mean, action_logstd = self.policy.apply(policy_state.params, state)
             action_std = jnp.exp(action_logstd)
             key, subkey = jax.random.split(key)
             action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
             log_prob = -0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
-            value = self.critic.apply(params.critic_params, state)
+            value = self.critic.apply(critic_state.params, state)
             storage = storage.replace(
                 states=storage.states.at[step].set(state),
                 actions=storage.actions.at[step].set(action),
@@ -113,18 +120,8 @@ class PPO:
         
 
         @jax.jit
-        def get_action_and_value2(params: flax.core.FrozenDict, state: np.ndarray, action: np.ndarray):
-            action_mean, action_logstd = self.policy.apply(params.policy_params, state)
-            action_std = jnp.exp(action_logstd)
-            logprob = -0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
-            entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
-            value = self.critic.apply(params.critic_params, state)
-            return logprob.sum(1), entropy, value.reshape(-1)
-        
-
-        @jax.jit
-        def calculate_gae_advantages(params: flax.core.FrozenDict, next_states: jnp.array, rewards: np.ndarray, dones: np.ndarray, storage: Storage):
-            next_values = jax.lax.stop_gradient(self.critic.apply(params.critic_params, next_states)).squeeze()
+        def calculate_gae_advantages(critic_state: TrainState, next_states: jnp.array, rewards: np.ndarray, dones: np.ndarray, storage: Storage):
+            next_values = self.critic.apply(critic_state.params, next_states).squeeze()
             delta = rewards + self.gamma * next_values * (1.0 - dones) - storage.values
             advantages = [delta[-1]]
             for t in jnp.arange(self.nr_steps - 2, -1, -1):
@@ -138,34 +135,44 @@ class PPO:
         
 
         @jax.jit
-        def update(train_state: TrainState, storage: Storage, key: jax.random.PRNGKey):
+        def update(policy_state: TrainState, critic_state: TrainState, storage: Storage, key: jax.random.PRNGKey):
             batch_states = storage.states.reshape((-1,) + self.os_shape)
             batch_actions = storage.actions.reshape((-1,) + self.as_shape)
             batch_advantages = storage.advantages.reshape(-1)
             batch_returns = storage.returns.reshape(-1)
             batch_log_probs = storage.log_probs.reshape(-1)
 
-            def ppo_loss(params, minibatch_states, minibatch_actions, minibatch_log_probs, minibatch_advantages, minibatch_returns):
-                new_log_prob, entropy, new_value = get_action_and_value2(params, minibatch_states, minibatch_actions)
+            def policy_loss(policy_params, minibatch_states, minibatch_actions, minibatch_log_probs, minibatch_advantages):
+                action_mean, action_logstd = self.policy.apply(policy_params, minibatch_states)
+                action_std = jnp.exp(action_logstd)
+                new_log_prob = -0.5 * ((minibatch_actions - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
+                entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
+                new_log_prob = new_log_prob.sum(1)
+                
                 logratio = new_log_prob - minibatch_log_probs
                 ratio = jnp.exp(logratio)
-                approx_kl_div = jax.lax.stop_gradient(((ratio - 1) - logratio).mean())
-                clip_fraction = jax.lax.stop_gradient(jnp.mean(jnp.float32((jnp.abs(ratio - 1) > self.clip_range))))
+                approx_kl_div = jnp.mean((ratio - 1) - logratio)
+                clip_fraction = jnp.mean(jnp.float32((jnp.abs(ratio - 1) > self.clip_range)))
 
-                minibatch_advantages = (minibatch_advantages - minibatch_advantages.mean()) / (minibatch_advantages.std() + 1e-8)
+                minibatch_advantages = (minibatch_advantages - jnp.mean(minibatch_advantages)) / (jnp.std(minibatch_advantages) + 1e-8)
 
                 pg_loss1 = -minibatch_advantages * ratio
                 pg_loss2 = -minibatch_advantages * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range)
-                pg_loss = jnp.maximum(pg_loss1, pg_loss2).mean()
-
-                v_loss = (0.5 * (new_value - minibatch_returns) ** 2).mean()
+                pg_loss = jnp.mean(jnp.maximum(pg_loss1, pg_loss2))
                 
-                entropy_loss = entropy.mean()
-                loss = pg_loss + self.vf_coef * v_loss - self.ent_coef * entropy_loss
+                entropy_loss = jnp.mean(entropy)
+                loss = pg_loss - self.ent_coef * entropy_loss
 
-                return loss, (pg_loss, v_loss, entropy_loss, approx_kl_div, clip_fraction)
+                return loss, (pg_loss, entropy_loss, approx_kl_div, clip_fraction)
+            
+            def critic_loss(critic_params, minibatch_states, minibatch_returns):
+                new_value = self.critic.apply(critic_params, minibatch_states).reshape(-1)
+                v_loss = jnp.mean(0.5 * (new_value - minibatch_returns) ** 2)
 
-            ppo_loss_grad_fn = jax.value_and_grad(ppo_loss, has_aux=True)
+                return self.vf_coef * v_loss, (v_loss)
+
+            policy_loss_grad_fn = jax.value_and_grad(policy_loss, has_aux=True)
+            critic_loss_grad_fn = jax.value_and_grad(critic_loss, has_aux=True)
 
             key, subkey = jax.random.split(key)
             batch_indices = jax.random.permutation(subkey, self.batch_size, independent=True)
@@ -180,22 +187,28 @@ class PPO:
                 end = start + self.minibatch_size
                 minibatch_indices = batch_indices[start:end]
 
-                (loss, (pg_loss, v_loss, entropy_loss, approx_kl_div, clip_fraction)), grads = ppo_loss_grad_fn(train_state.params,
+                (loss1, (pg_loss, entropy_loss, approx_kl_div, clip_fraction)), policy_grads = policy_loss_grad_fn(
+                    policy_state.params,
                     batch_states[minibatch_indices],
                     batch_actions[minibatch_indices],
                     batch_log_probs[minibatch_indices],
-                    batch_advantages[minibatch_indices],
+                    batch_advantages[minibatch_indices]
+                )
+                (loss2, (v_loss)), critic_grads = critic_loss_grad_fn(
+                    critic_state.params,
+                    batch_states[minibatch_indices],
                     batch_returns[minibatch_indices]
                 )
-                train_state = train_state.apply_gradients(grads=grads)
+                policy_state = policy_state.apply_gradients(grads=policy_grads)
+                critic_state = critic_state.apply_gradients(grads=critic_grads)
                 approx_kl_divs += approx_kl_div
                 pg_losses += pg_loss
                 value_losses += v_loss
                 entropy_losses += entropy_loss
-                loss_losses += loss
+                loss_losses += loss1 + loss2
                 clip_fractions += clip_fraction
 
-            return train_state, loss_losses/self.nr_minibatches, pg_losses/self.nr_minibatches, value_losses/self.nr_minibatches, entropy_losses/self.nr_minibatches, approx_kl_divs/self.nr_minibatches, clip_fractions/self.nr_minibatches, key
+            return policy_state, critic_state, loss_losses/self.nr_minibatches, pg_losses/self.nr_minibatches, value_losses/self.nr_minibatches, entropy_losses/self.nr_minibatches, approx_kl_divs/self.nr_minibatches, clip_fractions/self.nr_minibatches, key
 
 
         @jax.jit
@@ -227,7 +240,7 @@ class PPO:
             # Acting
             episode_info_buffer = deque(maxlen=100)
             for step in range(self.nr_steps):
-                processed_action, storage, self.key = get_action_and_value(self.train_state.params, state, storage, step, self.key)
+                processed_action, storage, self.key = get_action_and_value(self.policy_state, self.critic_state, state, storage, step, self.key)
                 next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
                 actual_next_state = next_state.copy()
                 for i, single_done in enumerate(done):
@@ -250,7 +263,7 @@ class PPO:
 
 
             # Calculating advantages and returns
-            storage = calculate_gae_advantages(self.train_state.params, next_states, rewards, dones, storage)
+            storage = calculate_gae_advantages(self.critic_state, next_states, rewards, dones, storage)
             
             calc_adv_return_end_time = time.time()
 
@@ -263,7 +276,7 @@ class PPO:
             clip_fractions = []
 
             for epoch in range(self.nr_epochs):
-                self.train_state, loss, pg_loss, v_loss, entropy_loss, approx_kl_divs, clip_fraction, self.key = update(self.train_state, storage, self.key)
+                self.policy_state, self.critic_state, loss, pg_loss, v_loss, entropy_loss, approx_kl_divs, clip_fraction, self.key = update(self.policy_state, self.critic_state, storage, self.key)
                 pg_losses.append(pg_loss)
                 value_losses.append(v_loss)
                 entropy_losses.append(entropy_loss)
@@ -306,7 +319,7 @@ class PPO:
             self.log("time/calc_adv_and_return_time", calc_adv_return_end_time - acting_end_time, global_step)
             self.log("time/optimizing_time", optimizing_end_time - calc_adv_return_end_time, global_step)
             self.log("time/saving_time", saving_end_time - optimizing_end_time, global_step)
-            self.log("train/learning_rate", self.train_state.opt_state[1].hyperparams["learning_rate"].item(), global_step)
+            self.log("train/learning_rate", self.policy_state.opt_state[1].hyperparams["learning_rate"].item(), global_step)
             self.log("train/clip_range", self.clip_range, global_step)
             self.log("train/clip_fraction", np.mean(clip_fractions), global_step)
             self.log("train/approx_kl", np.mean(np.asarray(approx_kl_divs)), global_step)
@@ -314,7 +327,7 @@ class PPO:
             self.log("train/value_loss", np.mean(value_losses), global_step)
             self.log("train/entropy_loss", np.mean(entropy_losses), global_step)
             self.log("train/loss", np.mean(loss_losses), global_step)
-            self.log("train/std", np.mean(np.asarray(jnp.exp(self.train_state.params.policy_params["params"]["policy_logstd"]))), global_step)
+            self.log("train/std", np.mean(np.asarray(jnp.exp(self.policy_state.params["params"]["policy_logstd"]))), global_step)
             self.log("train/explained_variance", explained_var.item(), global_step)
 
             if self.track_console:
@@ -339,7 +352,7 @@ class PPO:
 
         checkpoints.save_checkpoint(
             ckpt_dir=self.save_path,
-            target=self.train_state,
+            target={"policy": self.policy_state, "critic": self.critic_state},
             step=0,
             prefix="model_best_jax_",
             overwrite=True
@@ -368,19 +381,20 @@ class PPO:
         step = int(splitted_checkpoint_name[-1])
         restored_train_state = checkpoints.restore_checkpoint(
             ckpt_dir=checkpoint_dir,
-            target=model.train_state,
+            target={"policy": model.policy_state, "critic": model.critic_state},
             step=step,
             prefix=jax_file_name
         )
-        model.train_state = restored_train_state
+        model.policy_state = restored_train_state["policy"]
+        model.critic_state = restored_train_state["critic"]
 
         return model
     
 
     def test(self, episodes):
         @jax.jit
-        def get_action(params: flax.core.FrozenDict, state: np.ndarray):
-            action_mean, action_logstd = jax.lax.stop_gradient(self.policy.apply(params.policy_params, state))
+        def get_action(policy_state: TrainState, state: np.ndarray):
+            action_mean, action_logstd = self.policy.apply(policy_state.params, state)
             return self.get_processed_action(action_mean)
         
         self.set_eval_mode()
@@ -388,7 +402,7 @@ class PPO:
             done = False
             state = self.env.reset()
             while not done:
-                processed_action = get_action(self.train_state.params, state)
+                processed_action = get_action(self.policy_state, state)
                 state, reward, done, info = self.env.step(jax.device_get(processed_action))
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")

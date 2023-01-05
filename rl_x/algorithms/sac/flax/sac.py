@@ -79,6 +79,10 @@ class SAC():
         else:
             self.entropy_coefficient = ConstantEntropyCoefficient(float(self.entropy_coef))
 
+        self.policy.apply = jax.jit(self.policy.apply)
+        self.vector_critic.apply = jax.jit(self.vector_critic.apply)
+        self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
+        
         def q_linear_schedule(count):
             step = count - self.learning_starts
             total_steps = self.total_timesteps - self.learning_starts
@@ -123,10 +127,6 @@ class SAC():
             tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.entropy_learning_rate)
         )
 
-        self.policy.apply = jax.jit(self.policy.apply)
-        self.vector_critic.apply = jax.jit(self.vector_critic.apply)
-        self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
-
         if self.save_model:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
@@ -144,7 +144,7 @@ class SAC():
         @jax.jit
         def update_critics(
                 policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState,
-                states: jnp.ndarray, next_states: jnp.ndarray, actions: jnp.ndarray, rewards: jnp.ndarray, dones: jnp.ndarray, key: jax.random.PRNGKey
+                states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, key: jax.random.PRNGKey
             ):
             q_losses = []
 
@@ -177,7 +177,7 @@ class SAC():
 
 
         @jax.jit
-        def update_policy(policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState, states: jnp.ndarray, key: jax.random.PRNGKey):
+        def update_policy(policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState, states: np.ndarray, key: jax.random.PRNGKey):
             policy_losses = []
             entropies = []
             alphas = []
@@ -208,7 +208,7 @@ class SAC():
         
 
         @jax.jit
-        def get_additional_entropies(policy_state: TrainState, states: jnp.ndarray, key: jax.random.PRNGKey):
+        def get_additional_entropies(policy_state: TrainState, states: np.ndarray, key: jax.random.PRNGKey):
             entropies = []
 
             for i in range(self.entropy_update_freq - self.policy_update_freq):
@@ -222,7 +222,7 @@ class SAC():
 
 
         @jax.jit
-        def update_entropy_coefficient(entropy_coefficient_state: TrainState, entropies: jnp.ndarray, key: jax.random.PRNGKey):
+        def update_entropy_coefficient(entropy_coefficient_state: TrainState, entropies: np.ndarray, key: jax.random.PRNGKey):
             entropy_losses = []
 
             for i in range(self.entropy_update_steps):

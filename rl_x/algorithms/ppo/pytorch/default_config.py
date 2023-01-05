@@ -21,7 +21,6 @@ def get_config(algorithm_name):
     config.vf_coef = 0.5
     config.max_grad_norm = 0.5
     config.std_dev = 1.0
-    
-    config.nr_hidden_units = 64  # only for mlp
+    config.nr_hidden_units = 256
 
     return config

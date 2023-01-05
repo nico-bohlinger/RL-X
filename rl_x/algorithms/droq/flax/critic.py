@@ -1,3 +1,4 @@
+import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
 
@@ -18,7 +19,7 @@ class Critic(nn.Module):
     nr_hidden_units: int
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray, a: jnp.ndarray):
+    def __call__(self, x: np.ndarray, a: np.ndarray):
         x = jnp.concatenate([x, a], -1)
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=False)
@@ -38,7 +39,7 @@ class VectorCritic(nn.Module):
     nr_critics: int
 
     @nn.compact
-    def __call__(self, obs: jnp.ndarray, action: jnp.ndarray):
+    def __call__(self, obs: np.ndarray, action: np.ndarray):
         # Reference:
         # - https://github.com/araffin/sbx/blob/f31288d2701b39dd98c921f55e13ca3530868e9f/sbx/sac/policies.py
         # - https://github.com/ikostrikov/jaxrl/blob/main/jaxrl/networks/critic_net.py
