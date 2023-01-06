@@ -7,6 +7,7 @@ python example.py \
     --config.runner.wandb_entity="placeholder" \
     --config.runner.project_name="placeholder" \
     --config.runner.exp_name="placeholder" \
+    --config.runner.notes="placeholder" \
     --config.algorithm.total_timesteps=10000 \
     --config.environment.nr_envs=1 \
     --config.environment.seed=0

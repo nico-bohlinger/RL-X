@@ -2,15 +2,17 @@
 
 A framework for Reinforcement Learning research.
 
+
 ## Highlights
 
 - 💡 **Perfect to understand and prototype algorithms**:
     - One algorithm = One folder -> No backtracking through  parent classes
     - Algorithms can be easily copied out of RL-X
-- ⚒️ **Known DL libraries**: Implementations in PyTorch, TorchScript or Jax (Flax)
-- ⚡ **Maximum speed**: Jax versions are a lot faster than PyTorch
+- ⚒️ **Known DL libraries**: Implementations in PyTorch, TorchScript or JAX (Flax)
+- ⚡ **Maximum speed**: JAX versions utilize JIT compilation -> A lot faster than PyTorch
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
 - 📈 **Experiment tracking**: Console logging, Saving models, Tensorboard, Weights and Biases
+
 
 ## Implemented Algorithms
 - [Proximal Policy Optimization (PPO)](https://arxiv.org/abs/1707.06347) in PyTorch, TorchScript, Flax
@@ -25,13 +27,13 @@ A framework for Reinforcement Learning research.
 ## Usable Environments
 - [Gymnasium](https://github.com/Farama-Foundation/Gymnasium)
     - MuJoCo
-- [Envpool](https://github.com/sail-sg/envpool)
+- [EnvPool](https://github.com/sail-sg/envpool)
     - MuJoCo
     - Atari
     - Classic control
     - DeepMind Control Suite
 
-Most of them only have one reference environment implemented.
+Most of them have only one reference environment implemented.
 To try out more just change the environment name in the create_env.py files or add a proper new folder for it.
 
 For further infos on how to add more environments and algorithms read the respective README files.
@@ -44,14 +46,10 @@ git clone git@github.com:nico-bohlinger/RL-X.git
 pip install -e .
 ```
 
+
 ## Example
 ```
 cd experiments
 python experiment.py
 ```
-or
-```
-cd experiments
-bash experiment.sh
-```
-for an example on how to use hyperparameters
+Detailed instructions can be found in the README file in the experiments folder.
