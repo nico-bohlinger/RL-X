@@ -5,12 +5,6 @@ import time
 def get_config():
     config = config_dict.ConfigDict()
 
-    config.mode = "train"  # train, test
-    config.test_episodes = 10
-
-    config.save_model = False
-    config.load_model = ""
-
     config.track_console = False
     config.track_tb = False
     config.track_wandb = False
@@ -19,5 +13,10 @@ def get_config():
     config.exp_name = "placeholder"
     config.run_name = f"{int(time.time())}"
     config.notes = "placeholder"
+
+    config.save_model = False
+    config.load_model = ""
+
+    config.nr_test_episodes = 10  # if runner mode = test
 
     return config

@@ -34,7 +34,7 @@ from rl_x.environments.gym.mujoco.humanoid_v4 import GYM_MUJOCO_HUMANOID_V4
 
 ALGORITHM = PPO_PYTORCH
 ENVIRONMENT = ENVPOOL_MUJOCO_HUMANOID_V4
-RUNNER_MODE = RunnerMode.RUN_EXPERIMENT
+RUNNER_MODE = RunnerMode.TRAIN
 
 
 if __name__ == "__main__":

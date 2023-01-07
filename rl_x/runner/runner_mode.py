@@ -2,5 +2,6 @@ from enum import Enum
 
 
 class RunnerMode(Enum):
-    RUN_EXPERIMENT = 0
-    SHOW_CONFIG = 1
+    TRAIN = 0
+    TEST = 1
+    SHOW_CONFIG = 2

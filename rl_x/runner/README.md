@@ -8,12 +8,13 @@
 - Those configs can be later overwritten via the command line
 - They are available under the config.runner namespace
     - Example: ```--config.runner.track_console=True```
-    - See: ```experiments/experiment.sh``
+    - See: ```experiments/experiment.sh```
 
 **runner_mode.py**
 - Contains all possible runner modes
-    - Running an experiment
-    - Showing all available configs of the given algorithm, environment and runner combination
+    - TRAIN: Runs the training loop
+    - TEST: Runs the testing loop, with ```--config.runner.nr_test_episodes``` many episodes
+    - SHOW_CONFIG: Prints out all available configs of the given algorithm, environment and runner combination
 
 **runner.py**
 - Takes algorithm and environment and parses all configs to run an experiment

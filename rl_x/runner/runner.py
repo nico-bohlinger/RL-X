@@ -63,36 +63,28 @@ class Runner:
 
     def run(self, mode: RunnerMode):
         if mode == RunnerMode.SHOW_CONFIG:
-            self._run_and_show_config()
-        elif mode == RunnerMode.RUN_EXPERIMENT:
-            self._run_experiment()
+            main_func = self._show_config
+        elif mode == RunnerMode.TRAIN:
+            main_func = self._train
+        elif mode == RunnerMode.TEST:
+            main_func = self._test
         else:
             raise ValueError("Invalid mode")
-        
 
-    def _run_and_show_config(self):
-        def _show_config(_):
-            self._config = self._config_flag.value
-            rlx_logger.info("\n" + str(self._config))
-        app.run(_show_config)
-    
-
-    def _run_experiment(self):
         try:
-            app.run(self._main)
+            app.run(main_func)
         except KeyboardInterrupt:
             rlx_logger.warning("KeyboardInterrupt")
 
 
-    def _main(self, _):
+    def _show_config(self, _):
         self._config = self._config_flag.value
-        if self._config.runner.mode == "train":
-            self._train()
-        elif self._config.runner.mode == "test":
-            self._test()
+        rlx_logger.info("\n" + str(self._config))
 
 
-    def _train(self):
+    def _train(self, _):
+        self._config = self._config_flag.value
+
         if self._config.runner.track_wandb:
             wandb.init(
                 entity=self._config.runner.wandb_entity,
@@ -140,8 +132,6 @@ class Runner:
             raise ValueError("Tensorboard is not supported in test mode")
         if self._config.runner.save_model:
             raise ValueError("Saving model is not supported in test mode")
-        if self._config.environment.nr_envs > 1:
-            raise ValueError("nr_envs > 1 is not supported in test mode")
         
         run_path = f"runs/{self._config.runner.project_name}/{self._config.runner.exp_name}/{self._config.runner.run_name}"
 
@@ -153,6 +143,6 @@ class Runner:
             model = self._model_class(self._config, env, run_path, None)
         
         try:
-            model.test(self._config.runner.test_episodes)
+            model.test(self._config.runner.nr_test_episodes)
         finally:
             env.close()
