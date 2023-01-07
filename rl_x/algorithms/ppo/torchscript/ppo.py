@@ -122,7 +122,7 @@ class PPO:
 
             # Calculating advantages and returns
             with torch.no_grad():
-                next_values = self.critic.get_value(batch.next_states).reshape(-1, 1)
+                next_values = self.critic.get_value(batch.next_states).squeeze(-1)
             advantages, returns = calculate_gae_advantages_and_returns(batch.rewards, batch.dones, batch.values, next_values, self.gamma, self.gae_lambda)
             
             calc_adv_return_end_time = time.time()
