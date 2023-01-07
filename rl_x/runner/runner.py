@@ -126,6 +126,8 @@ class Runner:
 
 
     def _test(self, _):
+        self._config = self._config_flag.value
+        
         if self._config.runner.track_wandb:
             raise ValueError("Wandb is not supported in test mode")
         if self._config.runner.track_tb:
