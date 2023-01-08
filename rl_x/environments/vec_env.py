@@ -6,6 +6,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Type, Union
+from copy import deepcopy
 
 import cloudpickle
 import gymnasium as gym

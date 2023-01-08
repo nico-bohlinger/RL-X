@@ -1,5 +1,5 @@
 #!/bin/bash
-python example.py \
+python experiment.py \
     --config.runner.track_console=False \
     --config.runner.track_tb=True \
     --config.runner.track_wandb=True \
