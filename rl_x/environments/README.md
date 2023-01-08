@@ -21,7 +21,7 @@
 - Not needed when using EnvPool
 
 **\<environment name\>**
-- Contains either subfolders or directly the implementation of a concrete environment
+- Contains either subdirectories or directly the implementation of a concrete environment
 - See below for more details
 
 
@@ -61,7 +61,7 @@ pong_v5
 ## Adding new environments
 Fast testing of a new environment with an already provided framework (Gymnasium or EnvPool) can be done by changing the environment name in the create_env.py file or even make it a variable and add it to the config file.
 
-To add a completely new environment or permanently a new one from an already provided framework, create a new folder with the same structure as outlined above.
+To add a completely new environment or permanently a new one from an already provided framework, create a new directory with the same structure as outlined above.
 
 For concrete implementations see the provided environments, e.g. ```rl_x/environments/gym/mujoco``` or ```rl_x/environments/envpool/atari```.
 

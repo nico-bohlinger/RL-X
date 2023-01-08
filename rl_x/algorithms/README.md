@@ -11,8 +11,8 @@
 - Base class for all algorithms
 
 **\<algorithm name\>**
-- Contains either subfolders or directly the implementation of a concrete algorithm
-- It is recommended to use subfolders for each framework, e.g. PyTorch, Flax, etc.
+- Contains either subdirectories or directly the implementation of a concrete algorithm
+- It is recommended to use subdirectories for each framework, e.g. PyTorch, Flax, etc.
 - See below for more details
 
 
@@ -50,7 +50,7 @@ ppo
 
 
 ## Adding new algorithms
-To add a new algorithm, create a new folder with the algorithm name, a subfolder for the framework and add the files described above.
+To add a new algorithm, create a new directory with the algorithm name, a subdirectory for the framework and add the files described above.
 
 For concrete implementations see the provided algorithms, e.g. ```rl_x/algorithm/ppo/pytorch``` or ```rl_x/algorithm/sac/flax```.
 

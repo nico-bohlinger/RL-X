@@ -6,7 +6,7 @@ A framework for Reinforcement Learning research.
 ## Highlights
 
 - 💡 **Perfect to understand and prototype algorithms**:
-    - One algorithm = One folder -> No backtracking through  parent classes
+    - One algorithm = One directory -> No backtracking through  parent classes
     - Algorithms can be easily copied out of RL-X
 - ⚒️ **Known DL libraries**: Implementations in PyTorch, TorchScript or JAX (Flax)
 - ⚡ **Maximum speed**: JAX versions utilize JIT compilation -> A lot faster than PyTorch
@@ -34,7 +34,7 @@ A framework for Reinforcement Learning research.
     - DeepMind Control Suite
 
 Most of them have only one reference environment implemented.
-To try out more just change the environment name in the create_env.py files or add a proper new folder for it.
+To try out more just change the environment name in the create_env.py files or add a proper new directory for it.
 
 For further infos on how to add more environments and algorithms read the respective README files.
 
@@ -52,4 +52,4 @@ pip install -e .
 cd experiments
 python experiment.py
 ```
-Detailed instructions can be found in the README file in the experiments folder.
+Detailed instructions can be found in the README file in the experiments directory.
