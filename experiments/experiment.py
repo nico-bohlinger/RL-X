@@ -34,7 +34,7 @@ from rl_x.environments.envpool.atari.pong_v5 import ENVPOOL_ATARI_PONG_V5
 from rl_x.environments.gym.mujoco.humanoid_v4 import GYM_MUJOCO_HUMANOID_V4
 
 
-ALGORITHM = MPO_FLAX
+ALGORITHM = PPO_PYTORCH
 ENVIRONMENT = ENVPOOL_MUJOCO_HUMANOID_V4
 RUNNER_MODE = RunnerMode.TRAIN
 

@@ -15,9 +15,8 @@ import wandb
 
 from rl_x.algorithms.mpo.flax.policy import get_policy
 from rl_x.algorithms.mpo.flax.critic import get_critic
-from rl_x.algorithms.mpo.flax.entropy_coefficient import EntropyCoefficient
 from rl_x.algorithms.mpo.flax.replay_buffer import ReplayBuffer
-from rl_x.algorithms.mpo.flax.rl_train_state import RLTrainState
+from rl_x.algorithms.mpo.flax.types import AgentParams, DualParams, TrainingState
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -36,21 +35,22 @@ class MPO():
         self.seed = config.environment.seed
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
-        self.learning_rate = config.algorithm.learning_rate
-        self.anneal_learning_rate = config.algorithm.anneal_learning_rate
+        self.agent_learning_rate = config.algorithm.agent_learning_rate
+        self.dual_learning_rate = config.algorithm.dual_learning_rate
+        self.anneal_agent_learning_rate = config.algorithm.anneal_agent_learning_rate
+        self.anneal_dual_learning_rate = config.algorithm.anneal_dual_learning_rate
+        self.init_log_temperature = config.algorithm.init_log_temperature
+        self.init_log_alpha_mean = config.algorithm.init_log_alpha_mean
+        self.init_log_alpha_stddev = config.algorithm.init_log_alpha_stddev
         self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
         self.ensemble_size = config.algorithm.ensemble_size
-        self.q_update_steps = config.algorithm.q_update_steps
-        self.policy_update_steps = config.algorithm.policy_update_steps
-        self.entropy_update_steps = config.algorithm.entropy_update_steps
-        self.target_entropy = config.algorithm.target_entropy
         self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
-        self.max_nr_batches_needed = max(self.q_update_steps, self.policy_update_steps, self.entropy_update_steps)
+        self.max_nr_batches_needed = 1
 
         if config.algorithm.device == "cpu":
             jax.config.update("jax_platform_name", "cpu")
@@ -59,63 +59,56 @@ class MPO():
         random.seed(self.seed)
         np.random.seed(self.seed)
         self.key = jax.random.PRNGKey(self.seed)
-        self.key, policy_key, critic_key, entropy_coefficient_key = jax.random.split(self.key, 4)
+        self.key, policy_key, critic_key = jax.random.split(self.key, 3)
 
         self.env_as_low = env.action_space.low
         self.env_as_high = env.action_space.high
 
         self.policy, self.get_processed_action = get_policy(config, env)
         self.vector_critic = get_critic(config, env)
-        
-        if self.target_entropy == "auto":
-            self.target_entropy = -np.prod(env.get_single_action_space_shape()).item()
-        else:
-            self.target_entropy = float(self.target_entropy)
-        self.entropy_coefficient = EntropyCoefficient(1.0)
 
         self.policy.apply = jax.jit(self.policy.apply)
         self.vector_critic.apply = jax.jit(self.vector_critic.apply)
-        self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
 
-        def q_linear_schedule(step):
+        def agent_linear_schedule(step):
             total_steps = self.total_timesteps
-            fraction = 1.0 - (step / (total_steps * self.q_update_steps))
-            return self.learning_rate * fraction
-    
-        def policy_linear_schedule(step):
-            total_steps = self.total_timesteps
-            fraction = 1.0 - (step / (total_steps * self.policy_update_steps))
-            return self.learning_rate * fraction
-
-        def entropy_linear_schedule(step):
-            total_steps = self.total_timesteps
-            fraction = 1.0 - (step / (total_steps * self.entropy_update_steps))
-            return self.learning_rate * fraction
+            fraction = 1.0 - (step / (total_steps))
+            return self.agent_learning_rate * fraction
         
-        self.q_learning_rate = q_linear_schedule if self.anneal_learning_rate else self.learning_rate
-        self.policy_learning_rate = policy_linear_schedule if self.anneal_learning_rate else self.learning_rate
-        self.entropy_learning_rate = entropy_linear_schedule if self.anneal_learning_rate else self.learning_rate
+        def dual_linear_schedule(step):
+            total_steps = self.total_timesteps
+            fraction = 1.0 - (step / (total_steps))
+            return self.dual_learning_rate * fraction
+
+        agent_learning_rate = agent_linear_schedule if self.anneal_agent_learning_rate else self.agent_learning_rate
+        dual_learning_rate = dual_linear_schedule if self.anneal_dual_learning_rate else self.dual_learning_rate
+
+        self.agent_optimizer = optax.inject_hyperparams(optax.adam)(learning_rate=agent_learning_rate)
+        self.dual_optimizer = optax.inject_hyperparams(optax.adam)(learning_rate=dual_learning_rate)
 
         state = jnp.array([self.env.observation_space.sample()])
         action = jnp.array([self.env.action_space.sample()])
 
-        self.policy_state = TrainState.create(
-            apply_fn=self.policy.apply,
-            params=self.policy.init(policy_key, state),
-            tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.policy_learning_rate)
+        agent_params = AgentParams(
+            policy_params=self.policy.init(policy_key, state),
+            critic_params=self.vector_critic.init(critic_key, state, action)
+        )
+        
+        dual_variable_shape = [np.prod(env.get_single_action_space_shape()).item()]
+
+        dual_params = DualParams(
+            log_temperature=jnp.full([1], self.init_log_temperature, dtype=jnp.float32),
+            log_alpha_mean=jnp.full(dual_variable_shape, self.init_log_alpha_mean, dtype=jnp.float32),
+            log_alpha_stddev=jnp.full(dual_variable_shape, self.init_log_alpha_stddev, dtype=jnp.float32)
         )
 
-        self.vector_critic_state = RLTrainState.create(
-            apply_fn=self.vector_critic.apply,
-            params=self.vector_critic.init(critic_key, state, action),
-            target_params=self.vector_critic.init(critic_key, state, action),
-            tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.q_learning_rate)
-        )
-
-        self.entropy_coefficient_state = TrainState.create(
-            apply_fn=self.entropy_coefficient.apply,
-            params=self.entropy_coefficient.init(entropy_coefficient_key),
-            tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.entropy_learning_rate)
+        self.train_state = TrainingState(
+            agent_params=agent_params,
+            agent_target_params=agent_params,
+            dual_params=dual_params,
+            agent_optimizer_state=self.agent_optimizer.init(agent_params),
+            dual_optimizer_state=self.dual_optimizer.init(dual_params),
+            steps=0,
         )
 
         if self.save_model:
@@ -125,87 +118,16 @@ class MPO():
     
     def train(self):
         @jax.jit
-        def get_action(policy_state: TrainState, state: np.ndarray, key: jax.random.PRNGKey):
-            dist = self.policy.apply(policy_state.params, state)
+        def get_action(policy_params: flax.core.FrozenDict, state: np.ndarray, key: jax.random.PRNGKey):
+            dist = self.policy.apply(policy_params, state)
             key, subkey = jax.random.split(key)
             action = dist.sample(seed=subkey)
             return action, key
 
 
         @jax.jit
-        def update(
-                policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState,
-                states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, key: jax.random.PRNGKey
-            ):
-            # Update critic
-            q_losses = []
-
-            for i in range(self.q_update_steps):
-                dist = self.policy.apply(policy_state.params, next_states[i])
-                key, subkey = jax.random.split(key)
-                next_actions = dist.sample(seed=subkey)
-                next_log_probs = dist.log_prob(next_actions)
-
-                alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
-
-                next_q_targets = self.vector_critic.apply(vector_critic_state.target_params, next_states[i], next_actions)
-                min_next_q_target = jnp.min(next_q_targets, axis=0).reshape(-1, 1)
-                y = rewards[i].reshape(-1, 1) + self.gamma * (1 - dones[i].reshape(-1, 1)) * (min_next_q_target - alpha * next_log_probs.reshape(-1, 1))
-
-                def loss_fn(vector_critic_params: flax.core.FrozenDict):
-                    qs = self.vector_critic.apply(vector_critic_params, states[i], actions[i])
-                    return ((qs - y) ** 2).mean()
-                
-                q_loss, grads = jax.value_and_grad(loss_fn, has_aux=False)(vector_critic_state.params)
-                vector_critic_state = vector_critic_state.apply_gradients(grads=grads)
-                q_losses.append(q_loss)
-
-                # Update targets
-                vector_critic_state = vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
-
-
-            # Update policy
-            policy_losses = []
-            entropies = []
-            alphas = []
-
-            for i in range(self.policy_update_steps):
-                key, subkey = jax.random.split(key)
-
-                def loss_fn(policy_params: flax.core.FrozenDict):
-                    dist = self.policy.apply(policy_params, states[i])
-                    current_actions = dist.sample(seed=subkey)
-                    current_log_probs = dist.log_prob(current_actions).reshape(-1, 1)
-
-                    qs = self.vector_critic.apply(vector_critic_state.params, states[i], current_actions)
-                    min_q = jnp.min(qs, axis=0)
-
-                    alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
-
-                    policy_loss = (alpha * current_log_probs - min_q).mean()
-                    return policy_loss, (-current_log_probs.mean(), alpha)
-                
-                (policy_loss, (entropy, alpha)), grads = jax.value_and_grad(loss_fn, has_aux=True)(policy_state.params)
-                policy_state = policy_state.apply_gradients(grads=grads)
-                policy_losses.append(policy_loss)
-                entropies.append(entropy)
-                alphas.append(alpha)
-
-
-            # Update entropy coefficient
-            entropy_losses = []
-
-            for i in range(self.entropy_update_steps):
-                def loss_fn(entropy_coefficient_params: flax.core.FrozenDict):
-                    alpha = self.entropy_coefficient.apply(entropy_coefficient_params)
-                    return alpha * (entropies[i] - self.target_entropy)
-            
-                entropy_loss, grads = jax.value_and_grad(loss_fn, has_aux=False)(entropy_coefficient_state.params)
-                entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=grads)
-                entropy_losses.append(entropy_loss)
-
-
-            return jnp.array(q_losses), jnp.array(policy_losses), jnp.array(entropies), jnp.array(alphas), jnp.array(entropy_losses), policy_state, vector_critic_state, entropy_coefficient_state, key
+        def update():
+            pass
 
 
         self.set_train_mode()
@@ -218,11 +140,6 @@ class MPO():
         optimize_time_buffer = deque(maxlen=self.logging_freq)
         saving_time_buffer = deque(maxlen=self.logging_freq)
         fps_buffer = deque(maxlen=self.logging_freq)
-        q_loss_buffer = deque(maxlen=self.logging_freq)
-        policy_loss_buffer = deque(maxlen=self.logging_freq)
-        entropy_loss_buffer = deque(maxlen=self.logging_freq)
-        entropy_buffer = deque(maxlen=self.logging_freq)
-        alpha_buffer = deque(maxlen=self.logging_freq)
 
         state = self.env.reset()
 
@@ -236,7 +153,7 @@ class MPO():
                 processed_action = np.array([self.env.action_space.sample() for _ in range(self.nr_envs)])
                 action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
             else:
-                action, self.key = get_action(self.policy_state, state, self.key)
+                action, self.key = get_action(self.train_state.agent_params.policy_params, state, self.key)
                 processed_action = self.get_processed_action(action)
             
             next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
@@ -269,18 +186,14 @@ class MPO():
 
             # Optimizing - Prepare batches
             if should_optimize:
-                max_nr_batches_needed = max(self.q_update_steps, self.policy_update_steps, self.entropy_update_steps)
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, max_nr_batches_needed)
+                ...
+                # TODO
 
 
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
-                q_loss, policy_loss, entropies, alphas, entropy_loss, self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
-                q_loss_buffer.extend(q_loss)
-                policy_loss_buffer.extend(policy_loss)
-                entropy_loss_buffer.extend(entropy_loss)
-                entropy_buffer.extend(entropies)
-                alpha_buffer.extend(alphas)
+                ...
+                # TODO
             
             optimize_end_time = time.time()
             optimize_time_buffer.append(optimize_end_time - acting_end_time)
@@ -288,10 +201,8 @@ class MPO():
 
             # Saving
             if should_try_to_save:
-                mean_return = np.mean(saving_return_buffer)
-                if mean_return > self.best_mean_return:
-                    self.best_mean_return = mean_return
-                    self.save()
+                ...
+                # TODO
             
             saving_end_time = time.time()
             saving_time_buffer.append(saving_end_time - optimize_end_time)
@@ -318,12 +229,8 @@ class MPO():
                 self.log("time/acting_time", np.mean(acting_time_buffer), global_step)
                 self.log("time/optimize_time", np.mean(optimize_time_buffer), global_step)
                 self.log("time/saving_time", np.mean(saving_time_buffer), global_step)
-                self.log("train/learning_rate", self.policy_state.opt_state.hyperparams["learning_rate"].item(), global_step)
-                self.log("train/q_loss", self.get_buffer_mean(q_loss_buffer), global_step)
-                self.log("train/policy_loss", self.get_buffer_mean(policy_loss_buffer), global_step)
-                self.log("train/entropy_loss", self.get_buffer_mean(entropy_loss_buffer), global_step)
-                self.log("train/entropy", self.get_buffer_mean(entropy_buffer), global_step)
-                self.log("train/alpha", self.get_buffer_mean(alpha_buffer), global_step)
+                # self.log("train/agent_learning_rate", self.train_state.agent_optimizer_state.hyperparams["learning_rate"].item(), global_step)
+                # self.log("train/dual_learning_rate", self.train_state.dual_optimizer_state.hyperparams["learning_rate"].item(), global_step)
 
                 if self.track_console:
                     rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
@@ -333,11 +240,6 @@ class MPO():
                 optimize_time_buffer.clear()
                 saving_time_buffer.clear()
                 fps_buffer.clear()
-                q_loss_buffer.clear()
-                policy_loss_buffer.clear()
-                entropy_loss_buffer.clear()
-                entropy_buffer.clear()
-                alpha_buffer.clear()
 
 
     def get_buffer_mean(self, buffer):
@@ -360,67 +262,18 @@ class MPO():
         
 
     def save(self):
-        jax_file_path = self.save_path + "/model_best_jax_0"
-        config_file_path = self.save_path + "/model_best_config_0"
-
-        checkpoints.save_checkpoint(
-            ckpt_dir=self.save_path,
-            target={"policy": self.policy_state, "vector_critic": self.vector_critic_state, "entropy_coefficient": self.entropy_coefficient_state},
-            step=0,
-            prefix="model_best_jax_",
-            overwrite=True
-        )
-
-        with open(config_file_path, "wb") as file:
-            pickle.dump({"config_algorithm": self.config.algorithm}, file, pickle.HIGHEST_PROTOCOL)
-
-        if self.track_wandb:
-            wandb.save(jax_file_path, base_path=os.path.dirname(jax_file_path))
-            wandb.save(config_file_path, base_path=os.path.dirname(config_file_path))
+        # TODO
+        pass
     
             
     def load(config, env, run_path, writer):
-        splitted_path = config.runner.load_model.split("/")
-        checkpoint_dir = "/".join(splitted_path[:-1])
-        checkpoint_name = splitted_path[-1]
-        splitted_checkpoint_name = checkpoint_name.split("_")
-
-        config_file_name = "_".join(splitted_checkpoint_name[:-2]) + "_config_" + splitted_checkpoint_name[-1]
-        with open(f"{checkpoint_dir}/{config_file_name}", "rb") as file:
-            config.algorithm = pickle.load(file)["config_algorithm"]
-        model = MPO(config, env, run_path, writer)
-
-        jax_file_name = "_".join(splitted_checkpoint_name[:-1]) + "_"
-        step = int(splitted_checkpoint_name[-1])
-        restored_train_state = checkpoints.restore_checkpoint(
-            ckpt_dir=checkpoint_dir,
-            target={"policy": model.policy_state, "vector_critic": model.vector_critic_state, "entropy_coefficient": model.entropy_coefficient_state},
-            step=step,
-            prefix=jax_file_name
-        )
-        model.policy_state = restored_train_state["policy"]
-        model.vector_critic_state = restored_train_state["vector_critic"]
-        model.entropy_coefficient_state = restored_train_state["entropy_coefficient"]
-
-        return model
+        # TODO
+        pass
     
 
     def test(self, episodes):
-        @jax.jit
-        def get_action(policy_state: TrainState, state: np.ndarray):
-            dist = self.policy.apply(policy_state.params, state)
-            action = dist.mode()
-            return self.get_processed_action(action)
-        
-        self.set_eval_mode()
-        for i in range(episodes):
-            done = False
-            state = self.env.reset()
-            while not done:
-                processed_action = get_action(self.policy_state, state)
-                state, reward, done, info = self.env.step(jax.device_get(processed_action))
-            return_val = self.env.get_episode_infos(info)[0]["r"]
-            rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
+        # TODO
+        pass
     
 
     def set_train_mode(self):
