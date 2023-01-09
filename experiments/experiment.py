@@ -23,6 +23,8 @@ from rl_x.algorithms.droq.flax import DROQ_FLAX
 from rl_x.algorithms.tqc.flax import TQC_FLAX
 ## AQE
 from rl_x.algorithms.aqe.flax import AQE_FLAX
+## MPO
+from rl_x.algorithms.mpo.flax import MPO_FLAX
 
 # Environments
 from rl_x.environments.envpool.mujoco.humanoid_v4 import ENVPOOL_MUJOCO_HUMANOID_V4
@@ -32,7 +34,7 @@ from rl_x.environments.envpool.atari.pong_v5 import ENVPOOL_ATARI_PONG_V5
 from rl_x.environments.gym.mujoco.humanoid_v4 import GYM_MUJOCO_HUMANOID_V4
 
 
-ALGORITHM = PPO_PYTORCH
+ALGORITHM = MPO_FLAX
 ENVIRONMENT = ENVPOOL_MUJOCO_HUMANOID_V4
 RUNNER_MODE = RunnerMode.TRAIN
 
