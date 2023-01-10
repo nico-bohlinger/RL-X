@@ -6,8 +6,6 @@ import flax.linen as nn
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
-from rl_x.algorithms.mpo.flax.tanh_transformed_distribution import TanhTransformedDistribution
-
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
 
@@ -17,7 +15,7 @@ def get_policy(config, env):
     observation_space_type = env.get_observation_space_type()
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return (Policy(env.get_single_action_space_shape(), config.algorithm.log_std_min, config.algorithm.log_std_max, config.algorithm.nr_hidden_units),
+        return (Policy(env.get_single_action_space_shape(), config.algorithm.init_stddev, config.algorithm.min_stddev, config.algorithm.nr_hidden_units),
                 get_processed_action_function(jnp.array(env.action_space.low), jnp.array(env.action_space.high)))
     else:
         raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
@@ -26,8 +24,8 @@ def get_policy(config, env):
 
 class Policy(nn.Module):
     as_shape: Sequence[int]
-    log_std_min: float
-    log_std_max: float
+    init_stddev: float
+    min_stddev: float
     nr_hidden_units: int
 
     @nn.compact
@@ -38,10 +36,11 @@ class Policy(nn.Module):
         x = nn.relu(x)
 
         mean = nn.Dense(np.prod(self.as_shape).item())(x)
-        log_std = nn.Dense(np.prod(self.as_shape).item())(x)
-        log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
 
-        dist = TanhTransformedDistribution(tfd.MultivariateNormalDiag(loc=mean, scale_diag=jnp.exp(log_std)))
+        stddev = nn.Dense(np.prod(self.as_shape).item())(x)
+        stddev = self.min_stddev + (jax.nn.softplus(stddev) * self.init_stddev / jax.nn.softplus(0.0))  # Cholesky factor from MPO paper, implemented like in https://github.com/deepmind/acme/blob/master/acme/jax/networks/distributional.py
+
+        dist = tfd.MultivariateNormalDiag(loc=mean, scale_diag=stddev)
 
         return dist
 

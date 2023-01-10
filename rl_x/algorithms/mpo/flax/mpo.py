@@ -42,6 +42,8 @@ class MPO():
         self.init_log_temperature = config.algorithm.init_log_temperature
         self.init_log_alpha_mean = config.algorithm.init_log_alpha_mean
         self.init_log_alpha_stddev = config.algorithm.init_log_alpha_stddev
+        self.min_log_temperature = config.algorithm.min_log_temperature
+        self.min_log_alpha = config.algorithm.min_log_alpha
         self.trace_length = config.algorithm.trace_length
         self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
@@ -133,8 +135,56 @@ class MPO():
 
 
         @jax.jit
-        def update():
-            pass
+        def update(train_state: TrainingState, states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey):
+            def loss_fn(agent_params: flax.core.FrozenDict, dual_params: flax.core.FrozenDict, agent_target_params: flax.core.FrozenDict,
+                        states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey
+                ):
+                # Compute predictions
+                action_dist = self.policy.apply(agent_params.policy_params, states)
+                q_values = self.vector_critic.apply(agent_params.critic_params, states, actions)
+                min_q_values = jnp.min(q_values, axis=0)
+
+                # Compute targets
+                # TODO
+
+                # Compute policy loss
+                # TODO
+                policy_loss = 0
+
+                # Compute critic loss
+                # TODO
+                critic_loss = 0
+
+                loss = policy_loss + critic_loss
+
+                return loss, (policy_loss, critic_loss, key)
+
+
+            (loss, (policy_loss, critic_loss, key)), (agent_gradients, dual_gradients) = jax.value_and_grad(loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, next_states, actions, rewards, dones, log_probs, key)
+            
+            agent_updates, agent_optimizer_state = self.agent_optimizer.update(agent_gradients, train_state.agent_optimizer_state, train_state.agent_params)
+            dual_updates, dual_optimizer_state = self.dual_optimizer.update(dual_gradients, train_state.dual_optimizer_state, train_state.dual_params)
+
+            agent_params = optax.apply_updates(train_state.agent_params, agent_updates)
+            agent_target_params = optax.incremental_update(train_state.agent_params, train_state.agent_target_params, self.tau)
+
+            dual_params = optax.apply_updates(train_state.dual_params, dual_updates)
+            dual_params = DualParams(
+                log_temperature=jnp.maximum(dual_params.log_temperature, self.min_log_temperature),
+                log_alpha_mean=jnp.maximum(dual_params.log_alpha_mean, self.min_log_alpha),
+                log_alpha_stddev=jnp.maximum(dual_params.log_alpha_stddev, self.min_log_alpha)
+            )
+
+            train_state = TrainingState(
+                agent_params=agent_params,
+                agent_target_params=agent_target_params,
+                dual_params=dual_params,
+                agent_optimizer_state=agent_optimizer_state,
+                dual_optimizer_state=dual_optimizer_state,
+                steps=train_state.steps + 1
+            )
+
+            return train_state, loss, policy_loss, critic_loss, key
 
 
         self.set_train_mode()
@@ -154,6 +204,9 @@ class MPO():
         optimize_time_buffer = deque(maxlen=self.logging_freq)
         saving_time_buffer = deque(maxlen=self.logging_freq)
         fps_buffer = deque(maxlen=self.logging_freq)
+        complete_loss_buffer = deque(maxlen=self.logging_freq)
+        policy_loss_buffer = deque(maxlen=self.logging_freq)
+        critic_loss_buffer = deque(maxlen=self.logging_freq)
 
         state = self.env.reset()
 
@@ -189,7 +242,7 @@ class MPO():
             log_prob_stack = np.roll(log_prob_stack, shift=-1, axis=1)
 
             state_stack[:, -1] = state
-            actual_next_state_stack[:, -1] = actual_next_state_stack
+            actual_next_state_stack[:, -1] = actual_next_state
             action_stack[:, -1] = action
             reward_stack[:, -1] = reward
             done_stack[:, -1] = done
@@ -222,9 +275,12 @@ class MPO():
 
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
-                ...
-                # TODO
-            
+                self.train_state, complete_loss, policy_loss, critic_loss, self.key = update(
+                    self.train_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_log_probs, self.key)
+                complete_loss_buffer.append(complete_loss)
+                policy_loss_buffer.append(policy_loss)
+                critic_loss_buffer.append(critic_loss)
+
             optimize_end_time = time.time()
             optimize_time_buffer.append(optimize_end_time - acting_end_time)
 
@@ -263,6 +319,9 @@ class MPO():
                 self.log("time/saving_time", np.mean(saving_time_buffer), global_step)
                 self.log("train/agent_learning_rate", self.train_state.agent_optimizer_state.hyperparams["learning_rate"].item(), global_step)
                 self.log("train/dual_learning_rate", self.train_state.dual_optimizer_state.hyperparams["learning_rate"].item(), global_step)
+                self.log("train/complete_loss", self.get_buffer_mean(complete_loss_buffer), global_step)
+                self.log("train/policy_loss", self.get_buffer_mean(policy_loss_buffer), global_step)
+                self.log("train/critic_loss", self.get_buffer_mean(critic_loss_buffer), global_step)
 
                 if self.track_console:
                     rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
@@ -272,6 +331,9 @@ class MPO():
                 optimize_time_buffer.clear()
                 saving_time_buffer.clear()
                 fps_buffer.clear()
+                complete_loss_buffer.clear()
+                policy_loss_buffer.clear()
+                critic_loss_buffer.clear()
 
 
     def get_buffer_mean(self, buffer):
