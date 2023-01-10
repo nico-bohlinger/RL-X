@@ -20,6 +20,7 @@ def get_config(algorithm_name):
     config.init_log_temperature = 10.0
     config.init_log_alpha_mean = 10.0
     config.init_log_alpha_stddev = 1000.0
+    config.trace_length = 8
     config.ensemble_size = 2
     config.log_std_min = -20
     config.log_std_max = 2

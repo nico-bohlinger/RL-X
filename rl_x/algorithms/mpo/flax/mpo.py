@@ -42,6 +42,7 @@ class MPO():
         self.init_log_temperature = config.algorithm.init_log_temperature
         self.init_log_alpha_mean = config.algorithm.init_log_alpha_mean
         self.init_log_alpha_stddev = config.algorithm.init_log_alpha_stddev
+        self.trace_length = config.algorithm.trace_length
         self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
@@ -50,7 +51,6 @@ class MPO():
         self.ensemble_size = config.algorithm.ensemble_size
         self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
-        self.max_nr_batches_needed = 1
 
         if config.algorithm.device == "cpu":
             jax.config.update("jax_platform_name", "cpu")
@@ -118,11 +118,18 @@ class MPO():
     
     def train(self):
         @jax.jit
-        def get_action(policy_params: flax.core.FrozenDict, state: np.ndarray, key: jax.random.PRNGKey):
+        def get_action_and_log_prob(policy_params: flax.core.FrozenDict, state: np.ndarray, key: jax.random.PRNGKey):
             dist = self.policy.apply(policy_params, state)
             key, subkey = jax.random.split(key)
             action = dist.sample(seed=subkey)
-            return action, key
+            log_prob = dist.log_prob(action)
+            return action, log_prob, key
+
+
+        @jax.jit
+        def get_log_prob(policy_params: flax.core.FrozenDict, state: np.ndarray, action: np.ndarray):
+            dist = self.policy.apply(policy_params, state)
+            return dist.log_prob(action)
 
 
         @jax.jit
@@ -132,7 +139,14 @@ class MPO():
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.observation_space.shape, self.env.action_space.shape)
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.trace_length, self.env.observation_space.shape, self.env.action_space.shape)
+
+        state_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.observation_space.shape, dtype=np.float32)
+        actual_next_state_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.observation_space.shape, dtype=np.float32)
+        action_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.action_space.shape, dtype=np.float32)
+        reward_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
+        done_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
+        log_prob_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
 
         saving_return_buffer = deque(maxlen=100)
         episode_info_buffer = deque(maxlen=self.logging_freq)
@@ -152,8 +166,9 @@ class MPO():
             if global_step < self.learning_starts:
                 processed_action = np.array([self.env.action_space.sample() for _ in range(self.nr_envs)])
                 action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
+                log_prob = get_log_prob(self.train_state.agent_params.policy_params, state, action)
             else:
-                action, self.key = get_action(self.train_state.agent_params.policy_params, state, self.key)
+                action, log_prob, self.key = get_action_and_log_prob(self.train_state.agent_params.policy_params, state, self.key)
                 processed_action = self.get_processed_action(action)
             
             next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
@@ -164,10 +179,26 @@ class MPO():
                     if maybe_terminal_observation is not None:
                         actual_next_state[i] = maybe_terminal_observation
             
-            replay_buffer.add(state, actual_next_state, action, reward, done)
+            global_step += self.nr_envs
+            
+            state_stack = np.roll(state_stack, shift=-1, axis=1)
+            actual_next_state_stack = np.roll(actual_next_state_stack, shift=-1, axis=1)
+            action_stack = np.roll(action_stack, shift=-1, axis=1)
+            reward_stack = np.roll(reward_stack, shift=-1, axis=1)
+            done_stack = np.roll(done_stack, shift=-1, axis=1)
+            log_prob_stack = np.roll(log_prob_stack, shift=-1, axis=1)
+
+            state_stack[:, -1] = state
+            actual_next_state_stack[:, -1] = actual_next_state_stack
+            action_stack[:, -1] = action
+            reward_stack[:, -1] = reward
+            done_stack[:, -1] = done
+            log_prob_stack[:, -1] = log_prob
+
+            if global_step / self.nr_envs >= self.trace_length:
+                replay_buffer.add(state_stack, actual_next_state_stack, action_stack, reward_stack, done_stack, log_prob_stack)
 
             state = next_state
-            global_step += self.nr_envs
 
             episode_infos = self.env.get_episode_infos(info)
             episode_info_buffer.extend(episode_infos)
@@ -186,8 +217,7 @@ class MPO():
 
             # Optimizing - Prepare batches
             if should_optimize:
-                ...
-                # TODO
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_log_probs = replay_buffer.sample(self.batch_size)
 
 
             # Optimizing - Q-functions, policy and entropy coefficient
@@ -201,8 +231,10 @@ class MPO():
 
             # Saving
             if should_try_to_save:
-                ...
-                # TODO
+                mean_return = np.mean(saving_return_buffer)
+                if mean_return > self.best_mean_return:
+                    self.best_mean_return = mean_return
+                    self.save()
             
             saving_end_time = time.time()
             saving_time_buffer.append(saving_end_time - optimize_end_time)
@@ -229,8 +261,8 @@ class MPO():
                 self.log("time/acting_time", np.mean(acting_time_buffer), global_step)
                 self.log("time/optimize_time", np.mean(optimize_time_buffer), global_step)
                 self.log("time/saving_time", np.mean(saving_time_buffer), global_step)
-                # self.log("train/agent_learning_rate", self.train_state.agent_optimizer_state.hyperparams["learning_rate"].item(), global_step)
-                # self.log("train/dual_learning_rate", self.train_state.dual_optimizer_state.hyperparams["learning_rate"].item(), global_step)
+                self.log("train/agent_learning_rate", self.train_state.agent_optimizer_state.hyperparams["learning_rate"].item(), global_step)
+                self.log("train/dual_learning_rate", self.train_state.dual_optimizer_state.hyperparams["learning_rate"].item(), global_step)
 
                 if self.track_console:
                     rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
@@ -262,18 +294,65 @@ class MPO():
         
 
     def save(self):
-        # TODO
-        pass
+        jax_file_path = self.save_path + "/model_best_jax_0"
+        config_file_path = self.save_path + "/model_best_config_0"
+
+        checkpoints.save_checkpoint(
+            ckpt_dir=self.save_path,
+            target={"train_state": self.train_state},
+            step=0,
+            prefix="model_best_jax_",
+            overwrite=True
+        )
+
+        with open(config_file_path, "wb") as file:
+            pickle.dump({"config_algorithm": self.config.algorithm}, file, pickle.HIGHEST_PROTOCOL)
+
+        if self.track_wandb:
+            wandb.save(jax_file_path, base_path=os.path.dirname(jax_file_path))
+            wandb.save(config_file_path, base_path=os.path.dirname(config_file_path))
     
             
     def load(config, env, run_path, writer):
-        # TODO
-        pass
+        splitted_path = config.runner.load_model.split("/")
+        checkpoint_dir = "/".join(splitted_path[:-1])
+        checkpoint_name = splitted_path[-1]
+        splitted_checkpoint_name = checkpoint_name.split("_")
+
+        config_file_name = "_".join(splitted_checkpoint_name[:-2]) + "_config_" + splitted_checkpoint_name[-1]
+        with open(f"{checkpoint_dir}/{config_file_name}", "rb") as file:
+            config.algorithm = pickle.load(file)["config_algorithm"]
+        model = MPO(config, env, run_path, writer)
+
+        jax_file_name = "_".join(splitted_checkpoint_name[:-1]) + "_"
+        step = int(splitted_checkpoint_name[-1])
+        restored_train_state = checkpoints.restore_checkpoint(
+            ckpt_dir=checkpoint_dir,
+            target={"train_state": model.train_state},
+            step=step,
+            prefix=jax_file_name
+        )
+        model.train_state = restored_train_state["train_state"]
+
+        return model
     
 
     def test(self, episodes):
-        # TODO
-        pass
+        @jax.jit
+        def get_action(policy_params: flax.core.FrozenDict, state: np.ndarray):
+            dist = self.policy.apply(policy_params, state)
+            action = dist.mode()
+            return self.get_processed_action(action)
+        
+        self.set_eval_mode()
+        for i in range(episodes):
+            done = False
+            state = self.env.reset()
+            while not done:
+                processed_action = get_action(self.train_state.agent_params.policy_params, state)
+                state, reward, done, info = self.env.step(jax.device_get(processed_action))
+            return_val = self.env.get_episode_infos(info)[0]["r"]
+            rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
     
 
     def set_train_mode(self):
