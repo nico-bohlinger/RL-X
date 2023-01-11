@@ -9,7 +9,7 @@ def get_critic(config, env):
     observation_space_type = env.get_observation_space_type()
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return VectorCritic(config.algorithm.nr_hidden_units, config.algorithm.ensemble_size)
+        return VectorCritic(config.algorithm.nr_hidden_units, 1)
     else:
         raise ValueError(f"Unsupported observation_space_type: {observation_space_type}")
 
@@ -28,6 +28,7 @@ class Critic(nn.Module):
         return x
     
 
+# Not really necessary to use a vectorized critic here, because standard MPO doesn't seem to use multiple critics
 class VectorCritic(nn.Module):
     nr_hidden_units: int
     nr_critics: int

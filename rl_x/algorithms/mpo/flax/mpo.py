@@ -39,18 +39,19 @@ class MPO():
         self.dual_learning_rate = config.algorithm.dual_learning_rate
         self.anneal_agent_learning_rate = config.algorithm.anneal_agent_learning_rate
         self.anneal_dual_learning_rate = config.algorithm.anneal_dual_learning_rate
+        self.nr_samples = config.algorithm.nr_samples
         self.init_log_temperature = config.algorithm.init_log_temperature
         self.init_log_alpha_mean = config.algorithm.init_log_alpha_mean
         self.init_log_alpha_stddev = config.algorithm.init_log_alpha_stddev
         self.min_log_temperature = config.algorithm.min_log_temperature
         self.min_log_alpha = config.algorithm.min_log_alpha
+        self.retrace_lambda = config.algorithm.retrace_lambda
         self.trace_length = config.algorithm.trace_length
         self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
-        self.ensemble_size = config.algorithm.ensemble_size
         self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
 
@@ -139,13 +140,53 @@ class MPO():
             def loss_fn(agent_params: flax.core.FrozenDict, dual_params: flax.core.FrozenDict, agent_target_params: flax.core.FrozenDict,
                         states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey
                 ):
+                # TODO: Should target calculation be outside the loss function? Does that make it faster or even results in no need of stop gradient?
+
+                # Keys
+                # TODO: give better key names
+                key, k1, k2 = jax.random.split(key, 3)
+
                 # Compute predictions
-                action_dist = self.policy.apply(agent_params.policy_params, states)
-                q_values = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1])
-                min_q_values = jnp.min(q_values, axis=0)
+                q_values = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1]).squeeze((0, 2))
 
                 # Compute targets
-                # TODO
+                target_policy = self.policy.apply(agent_target_params.policy_params, states)
+
+                a_improvement = target_policy.sample(self.nr_samples, seed=k1)
+
+                vmap_critic_call = jax.vmap(self.vector_critic.apply, in_axes=(None, None, 0))
+                q_improvement = vmap_critic_call(agent_target_params.critic_params, states, a_improvement).squeeze((1, 3))
+
+                eval_policy = target_policy
+
+                a_evaluation = eval_policy.sample(self.nr_samples, seed=k2)
+
+                value_target = vmap_critic_call(agent_target_params.critic_params, states, a_evaluation).squeeze((1, 3))
+                value_target = jnp.mean(value_target, axis=0)
+
+                ###
+                # Retrace calculation defined in rlax and used by acme: https://github.com/deepmind/rlax/blob/master/rlax/_src/multistep.py#L380#L433
+                q_t = self.vector_critic.apply(agent_target_params.critic_params, states, actions).squeeze((0, 2))[1:-1]
+                v_t = value_target[1:]
+                r_t = rewards[:-1]
+                discount_t = self.gamma * (1 - dones[:-1])
+                log_rhos = target_policy.log_prob(action) - log_probs
+                c_t = self.retrace_lambda * jnp.minimum(1.0, jnp.exp(log_rhos[1:-1]))
+
+                g = r_t[-1] + discount_t[-1] * v_t[-1]
+
+                def _body(acc, xs):
+                    reward, discount, c, v, q = xs
+                    acc = reward + discount * (v - c * q + c * acc)
+                    return acc, acc
+                
+                _, returns = jax.lax.scan(_body, g, (r_t[:-1], discount_t[:-1], c_t, v_t[:-1], q_t), reverse=True)
+                returns = jnp.concatenate([returns, g[jnp.newaxis]], axis=0)
+                ###
+
+                q_value_target = jax.lax.stop_gradient(returns)
+                reward_target = jax.lax.stop_gradient(rewards)
+                value_target = jax.lax.stop_gradient(value_target)[:-1]
 
                 # Compute policy loss
                 # TODO

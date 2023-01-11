@@ -17,13 +17,14 @@ def get_config(algorithm_name):
     config.batch_size = 256
     config.tau = 0.005
     config.gamma = 0.99
+    config.nr_samples = 20
     config.init_log_temperature = 10.0
     config.init_log_alpha_mean = 10.0
     config.init_log_alpha_stddev = 1000.0
     config.min_log_temperature = -18.0
     config.min_log_alpha = -18.0
+    config.retrace_lambda = 0.95
     config.trace_length = 8
-    config.ensemble_size = 2
     config.init_stddev = 0.3
     config.min_stddev = 1e-6
     config.nr_hidden_units = 256
