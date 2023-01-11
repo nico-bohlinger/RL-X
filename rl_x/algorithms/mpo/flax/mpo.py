@@ -102,7 +102,8 @@ class MPO():
         dual_params = DualParams(
             log_temperature=jnp.full([1], self.init_log_temperature, dtype=jnp.float32),
             log_alpha_mean=jnp.full(dual_variable_shape, self.init_log_alpha_mean, dtype=jnp.float32),
-            log_alpha_stddev=jnp.full(dual_variable_shape, self.init_log_alpha_stddev, dtype=jnp.float32)
+            log_alpha_stddev=jnp.full(dual_variable_shape, self.init_log_alpha_stddev, dtype=jnp.float32),
+            log_penalty_temperature=jnp.full([1], self.init_log_temperature, dtype=jnp.float32)
         )
 
         self.train_state = TrainingState(
@@ -215,7 +216,8 @@ class MPO():
             dual_params = DualParams(
                 log_temperature=jnp.maximum(dual_params.log_temperature, self.min_log_temperature),
                 log_alpha_mean=jnp.maximum(dual_params.log_alpha_mean, self.min_log_alpha),
-                log_alpha_stddev=jnp.maximum(dual_params.log_alpha_stddev, self.min_log_alpha)
+                log_alpha_stddev=jnp.maximum(dual_params.log_alpha_stddev, self.min_log_alpha),
+                log_penalty_temperature=jnp.maximum(dual_params.log_penalty_temperature, self.min_log_temperature)
             )
 
             train_state = TrainingState(

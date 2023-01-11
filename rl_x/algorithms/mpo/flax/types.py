@@ -14,6 +14,7 @@ class DualParams(struct.PyTreeNode):
     log_temperature: jnp.ndarray
     log_alpha_mean: jnp.ndarray
     log_alpha_stddev: jnp.ndarray
+    log_penalty_temperature: jnp.ndarray
 
 
 class TrainingState(struct.PyTreeNode):
