@@ -4,6 +4,7 @@ import pickle
 import random
 import time
 from collections import deque
+import tree
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -49,6 +50,10 @@ class MPO():
         self.init_log_alpha_stddev = config.algorithm.init_log_alpha_stddev
         self.min_log_temperature = config.algorithm.min_log_temperature
         self.min_log_alpha = config.algorithm.min_log_alpha
+        self.kl_epsilon = config.algorithm.kl_epsilon
+        self.kl_epsilon_penalty = config.algorithm.kl_epsilon_penalty
+        self.kl_epsilon_mean = config.algorithm.kl_epsilon_mean
+        self.kl_epsilon_stddev = config.algorithm.kl_epsilon_stddev
         self.retrace_lambda = config.algorithm.retrace_lambda
         self.trace_length = config.algorithm.trace_length
         self.buffer_size = config.algorithm.buffer_size
@@ -143,13 +148,11 @@ class MPO():
         @jax.jit
         def update(train_state: TrainingState, states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey):
             def loss_fn(agent_params: flax.core.FrozenDict, dual_params: flax.core.FrozenDict, agent_target_params: flax.core.FrozenDict,
-                        states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey
+                        states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, k1: jax.random.PRNGKey, k2: jax.random.PRNGKey
                 ):
                 # TODO: Should target calculation be outside the loss function? Does that make it faster or even results in no need of stop gradient?
 
-                # Keys
                 # TODO: give better key names
-                key, k1, k2 = jax.random.split(key, 3)
 
 
                 # Compute predictions
@@ -214,24 +217,92 @@ class MPO():
                 target_mean = target_policy.distribution.mean()
                 target_stddev = target_policy.distribution.stddev()
 
-                # ...
+                # Optimize the dual function. Equation (9) from the paper
+                tempered_q_values = jax.lax.stop_gradient(q_improvement) / temperature
+                normalized_weights = jax.lax.stop_gradient(jax.nn.softmax(tempered_q_values, axis=0))
+                q_logsumexp = jax.scipy.special.logsumexp(tempered_q_values, axis=0)
+                loss_temperature = temperature * (self.kl_epsilon + jnp.mean(q_logsumexp) - jnp.log(self.nr_samples))
+                # Estimate actualized KL
+                kl_nonparametric = jnp.sum(normalized_weights * jnp.log(self.nr_samples * normalized_weights + self.stability_epsilon), axis=0)
 
-                # TODO
-                policy_loss = 0
+                # Penalty for violating the action constraint
+                diff_out_of_bound = a_improvement - jnp.clip(a_improvement, -1.0, 1.0)
+                cost_out_of_bound = -jnp.linalg.norm(diff_out_of_bound, axis=-1)
+                tempered_cost = jax.lax.stop_gradient(cost_out_of_bound) / penalty_temperature
+                penalty_normalized_weights = jax.lax.stop_gradient(jax.nn.softmax(tempered_cost, axis=0))
+                penalty_logsumexp = jax.scipy.special.logsumexp(tempered_cost, axis=0)
+                loss_penalty_temperature = penalty_temperature * (self.kl_epsilon_penalty + jnp.mean(penalty_logsumexp) - jnp.log(self.nr_samples))
+                # Estimate actualized KL
+                penalty_kl_nonparametric = jnp.sum(penalty_normalized_weights * jnp.log(self.nr_samples * penalty_normalized_weights + self.stability_epsilon), axis=0)
+
+                normalized_weights += penalty_normalized_weights
+                loss_temperature += loss_penalty_temperature
+
+                # Calculate KL loss for policy
+
+                # Decompose current policy into fixed-mean & fixed-stddev distributions
+                fixed_stddev_dist = tfd.Independent(tfd.Normal(loc=current_mean, scale=target_stddev))
+                fixed_mean_dist = tfd.Independent(tfd.Normal(loc=target_mean, scale=current_stddev))
+
+                loss_policy_mean = jnp.mean(-jnp.sum(fixed_stddev_dist.log_prob(a_improvement) * normalized_weights, axis=0))
+                loss_policy_stddev = jnp.mean(-jnp.sum(fixed_mean_dist.log_prob(a_improvement) * normalized_weights, axis=0))
+
+                kl_mean = target_policy.distribution.kl_divergence(fixed_stddev_dist.distribution)
+                kl_stddev = target_policy.distribution.kl_divergence(fixed_mean_dist.distribution)
+
+                mean_kl_mean = jnp.mean(kl_mean, axis=0)
+                loss_kl_mean = jnp.sum(jax.lax.stop_gradient(alpha_mean) * mean_kl_mean)
+                loss_alpha_mean = jnp.sum(alpha_mean * (self.kl_epsilon_mean - jax.lax.stop_gradient(mean_kl_mean)))
+
+                mean_kl_stddev = jnp.mean(kl_stddev, axis=0)
+                loss_kl_stddev = jnp.sum(jax.lax.stop_gradient(alpha_stddev) * mean_kl_stddev)
+                loss_alpha_stddev = jnp.sum(alpha_stddev * (self.kl_epsilon_stddev - jax.lax.stop_gradient(mean_kl_stddev)))
+
+                # Combine losses
+                unconst_policy_loss = loss_policy_mean + loss_policy_stddev
+                kl_penalty_loss = loss_kl_mean + loss_kl_stddev
+                alpha_loss = loss_alpha_mean + loss_alpha_stddev
+                policy_loss = unconst_policy_loss + kl_penalty_loss + alpha_loss + loss_temperature
+
 
                 # Compute critic loss
                 critic_loss = jnp.mean(0.5 * jnp.square(q_value_target - q_value_pred))
 
                 loss = policy_loss + critic_loss
 
-                return loss, (policy_loss, critic_loss, key)
+                # Create metrics
+                metrics = {
+                    "dual/alpha_mean": jnp.mean(alpha_mean),
+                    "dual/alpha_stddev": jnp.mean(alpha_stddev),
+                    "dual/temperature": jnp.mean(temperature),
+                    "dual/penalty_temperature": jnp.mean(penalty_temperature),
+                    "loss/unconst_policy_loss": unconst_policy_loss,
+                    "loss/kl_penalty_loss": kl_penalty_loss,
+                    "loss/alpha_loss": alpha_loss,
+                    "loss/temperature_loss": loss_temperature,
+                    "loss/critic_loss": critic_loss,
+                    "kl/q_kl": jnp.mean(kl_nonparametric) / self.kl_epsilon,
+                    "kl/action_penalty_kl": jnp.mean(penalty_kl_nonparametric) / self.kl_epsilon_penalty,
+                    "kl/policy_mean_kl": jnp.mean(mean_kl_mean) / self.kl_epsilon_mean,
+                    "kl/policy_stddev_kl": jnp.mean(mean_kl_stddev) / self.kl_epsilon_stddev,
+                    "Q_vals/mean_Q_pred": jnp.mean(q_value_pred),
+                    "policy/mean_std_dev": jnp.mean(current_stddev)
+                }
+
+                return loss, (metrics)
 
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, None), out_axes=0)
-            mean_vmapped_loss_fn = lambda *args: jnp.mean(vmap_loss_fn(*args), axis=0)
+            key, k1, k2 = jax.random.split(key, 3)
 
-            (loss, (policy_loss, critic_loss, key)), (agent_gradients, dual_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, next_states, actions, rewards, dones, log_probs, key)
-            
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, None, None), out_axes=0)
+            safe_mean = lambda x: jnp.sum(x) if x is not None else x
+            mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
+
+            (loss, (metrics)), (agent_gradients, dual_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, next_states, actions, rewards, dones, log_probs, k1, k2)
+
+            agent_gradients_norm = optax.global_norm(agent_gradients)
+            dual_gradients_norm = optax.global_norm(dual_gradients)
+
             agent_updates, agent_optimizer_state = self.agent_optimizer.update(agent_gradients, train_state.agent_optimizer_state, train_state.agent_params)
             dual_updates, dual_optimizer_state = self.dual_optimizer.update(dual_gradients, train_state.dual_optimizer_state, train_state.dual_params)
 
@@ -255,7 +326,10 @@ class MPO():
                 steps=train_state.steps + 1
             )
 
-            return train_state, loss, policy_loss, critic_loss, key
+            metrics["gradients/agent_gradients_norm"] = agent_gradients_norm
+            metrics["gradients/dual_gradients_norm"] = dual_gradients_norm
+
+            return train_state, metrics, key
 
 
         self.set_train_mode()
@@ -275,9 +349,7 @@ class MPO():
         optimize_time_buffer = deque(maxlen=self.logging_freq)
         saving_time_buffer = deque(maxlen=self.logging_freq)
         fps_buffer = deque(maxlen=self.logging_freq)
-        complete_loss_buffer = deque(maxlen=self.logging_freq)
-        policy_loss_buffer = deque(maxlen=self.logging_freq)
-        critic_loss_buffer = deque(maxlen=self.logging_freq)
+        metrics_buffer = deque(maxlen=self.logging_freq)
 
         state = self.env.reset()
 
@@ -346,11 +418,9 @@ class MPO():
 
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
-                self.train_state, complete_loss, policy_loss, critic_loss, self.key = update(
+                self.train_state, metrics, self.key = update(
                     self.train_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_log_probs, self.key)
-                complete_loss_buffer.append(complete_loss)
-                policy_loss_buffer.append(policy_loss)
-                critic_loss_buffer.append(critic_loss)
+                metrics_buffer.append(metrics)
 
             optimize_end_time = time.time()
             optimize_time_buffer.append(optimize_end_time - acting_end_time)
@@ -388,11 +458,12 @@ class MPO():
                 self.log("time/acting_time", np.mean(acting_time_buffer), global_step)
                 self.log("time/optimize_time", np.mean(optimize_time_buffer), global_step)
                 self.log("time/saving_time", np.mean(saving_time_buffer), global_step)
-                self.log("train/agent_learning_rate", self.train_state.agent_optimizer_state.hyperparams["learning_rate"].item(), global_step)
-                self.log("train/dual_learning_rate", self.train_state.dual_optimizer_state.hyperparams["learning_rate"].item(), global_step)
-                self.log("train/complete_loss", self.get_buffer_mean(complete_loss_buffer), global_step)
-                self.log("train/policy_loss", self.get_buffer_mean(policy_loss_buffer), global_step)
-                self.log("train/critic_loss", self.get_buffer_mean(critic_loss_buffer), global_step)
+                self.log("lr/agent_learning_rate", self.train_state.agent_optimizer_state.hyperparams["learning_rate"].item(), global_step)
+                self.log("lr/dual_learning_rate", self.train_state.dual_optimizer_state.hyperparams["learning_rate"].item(), global_step)
+                if should_learning_start:
+                    mean_metrics = {key: np.mean([metrics[key] for metrics in metrics_buffer]) for key in metrics_buffer[0].keys()}
+                    for key, value in mean_metrics.items():
+                        self.log(f"{key}", value, global_step)
 
                 if self.track_console:
                     rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
@@ -402,9 +473,7 @@ class MPO():
                 optimize_time_buffer.clear()
                 saving_time_buffer.clear()
                 fps_buffer.clear()
-                complete_loss_buffer.clear()
-                policy_loss_buffer.clear()
-                critic_loss_buffer.clear()
+                metrics_buffer.clear()
 
 
     def get_buffer_mean(self, buffer):
