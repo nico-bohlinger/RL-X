@@ -27,6 +27,7 @@ def get_config(algorithm_name):
     config.trace_length = 8
     config.init_stddev = 0.3
     config.min_stddev = 1e-6
+    config.stability_epsilon = 1e-8
     config.nr_hidden_units = 256
     config.logging_freq = 3000
 

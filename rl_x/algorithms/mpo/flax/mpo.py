@@ -8,10 +8,13 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import flax
-from flax.training.train_state import TrainState
 from flax.training import checkpoints
 import optax
 import wandb
+import tensorflow_probability
+
+tfp = tensorflow_probability.substrates.jax
+tfd = tensorflow_probability.substrates.jax.distributions
 
 from rl_x.algorithms.mpo.flax.policy import get_policy
 from rl_x.algorithms.mpo.flax.critic import get_critic
@@ -40,6 +43,7 @@ class MPO():
         self.anneal_agent_learning_rate = config.algorithm.anneal_agent_learning_rate
         self.anneal_dual_learning_rate = config.algorithm.anneal_dual_learning_rate
         self.nr_samples = config.algorithm.nr_samples
+        self.stability_epsilon = config.algorithm.stability_epsilon
         self.init_log_temperature = config.algorithm.init_log_temperature
         self.init_log_alpha_mean = config.algorithm.init_log_alpha_mean
         self.init_log_alpha_stddev = config.algorithm.init_log_alpha_stddev
@@ -147,8 +151,11 @@ class MPO():
                 # TODO: give better key names
                 key, k1, k2 = jax.random.split(key, 3)
 
+
                 # Compute predictions
+                pred_policy = self.policy.apply(agent_params.policy_params, states)
                 q_value_pred = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1]).squeeze((0, 2))
+
 
                 # Compute targets
                 target_policy = self.policy.apply(agent_target_params.policy_params, states)
@@ -189,7 +196,26 @@ class MPO():
                 reward_target = jax.lax.stop_gradient(rewards)
                 value_target = jax.lax.stop_gradient(value_target)[:-1]
 
+
                 # Compute policy loss
+
+                # Cast `MultivariateNormalDiag`s to Independent Normals. Allows to satisfy KL constraints per-dimension.
+                target_policy = tfd.Independent(tfd.Normal(target_policy.mean(), target_policy.stddev()))
+                current_policy = tfd.Independent(tfd.Normal(pred_policy.mean(), pred_policy.stddev()))
+
+                # Convert from log. Use softplus for stability
+                temperature = jax.nn.softplus(dual_params.log_temperature) + self.stability_epsilon
+                alpha_mean = jax.nn.softplus(dual_params.log_alpha_mean) + self.stability_epsilon
+                alpha_stddev = jax.nn.softplus(dual_params.log_alpha_stddev) + self.stability_epsilon
+                penalty_temperature = jax.nn.softplus(dual_params.log_penalty_temperature) + self.stability_epsilon
+
+                current_mean = current_policy.distribution.mean()
+                current_stddev = current_policy.distribution.stddev()
+                target_mean = target_policy.distribution.mean()
+                target_stddev = target_policy.distribution.stddev()
+
+                # ...
+
                 # TODO
                 policy_loss = 0
 
