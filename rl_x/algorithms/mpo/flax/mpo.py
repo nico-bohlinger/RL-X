@@ -147,7 +147,7 @@ class MPO():
                 key, k1, k2 = jax.random.split(key, 3)
 
                 # Compute predictions
-                q_values = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1]).squeeze((0, 2))
+                q_value_pred = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1]).squeeze((0, 2))
 
                 # Compute targets
                 target_policy = self.policy.apply(agent_target_params.policy_params, states)
@@ -193,8 +193,7 @@ class MPO():
                 policy_loss = 0
 
                 # Compute critic loss
-                # TODO
-                critic_loss = 0
+                critic_loss = jnp.mean(0.5 * jnp.square(q_value_target - q_value_pred))
 
                 loss = policy_loss + critic_loss
 
