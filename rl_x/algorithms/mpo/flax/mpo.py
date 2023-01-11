@@ -141,7 +141,7 @@ class MPO():
                 ):
                 # Compute predictions
                 action_dist = self.policy.apply(agent_params.policy_params, states)
-                q_values = self.vector_critic.apply(agent_params.critic_params, states, actions)
+                q_values = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1])
                 min_q_values = jnp.min(q_values, axis=0)
 
                 # Compute targets
@@ -160,7 +160,10 @@ class MPO():
                 return loss, (policy_loss, critic_loss, key)
 
 
-            (loss, (policy_loss, critic_loss, key)), (agent_gradients, dual_gradients) = jax.value_and_grad(loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, next_states, actions, rewards, dones, log_probs, key)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, None), out_axes=0)
+            mean_vmapped_loss_fn = lambda *args: jnp.mean(vmap_loss_fn(*args), axis=0)
+
+            (loss, (policy_loss, critic_loss, key)), (agent_gradients, dual_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, next_states, actions, rewards, dones, log_probs, key)
             
             agent_updates, agent_optimizer_state = self.agent_optimizer.update(agent_gradients, train_state.agent_optimizer_state, train_state.agent_params)
             dual_updates, dual_optimizer_state = self.dual_optimizer.update(dual_gradients, train_state.dual_optimizer_state, train_state.dual_params)
