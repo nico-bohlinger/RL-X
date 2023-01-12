@@ -33,6 +33,7 @@ def get_config(algorithm_name):
     config.min_stddev = 1e-6
     config.stability_epsilon = 1e-8
     config.nr_hidden_units = 256
+    config.logging_all_metrics = False  # Some metrics seem to cost performance when logged, so they get only logged if True
     config.logging_freq = 3000
 
     return config

@@ -61,6 +61,7 @@ class MPO():
         self.batch_size = config.algorithm.batch_size
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
+        self.logging_all_metrics = config.algorithm.logging_all_metrics
         self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
 
@@ -150,11 +151,6 @@ class MPO():
             def loss_fn(agent_params: flax.core.FrozenDict, dual_params: flax.core.FrozenDict, agent_target_params: flax.core.FrozenDict,
                         states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, k1: jax.random.PRNGKey, k2: jax.random.PRNGKey
                 ):
-                # TODO: Should target calculation be outside the loss function? Does that make it faster or even results in no need of stop gradient?
-
-                # TODO: give better key names
-
-
                 # Compute predictions
                 pred_policy = self.policy.apply(agent_params.policy_params, states)
                 q_value_pred = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1]).squeeze((0, 2))
@@ -263,7 +259,6 @@ class MPO():
                 alpha_loss = loss_alpha_mean + loss_alpha_stddev
                 policy_loss = unconst_policy_loss + kl_penalty_loss + alpha_loss + loss_temperature
 
-
                 # Compute critic loss
                 critic_loss = jnp.mean(0.5 * jnp.square(q_value_target - q_value_pred))
 
@@ -276,17 +271,21 @@ class MPO():
                     "dual/temperature": jnp.mean(temperature),
                     "dual/penalty_temperature": jnp.mean(penalty_temperature),
                     "loss/unconst_policy_loss": unconst_policy_loss,
-                    "loss/kl_penalty_loss": kl_penalty_loss,
-                    "loss/alpha_loss": alpha_loss,
                     "loss/temperature_loss": loss_temperature,
                     "loss/critic_loss": critic_loss,
                     "kl/q_kl": jnp.mean(kl_nonparametric) / self.kl_epsilon,
                     "kl/action_penalty_kl": jnp.mean(penalty_kl_nonparametric) / self.kl_epsilon_penalty,
-                    "kl/policy_mean_kl": jnp.mean(mean_kl_mean) / self.kl_epsilon_mean,
-                    "kl/policy_stddev_kl": jnp.mean(mean_kl_stddev) / self.kl_epsilon_stddev,
                     "Q_vals/mean_Q_pred": jnp.mean(q_value_pred),
                     "policy/mean_std_dev": jnp.mean(current_stddev)
                 }
+
+                # Some metrics seem to cost performance when logged, so they get only logged if necessary
+                # TODO: When the jax logger works again, inspect why this is the case
+                if self.logging_all_metrics:
+                    metrics["loss/kl_penalty_loss"] = kl_penalty_loss
+                    metrics["loss/alpha_loss"] = alpha_loss
+                    metrics["kl/policy_mean_kl"] = jnp.mean(mean_kl_mean) / self.kl_epsilon_mean
+                    metrics["kl/policy_stddev_kl"] = jnp.mean(mean_kl_stddev) / self.kl_epsilon_stddev
 
                 return loss, (metrics)
 
