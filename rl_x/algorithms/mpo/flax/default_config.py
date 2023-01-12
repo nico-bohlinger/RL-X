@@ -29,7 +29,7 @@ def get_config(algorithm_name):
     config.kl_epsilon_stddev = 1e-6  # Acme docu mentions: Divide it by nr action space dimension, orig stddev = 0.0001
     config.retrace_lambda = 0.95
     config.trace_length = 8
-    config.init_stddev = 0.3
+    config.init_stddev = 0.5
     config.min_stddev = 1e-6
     config.stability_epsilon = 1e-8
     config.nr_hidden_units = 256

@@ -295,7 +295,7 @@ class MPO():
             key, k1, k2 = jax.random.split(key, 3)
 
             vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, None, None), out_axes=0)
-            safe_mean = lambda x: jnp.sum(x) if x is not None else x
+            safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
 
             (loss, (metrics)), (agent_gradients, dual_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, next_states, actions, rewards, dones, log_probs, k1, k2)
