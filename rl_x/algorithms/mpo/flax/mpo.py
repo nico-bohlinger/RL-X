@@ -43,6 +43,10 @@ class MPO():
         self.dual_learning_rate = config.algorithm.dual_learning_rate
         self.anneal_agent_learning_rate = config.algorithm.anneal_agent_learning_rate
         self.anneal_dual_learning_rate = config.algorithm.anneal_dual_learning_rate
+        self.ensemble_size = config.algorithm.ensemble_size
+        self.nr_atoms_per_net = config.algorithm.nr_atoms_per_net
+        self.nr_dropped_atoms_per_net = config.algorithm.nr_dropped_atoms_per_net
+        self.huber_kappa = config.algorithm.huber_kappa
         self.nr_samples = config.algorithm.nr_samples
         self.stability_epsilon = config.algorithm.stability_epsilon
         self.init_log_temperature = config.algorithm.init_log_temperature
@@ -64,6 +68,8 @@ class MPO():
         self.logging_all_metrics = config.algorithm.logging_all_metrics
         self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.nr_total_atoms = self.nr_atoms_per_net * self.ensemble_size
+        self.nr_target_atoms = self.nr_total_atoms - (self.nr_dropped_atoms_per_net * self.ensemble_size)
 
         if config.algorithm.device == "cpu":
             jax.config.update("jax_platform_name", "cpu")
@@ -153,7 +159,9 @@ class MPO():
                 ):
                 # Compute predictions
                 pred_policy = self.policy.apply(agent_params.policy_params, states)
-                q_value_pred = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1]).squeeze((0, 2))
+                q_atoms_pred = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1])
+                q_atoms_pred = jnp.transpose(q_atoms_pred, (1, 0, 2)).reshape(self.trace_length - 1, self.nr_total_atoms)
+                q_atoms_pred = jnp.expand_dims(q_atoms_pred, axis=2)
 
 
                 # Compute targets
@@ -162,36 +170,43 @@ class MPO():
                 a_improvement = target_policy.sample(self.nr_samples, seed=k1)
 
                 vmap_critic_call = jax.vmap(self.vector_critic.apply, in_axes=(None, None, 0))
-                q_improvement = vmap_critic_call(agent_target_params.critic_params, states, a_improvement).squeeze((1, 3))
+                q_improvement = vmap_critic_call(agent_target_params.critic_params, states, a_improvement)
+                q_improvement = jnp.transpose(q_improvement, (0, 2, 1, 3)).reshape(self.nr_samples, self.trace_length, self.nr_total_atoms)
+                q_improvement = jnp.mean(q_improvement, axis=2)
 
                 eval_policy = target_policy
 
                 a_evaluation = eval_policy.sample(self.nr_samples, seed=k2)
 
-                value_target = vmap_critic_call(agent_target_params.critic_params, states, a_evaluation).squeeze((1, 3))
-                value_target = jnp.mean(value_target, axis=0)
+                value_atoms_target = vmap_critic_call(agent_target_params.critic_params, states, a_evaluation)
+                value_atoms_target = jnp.transpose(value_atoms_target, (0, 2, 1, 3)).reshape(self.nr_samples, self.trace_length, self.nr_total_atoms)
+                value_atoms_target = jnp.mean(value_atoms_target, axis=0)
+                value_atoms_target = jnp.sort(value_atoms_target)[:, :self.nr_target_atoms]
 
                 ###
                 # Retrace calculation defined in rlax and used by acme: https://github.com/deepmind/rlax/blob/master/rlax/_src/multistep.py#L380#L433
-                q_t = self.vector_critic.apply(agent_target_params.critic_params, states, actions).squeeze((0, 2))[1:-1]
-                v_t = value_target[1:]
+                q_t = self.vector_critic.apply(agent_target_params.critic_params, states[1:-1], actions[1:-1])
+                q_t = jnp.transpose(q_t, (1, 0, 2)).reshape(self.trace_length - 2, self.nr_total_atoms)
+                q_t = jnp.sort(q_t)[:, :self.nr_target_atoms]
+                v_t = value_atoms_target[1:, :]
                 r_t = rewards[:-1]
                 discount_t = self.gamma * (1 - dones[:-1])
                 log_rhos = target_policy.log_prob(action) - log_probs
                 c_t = self.retrace_lambda * jnp.minimum(1.0, jnp.exp(log_rhos[1:-1]))
 
-                g = r_t[-1] + discount_t[-1] * v_t[-1]
+                g = r_t[-1] + discount_t[-1] * v_t[-1:, ]
 
                 def _body(acc, xs):
                     reward, discount, c, v, q = xs
                     acc = reward + discount * (v - c * q + c * acc)
                     return acc, acc
                 
-                _, returns = jax.lax.scan(_body, g, (r_t[:-1], discount_t[:-1], c_t, v_t[:-1], q_t), reverse=True)
-                returns = jnp.concatenate([returns, g[jnp.newaxis]], axis=0)
+                _, returns = jax.lax.scan(_body, g, (r_t[:-1], discount_t[:-1], c_t, v_t[:-1, :], q_t), reverse=True)
+                returns = jnp.concatenate([returns, g[jnp.newaxis]], axis=0).squeeze(1)
+                returns = jnp.expand_dims(returns, axis=1)
                 ###
 
-                q_value_target = jax.lax.stop_gradient(returns)
+                q_atoms_target = jax.lax.stop_gradient(returns)
 
 
                 # Compute policy loss
@@ -260,7 +275,14 @@ class MPO():
 
 
                 # Compute critic loss
-                critic_loss = jnp.mean(0.5 * jnp.square(q_value_target - q_value_pred))
+                cumulative_prob = (jnp.arange(self.nr_total_atoms, dtype=jnp.float32) + 0.5) / self.nr_total_atoms
+                cumulative_prob = jnp.expand_dims(cumulative_prob, axis=(0, -1))  # (1, nr_total_atoms, 1)
+
+                delta_i_j = q_atoms_target - q_atoms_pred
+                abs_delta_i_j = jnp.abs(delta_i_j)
+                huber_loss = jnp.where(abs_delta_i_j <= self.huber_kappa, 0.5 * delta_i_j ** 2, self.huber_kappa * (abs_delta_i_j - 0.5 * self.huber_kappa))
+                critic_loss = jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa
+
 
                 loss = policy_loss + critic_loss
 
@@ -276,7 +298,7 @@ class MPO():
                     "loss/critic_loss": critic_loss,
                     "kl/q_kl": jnp.mean(kl_nonparametric) / self.kl_epsilon,
                     "kl/action_penalty_kl": jnp.mean(penalty_kl_nonparametric) / self.kl_epsilon_penalty,
-                    "Q_vals/mean_Q_pred": jnp.mean(q_value_pred),
+                    "Q_vals/mean_Q_pred": jnp.mean(q_atoms_pred),
                     "policy/mean_std_dev": jnp.mean(current_stddev)
                 }
 

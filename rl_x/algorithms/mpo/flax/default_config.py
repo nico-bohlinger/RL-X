@@ -9,7 +9,7 @@ def get_config(algorithm_name):
     config.device = "gpu"  # cpu, gpu
     config.total_timesteps = 1e9
     config.agent_learning_rate = 3e-4
-    config.dual_learning_rate = 1e-2
+    config.dual_learning_rate = 3e-3
     config.anneal_agent_learning_rate = False
     config.anneal_dual_learning_rate = False
     config.buffer_size = 1e6
@@ -17,6 +17,10 @@ def get_config(algorithm_name):
     config.batch_size = 256
     config.tau = 0.005
     config.gamma = 0.99
+    config.ensemble_size = 2
+    config.nr_atoms_per_net = 25
+    config.nr_dropped_atoms_per_net = 2
+    config.huber_kappa = 1.0
     config.nr_samples = 20
     config.init_log_temperature = 10.0
     config.init_log_alpha_mean = 10.0
