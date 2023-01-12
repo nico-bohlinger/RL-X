@@ -192,7 +192,6 @@ class MPO():
                 ###
 
                 q_value_target = jax.lax.stop_gradient(returns)
-                value_target = jax.lax.stop_gradient(value_target)[:-1]
 
 
                 # Compute policy loss
@@ -259,10 +258,12 @@ class MPO():
                 alpha_loss = loss_alpha_mean + loss_alpha_stddev
                 policy_loss = unconst_policy_loss + kl_penalty_loss + alpha_loss + loss_temperature
 
+
                 # Compute critic loss
                 critic_loss = jnp.mean(0.5 * jnp.square(q_value_target - q_value_pred))
 
                 loss = policy_loss + critic_loss
+
 
                 # Create metrics
                 metrics = {
