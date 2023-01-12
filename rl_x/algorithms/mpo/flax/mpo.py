@@ -115,6 +115,7 @@ class MPO():
         
         dual_variable_shape = [np.prod(env.get_single_action_space_shape()).item()]
 
+        # The Lagrange multiplieres
         dual_params = DualParams(
             log_temperature=jnp.full([1], self.init_log_temperature, dtype=jnp.float32),
             log_alpha_mean=jnp.full(dual_variable_shape, self.init_log_alpha_mean, dtype=jnp.float32),
@@ -157,7 +158,7 @@ class MPO():
             def loss_fn(agent_params: flax.core.FrozenDict, dual_params: flax.core.FrozenDict, agent_target_params: flax.core.FrozenDict,
                         states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, k1: jax.random.PRNGKey, k2: jax.random.PRNGKey
                 ):
-                # Compute predictions
+                # Compute predictions. Atoms for TQC critic loss
                 pred_policy = self.policy.apply(agent_params.policy_params, states)
                 q_atoms_pred = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1])
                 q_atoms_pred = jnp.transpose(q_atoms_pred, (1, 0, 2)).reshape(self.trace_length - 1, self.nr_total_atoms)
@@ -226,7 +227,7 @@ class MPO():
                 target_mean = target_policy.distribution.mean()
                 target_stddev = target_policy.distribution.stddev()
 
-                # Optimize the dual function. Equation (9) from the paper
+                # Optimize the dual function. Equation (9) from the paper. Temperature is the Lagrange multiplier eta.
                 tempered_q_values = jax.lax.stop_gradient(q_improvement) / temperature
                 normalized_weights = jax.lax.stop_gradient(jax.nn.softmax(tempered_q_values, axis=0))
                 q_logsumexp = jax.scipy.special.logsumexp(tempered_q_values, axis=0)
@@ -247,9 +248,10 @@ class MPO():
                 normalized_weights += penalty_normalized_weights
                 loss_temperature += loss_penalty_temperature
 
-                # Calculate KL loss for policy
+                # Calculate KL loss for policy with alpha as the Lagrange multiplier
 
                 # Decompose current policy into fixed-mean & fixed-stddev distributions
+                # Not part of the original MPO but seems to help with stability
                 fixed_stddev_dist = tfd.Independent(tfd.Normal(loc=current_mean, scale=target_stddev))
                 fixed_mean_dist = tfd.Independent(tfd.Normal(loc=target_mean, scale=current_stddev))
 
@@ -274,7 +276,7 @@ class MPO():
                 policy_loss = unconst_policy_loss + kl_penalty_loss + alpha_loss + loss_temperature
 
 
-                # Compute critic loss
+                # Compute critic loss in TQC style
                 cumulative_prob = (jnp.arange(self.nr_total_atoms, dtype=jnp.float32) + 0.5) / self.nr_total_atoms
                 cumulative_prob = jnp.expand_dims(cumulative_prob, axis=(0, -1))  # (1, nr_total_atoms, 1)
 
@@ -428,7 +430,7 @@ class MPO():
                 batch_states, batch_actions, batch_rewards, batch_dones, batch_log_probs = replay_buffer.sample(self.batch_size)
 
 
-            # Optimizing - Q-functions, policy and entropy coefficient
+            # Optimizing - Critic, policy, Lagrange multipliers
             if should_optimize:
                 self.train_state, metrics, self.key = update(
                     self.train_state, batch_states, batch_actions, batch_rewards, batch_dones, batch_log_probs, self.key)
