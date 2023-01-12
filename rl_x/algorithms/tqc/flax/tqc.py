@@ -291,8 +291,7 @@ class TQC():
 
             # Optimizing - Prepare batches
             if should_optimize:
-                max_nr_batches_needed = max(self.q_update_steps, self.policy_update_steps, self.entropy_update_steps)
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, max_nr_batches_needed)
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, self.max_nr_batches_needed)
 
 
             # Optimizing - Q-functions, policy and entropy coefficient
