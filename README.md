@@ -22,6 +22,7 @@ A framework for Reinforcement Learning research.
 - [Dropout Q-Functions (DroQ)](https://arxiv.org/abs/2110.02034) in Flax
 - [Truncated Quantile Critics (TQC)](https://arxiv.org/abs/2005.04269) in Flax
 - [Aggressive Q-Learning with Ensembles (AQE)](https://arxiv.org/abs/2111.09159) in Flax
+- [Maximum a Posteriori Policy Optimization (MPO)](https://arxiv.org/pdf/1806.06920) in Flax
 
 
 ## Usable Environments

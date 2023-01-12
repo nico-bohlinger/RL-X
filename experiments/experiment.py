@@ -23,6 +23,8 @@ from rl_x.algorithms.droq.flax import DROQ_FLAX
 from rl_x.algorithms.tqc.flax import TQC_FLAX
 ## AQE
 from rl_x.algorithms.aqe.flax import AQE_FLAX
+## MPO
+from rl_x.algorithms.mpo.flax import MPO_FLAX
 
 # Environments
 from rl_x.environments.envpool.mujoco.humanoid_v4 import ENVPOOL_MUJOCO_HUMANOID_V4
