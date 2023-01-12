@@ -146,9 +146,9 @@ class MPO():
 
 
         @jax.jit
-        def update(train_state: TrainingState, states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey):
+        def update(train_state: TrainingState, states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey):
             def loss_fn(agent_params: flax.core.FrozenDict, dual_params: flax.core.FrozenDict, agent_target_params: flax.core.FrozenDict,
-                        states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, k1: jax.random.PRNGKey, k2: jax.random.PRNGKey
+                        states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, k1: jax.random.PRNGKey, k2: jax.random.PRNGKey
                 ):
                 # TODO: Should target calculation be outside the loss function? Does that make it faster or even results in no need of stop gradient?
 
@@ -196,7 +196,6 @@ class MPO():
                 ###
 
                 q_value_target = jax.lax.stop_gradient(returns)
-                reward_target = jax.lax.stop_gradient(rewards)
                 value_target = jax.lax.stop_gradient(value_target)[:-1]
 
 
@@ -294,11 +293,11 @@ class MPO():
 
             key, k1, k2 = jax.random.split(key, 3)
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, None, None), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, None, None), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
 
-            (loss, (metrics)), (agent_gradients, dual_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, next_states, actions, rewards, dones, log_probs, k1, k2)
+            (loss, (metrics)), (agent_gradients, dual_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, actions, rewards, dones, log_probs, k1, k2)
 
             agent_gradients_norm = optax.global_norm(agent_gradients)
             dual_gradients_norm = optax.global_norm(dual_gradients)
@@ -337,7 +336,6 @@ class MPO():
         replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.trace_length, self.env.observation_space.shape, self.env.action_space.shape)
 
         state_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.observation_space.shape, dtype=np.float32)
-        actual_next_state_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.observation_space.shape, dtype=np.float32)
         action_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.action_space.shape, dtype=np.float32)
         reward_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
         done_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
@@ -368,31 +366,23 @@ class MPO():
                 processed_action = self.get_processed_action(action)
             
             next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
-            actual_next_state = next_state.copy()
-            for i, single_done in enumerate(done):
-                if single_done:
-                    maybe_terminal_observation = self.env.get_terminal_observation(info, i)
-                    if maybe_terminal_observation is not None:
-                        actual_next_state[i] = maybe_terminal_observation
             
             global_step += self.nr_envs
             
             state_stack = np.roll(state_stack, shift=-1, axis=1)
-            actual_next_state_stack = np.roll(actual_next_state_stack, shift=-1, axis=1)
             action_stack = np.roll(action_stack, shift=-1, axis=1)
             reward_stack = np.roll(reward_stack, shift=-1, axis=1)
             done_stack = np.roll(done_stack, shift=-1, axis=1)
             log_prob_stack = np.roll(log_prob_stack, shift=-1, axis=1)
 
             state_stack[:, -1] = state
-            actual_next_state_stack[:, -1] = actual_next_state
             action_stack[:, -1] = action
             reward_stack[:, -1] = reward
             done_stack[:, -1] = done
             log_prob_stack[:, -1] = log_prob
 
             if global_step / self.nr_envs >= self.trace_length:
-                replay_buffer.add(state_stack, actual_next_state_stack, action_stack, reward_stack, done_stack, log_prob_stack)
+                replay_buffer.add(state_stack, action_stack, reward_stack, done_stack, log_prob_stack)
 
             state = next_state
 
@@ -413,13 +403,13 @@ class MPO():
 
             # Optimizing - Prepare batches
             if should_optimize:
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_log_probs = replay_buffer.sample(self.batch_size)
+                batch_states, batch_actions, batch_rewards, batch_dones, batch_log_probs = replay_buffer.sample(self.batch_size)
 
 
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
                 self.train_state, metrics, self.key = update(
-                    self.train_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_log_probs, self.key)
+                    self.train_state, batch_states, batch_actions, batch_rewards, batch_dones, batch_log_probs, self.key)
                 metrics_buffer.append(metrics)
 
             optimize_end_time = time.time()
