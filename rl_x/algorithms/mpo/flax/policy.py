@@ -2,6 +2,7 @@ from typing import Sequence
 import numpy as np
 import jax
 import jax.numpy as jnp
+from jax.nn.initializers import variance_scaling
 import flax.linen as nn
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
@@ -35,9 +36,9 @@ class Policy(nn.Module):
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
 
-        mean = nn.Dense(np.prod(self.as_shape).item())(x)
+        mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal", in_axis=-2, out_axis=-1, batch_axis=(), dtype=jnp.float_))(x)
 
-        stddev = nn.Dense(np.prod(self.as_shape).item())(x)
+        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal", in_axis=-2, out_axis=-1, batch_axis=(), dtype=jnp.float_))(x)
         stddev = self.min_stddev + (jax.nn.softplus(stddev) * self.init_stddev / jax.nn.softplus(0.0))  # Cholesky factor from MPO paper, implemented like in https://github.com/deepmind/acme/blob/master/acme/jax/networks/distributional.py
 
         dist = tfd.MultivariateNormalDiag(loc=mean, scale_diag=stddev)
