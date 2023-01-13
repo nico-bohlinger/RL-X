@@ -8,6 +8,6 @@ def get_config(environment_name):
 
     config.seed = 1
     config.nr_envs = 1
-    config.dones_at_timeout = False
+    config.dones_at_timeout = True
 
     return config
