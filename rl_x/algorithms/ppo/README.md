@@ -16,7 +16,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 **Supported action and observation space types**
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions |
 | ----------- | ----------- | ----------- | ----------- | ----------- |
-| PyTorch | ✅ | ❌ | ✅ | ❌ |
+| PyTorch | ✅ | ✅ | ✅ | ✅ |
 | TorchScript | ✅ | ❌ | ✅ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ |
 
