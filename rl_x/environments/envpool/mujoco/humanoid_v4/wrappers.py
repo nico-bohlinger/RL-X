@@ -25,7 +25,7 @@ class RecordEpisodeStatistics(gym.Wrapper):
             action
         )
         if self.dones_at_timeout:
-            dones = terminated or truncated
+            dones = np.logical_or(terminated, truncated)
         else:
             dones = terminated
         self.episode_returns += rewards

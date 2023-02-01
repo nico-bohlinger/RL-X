@@ -23,7 +23,7 @@ class RecordEpisodeStatistics(gym.Wrapper):
         observations, rewards, terminated, truncated, infos = super(RecordEpisodeStatistics, self).step(
             action
         )
-        dones = terminated or truncated
+        dones = np.logical_or(terminated, truncated)
         self.episode_returns += rewards
         self.episode_lengths += 1
         infos["episode"] = [None] * self.num_envs
