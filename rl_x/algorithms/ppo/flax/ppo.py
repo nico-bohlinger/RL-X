@@ -160,7 +160,7 @@ class PPO:
                 pg_loss2 = -minibatch_advantages * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range)
                 pg_loss = jnp.mean(jnp.maximum(pg_loss1, pg_loss2))
                 
-                entropy_loss = jnp.mean(entropy)
+                entropy_loss = jnp.mean(entropy.sum(1))
                 loss = pg_loss - self.ent_coef * entropy_loss
 
                 return loss, (pg_loss, entropy_loss, approx_kl_div, clip_fraction)
