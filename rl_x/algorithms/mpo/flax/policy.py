@@ -33,6 +33,7 @@ class Policy(nn.Module):
     def __call__(self, x):
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
+        x = nn.LayerNorm()(x)
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
 

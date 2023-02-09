@@ -9,13 +9,13 @@ def get_config(algorithm_name):
     config.device = "gpu"  # cpu, gpu
     config.total_timesteps = 1e9
     config.agent_learning_rate = 3e-4
-    config.dual_learning_rate = 3e-3
+    config.dual_learning_rate = 1e-2
     config.anneal_agent_learning_rate = False
     config.anneal_dual_learning_rate = False
     config.buffer_size = 1e6
     config.learning_starts = 5000
     config.batch_size = 256
-    config.tau = 0.005
+    config.update_period = 100
     config.gamma = 0.99
     config.ensemble_size = 2
     config.nr_atoms_per_net = 25
@@ -29,10 +29,10 @@ def get_config(algorithm_name):
     config.min_log_alpha = -18.0
     config.kl_epsilon = 0.1
     config.kl_epsilon_penalty = 0.001
-    config.kl_epsilon_mean = 0.005  # Acme docu mentions: Divide it by nr action space dimension, orig mean = 0.1
+    config.kl_epsilon_mean = 0.0025  # Acme docu mentions: Divide it by nr action space dimension, orig mean = 0.1
     config.kl_epsilon_stddev = 1e-6  # Acme docu mentions: Divide it by nr action space dimension, orig stddev = 0.0001
     config.retrace_lambda = 0.95
-    config.trace_length = 8
+    config.trace_length = 2
     config.init_stddev = 0.5
     config.min_stddev = 1e-6
     config.stability_epsilon = 1e-8

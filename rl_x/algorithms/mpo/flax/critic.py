@@ -23,6 +23,7 @@ class Critic(nn.Module):
         x = jnp.concatenate([x, a], -1)
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
+        x = nn.LayerNorm()(x)
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
         x = nn.Dense(self.nr_atoms)(x)

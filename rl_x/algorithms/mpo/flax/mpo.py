@@ -63,7 +63,7 @@ class MPO():
         self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
-        self.tau = config.algorithm.tau
+        self.update_period = config.algorithm.update_period
         self.gamma = config.algorithm.gamma
         self.logging_all_metrics = config.algorithm.logging_all_metrics
         self.logging_freq = config.algorithm.logging_freq
@@ -192,7 +192,7 @@ class MPO():
                 v_t = value_atoms_target[1:, :]
                 r_t = rewards[:-1]
                 discount_t = self.gamma * (1 - dones[:-1])
-                log_rhos = target_policy.log_prob(action) - log_probs
+                log_rhos = target_policy.log_prob(actions) - log_probs
                 c_t = self.retrace_lambda * jnp.minimum(1.0, jnp.exp(log_rhos[1:-1]))
 
                 g = r_t[-1] + discount_t[-1] * v_t[-1:, ]
@@ -283,7 +283,7 @@ class MPO():
                 delta_i_j = q_atoms_target - q_atoms_pred
                 abs_delta_i_j = jnp.abs(delta_i_j)
                 huber_loss = jnp.where(abs_delta_i_j <= self.huber_kappa, 0.5 * delta_i_j ** 2, self.huber_kappa * (abs_delta_i_j - 0.5 * self.huber_kappa))
-                critic_loss = jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa
+                critic_loss = jnp.mean(jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa)
 
 
                 loss = policy_loss + critic_loss
@@ -300,8 +300,8 @@ class MPO():
                     "loss/critic_loss": critic_loss,
                     "kl/q_kl": jnp.mean(kl_nonparametric) / self.kl_epsilon,
                     "kl/action_penalty_kl": jnp.mean(penalty_kl_nonparametric) / self.kl_epsilon_penalty,
-                    "Q_vals/mean_Q_pred": jnp.mean(q_atoms_pred),
-                    "policy/mean_std_dev": jnp.mean(current_stddev)
+                    "Q_vals/Q_pred": jnp.mean(q_atoms_pred),
+                    "policy/std_dev": jnp.mean(current_stddev)
                 }
 
                 # Some metrics seem to cost performance when logged, so they get only logged if necessary
@@ -330,7 +330,8 @@ class MPO():
             dual_updates, dual_optimizer_state = self.dual_optimizer.update(dual_gradients, train_state.dual_optimizer_state, train_state.dual_params)
 
             agent_params = optax.apply_updates(train_state.agent_params, agent_updates)
-            agent_target_params = optax.incremental_update(train_state.agent_params, train_state.agent_target_params, self.tau)
+            steps = train_state.steps + 1
+            agent_target_params = optax.periodic_update(agent_params, train_state.agent_target_params, steps, self.update_period)
 
             dual_params = optax.apply_updates(train_state.dual_params, dual_updates)
             dual_params = DualParams(
@@ -346,7 +347,7 @@ class MPO():
                 dual_params=dual_params,
                 agent_optimizer_state=agent_optimizer_state,
                 dual_optimizer_state=dual_optimizer_state,
-                steps=train_state.steps + 1
+                steps=steps
             )
 
             metrics["gradients/agent_gradients_norm"] = agent_gradients_norm
