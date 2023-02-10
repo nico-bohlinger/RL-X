@@ -3,6 +3,9 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jax.nn.initializers import variance_scaling
+from jax import random
+from jax import core
+from jax._src import dtypes
 import flax.linen as nn
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
@@ -22,6 +25,15 @@ def get_policy(config, env):
         raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
 
 
+def uniform_scaling(scale, dtype = jnp.float_):
+    def init(key, shape, dtype=dtype):
+        input_size = np.product(shape[:-1])
+        dtype = dtypes.canonicalize_dtype(dtype)
+        named_shape = core.as_named_shape(shape)
+        max_val = jnp.sqrt(3 / input_size) * scale
+        return random.uniform(key, named_shape, dtype, -1) * max_val
+    return init
+
 
 class Policy(nn.Module):
     as_shape: Sequence[int]
@@ -31,15 +43,17 @@ class Policy(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        x = nn.Dense(self.nr_hidden_units)(x)
-        x = nn.relu(x)
+        x = nn.Dense(self.nr_hidden_units, kernel_init=uniform_scaling(0.333))(x)
         x = nn.LayerNorm()(x)
-        x = nn.Dense(self.nr_hidden_units)(x)
-        x = nn.relu(x)
+        x = nn.tanh(x)
+        x = nn.Dense(self.nr_hidden_units, kernel_init=uniform_scaling(0.333))(x)
+        x = nn.elu(x)
+        x = nn.Dense(self.nr_hidden_units, kernel_init=uniform_scaling(0.333))(x)
+        x = nn.elu(x)
 
-        mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal", in_axis=-2, out_axis=-1, batch_axis=(), dtype=jnp.float_))(x)
+        mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal"))(x)
 
-        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal", in_axis=-2, out_axis=-1, batch_axis=(), dtype=jnp.float_))(x)
+        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal"))(x)
         stddev = self.min_stddev + (jax.nn.softplus(stddev) * self.init_stddev / jax.nn.softplus(0.0))  # Cholesky factor from MPO paper, implemented like in https://github.com/deepmind/acme/blob/master/acme/jax/networks/distributional.py
 
         dist = tfd.MultivariateNormalDiag(loc=mean, scale_diag=stddev)

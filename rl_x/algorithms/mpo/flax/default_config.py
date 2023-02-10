@@ -29,7 +29,7 @@ def get_config(algorithm_name):
     config.min_log_alpha = -18.0
     config.kl_epsilon = 0.1
     config.kl_epsilon_penalty = 0.001
-    config.kl_epsilon_mean = 0.0025  # Acme docu mentions: Divide it by nr action space dimension, orig mean = 0.1
+    config.kl_epsilon_mean = 0.01  # Acme docu mentions: Divide it by nr action space dimension, orig mean = 0.1
     config.kl_epsilon_stddev = 1e-6  # Acme docu mentions: Divide it by nr action space dimension, orig stddev = 0.0001
     config.retrace_lambda = 0.95
     config.trace_length = 2
