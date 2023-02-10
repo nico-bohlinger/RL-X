@@ -315,13 +315,14 @@ class MPO():
                 return loss, (metrics)
 
 
-            key, k1, k2 = jax.random.split(key, 3)
+            keys = jax.random.split(key, self.batch_size + 1)
+            key, keys = keys[0], keys[1:]
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, None, None), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
 
-            (loss, (metrics)), (agent_gradients, dual_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, actions, rewards, dones, log_probs, k1, k2)
+            (loss, (metrics)), (agent_gradients, dual_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, actions, rewards, dones, log_probs, keys)
 
             agent_gradients_norm = optax.global_norm(agent_gradients)
             dual_gradients_norm = optax.global_norm(dual_gradients)
@@ -341,7 +342,7 @@ class MPO():
                 log_penalty_temperature=jnp.maximum(dual_params.log_penalty_temperature, self.min_log_temperature)
             )
 
-            train_state = TrainingState(
+            new_train_state = TrainingState(
                 agent_params=agent_params,
                 agent_target_params=agent_target_params,
                 dual_params=dual_params,
@@ -353,7 +354,7 @@ class MPO():
             metrics["gradients/agent_gradients_norm"] = agent_gradients_norm
             metrics["gradients/dual_gradients_norm"] = dual_gradients_norm
 
-            return train_state, metrics, key
+            return new_train_state, metrics, key
 
 
         self.set_train_mode()
@@ -385,9 +386,9 @@ class MPO():
             if global_step < self.learning_starts:
                 processed_action = np.array([self.env.action_space.sample() for _ in range(self.nr_envs)])
                 action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
-                log_prob = get_log_prob(self.train_state.agent_params.policy_params, state, action)
+                log_prob = get_log_prob(self.train_state.agent_target_params.policy_params, state, action)
             else:
-                action, log_prob, self.key = get_action_and_log_prob(self.train_state.agent_params.policy_params, state, self.key)
+                action, log_prob, self.key = get_action_and_log_prob(self.train_state.agent_target_params.policy_params, state, self.key)
                 processed_action = self.get_processed_action(action)
             
             next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
