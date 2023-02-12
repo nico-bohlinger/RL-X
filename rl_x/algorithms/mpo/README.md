@@ -14,8 +14,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 - Distributional TQC critics  
 
 **Notes**
-- Seems to be relatively slow (steps per second), sensitive to hyperparameters and the performance is unstable. The latter may be due to bugs
-- TQC critics help but also make it slower
+- Achieves great performance in general but suffers from sudden loss spikes that can cause the performance to collapse
 
 **Supported frameworks**
 - JAX (Flax)

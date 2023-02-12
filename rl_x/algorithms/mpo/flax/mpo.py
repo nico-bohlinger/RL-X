@@ -65,6 +65,7 @@ class MPO():
         self.batch_size = config.algorithm.batch_size
         self.update_period = config.algorithm.update_period
         self.gamma = config.algorithm.gamma
+        self.max_param_update = config.algorithm.max_param_update
         self.logging_all_metrics = config.algorithm.logging_all_metrics
         self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
@@ -102,8 +103,14 @@ class MPO():
         agent_learning_rate = agent_linear_schedule if self.anneal_agent_learning_rate else self.agent_learning_rate
         dual_learning_rate = dual_linear_schedule if self.anneal_dual_learning_rate else self.dual_learning_rate
 
-        self.agent_optimizer = optax.inject_hyperparams(optax.adam)(learning_rate=agent_learning_rate)
-        self.dual_optimizer = optax.inject_hyperparams(optax.adam)(learning_rate=dual_learning_rate)
+        self.agent_optimizer = optax.chain(
+            optax.clip(self.max_param_update),
+            optax.inject_hyperparams(optax.adam)(learning_rate=agent_learning_rate),
+        )
+        self.dual_optimizer = optax.chain(
+            optax.clip(self.max_param_update),
+            optax.inject_hyperparams(optax.adam)(learning_rate=dual_learning_rate),
+        )
 
         state = jnp.array([self.env.observation_space.sample()])
         action = jnp.array([self.env.action_space.sample()])
@@ -306,14 +313,22 @@ class MPO():
                 # Some metrics seem to cost performance when logged, so they get only logged if necessary
                 # TODO: When the jax logger works again, inspect why this is the case
                 if self.logging_all_metrics:
-                    metrics["policy_mean_loss"] = loss_policy_mean
-                    metrics["policy_stddev_loss"] = loss_policy_stddev
+                    metrics["loss/policy_mean_loss"] = loss_policy_mean
+                    metrics["loss/policy_stddev_loss"] = loss_policy_stddev
                     metrics["loss/kl_penalty_loss"] = kl_penalty_loss
                     metrics["loss/alpha_loss"] = alpha_loss
                     metrics["loss/alpha_mean_loss"] = loss_alpha_mean
                     metrics["loss/alpha_stddev_loss"] = loss_alpha_stddev
                     metrics["kl/policy_mean_kl"] = jnp.mean(mean_kl_mean) / self.kl_epsilon_mean
                     metrics["kl/policy_stddev_kl"] = jnp.mean(mean_kl_stddev) / self.kl_epsilon_stddev
+                    metrics["loss/policy_fix_std_logprob"] = jnp.mean(fixed_stddev_dist.log_prob(a_improvement))
+                    metrics["loss/policy_fix_mean_logprob"] = jnp.mean(fixed_mean_dist.log_prob(a_improvement))
+                    metrics["loss/a_improvement"] = jnp.mean(a_improvement)
+                    metrics["loss/target_mean"] = jnp.mean(target_mean)
+                    metrics["loss/target_stddev"] = jnp.mean(target_stddev)
+                    metrics["Q_vals/Q_target"] = jnp.mean(q_atoms_target)
+                    metrics["Q_vals/Q_improvement"] = jnp.mean(q_improvement)
+                    metrics["policy/mean"] = jnp.mean(current_mean)
 
                 return loss, (metrics)
 

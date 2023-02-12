@@ -35,6 +35,7 @@ def get_config(algorithm_name):
     config.trace_length = 2
     config.init_stddev = 0.5
     config.min_stddev = 1e-6
+    config.max_param_update = 1.0
     config.stability_epsilon = 1e-8
     config.nr_hidden_units = 256
     config.logging_all_metrics = False  # Some metrics seem to cost performance when logged, so they get only logged if True
