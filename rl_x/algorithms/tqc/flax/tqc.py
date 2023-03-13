@@ -47,15 +47,11 @@ class TQC():
         self.nr_atoms_per_net = config.algorithm.nr_atoms_per_net
         self.nr_dropped_atoms_per_net = config.algorithm.nr_dropped_atoms_per_net
         self.huber_kappa = config.algorithm.huber_kappa
-        self.q_update_steps = config.algorithm.q_update_steps
-        self.policy_update_steps = config.algorithm.policy_update_steps
-        self.entropy_update_steps = config.algorithm.entropy_update_steps
         self.target_entropy = config.algorithm.target_entropy
         self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
         self.nr_total_atoms = self.nr_atoms_per_net * self.ensemble_size
         self.nr_target_atoms = self.nr_total_atoms - (self.nr_dropped_atoms_per_net * self.ensemble_size)
-        self.max_nr_batches_needed = max(self.q_update_steps, self.policy_update_steps, self.entropy_update_steps)
 
         if config.algorithm.device == "cpu":
             jax.config.update("jax_platform_name", "cpu")
@@ -143,91 +139,75 @@ class TQC():
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, key: jax.random.PRNGKey
             ):
             # Update critic
-            q_losses = []
+            key, action_sample_key = jax.random.split(key)
 
-            for i in range(self.q_update_steps):
-                key, action_sample_key = jax.random.split(key)
+            dist = self.policy.apply(policy_state.params, next_states)
+            next_actions = dist.sample(seed=action_sample_key)
+            next_log_probs = dist.log_prob(next_actions)
 
-                dist = self.policy.apply(policy_state.params, next_states[i])
-                next_actions = dist.sample(seed=action_sample_key)
-                next_log_probs = dist.log_prob(next_actions)
+            alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
 
-                alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
+            next_q_target_atoms = self.vector_critic.apply(vector_critic_state.target_params, next_states, next_actions)
+            next_q_target_atoms = jnp.transpose(next_q_target_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)  # (batch_size, nr_total_atoms)
+            next_q_target_atoms = jnp.sort(next_q_target_atoms)
+            next_q_target_atoms = next_q_target_atoms[:, :self.nr_target_atoms]
 
-                next_q_target_atoms = self.vector_critic.apply(vector_critic_state.target_params, next_states[i], next_actions)
-                next_q_target_atoms = jnp.transpose(next_q_target_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)  # (batch_size, nr_total_atoms)
-                next_q_target_atoms = jnp.sort(next_q_target_atoms)
-                next_q_target_atoms = next_q_target_atoms[:, :self.nr_target_atoms]
+            y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (next_q_target_atoms - alpha * next_log_probs.reshape(-1, 1))
+            y = jnp.expand_dims(y, axis=1)  # (batch_size, 1, nr_target_atoms)
 
-                y = rewards[i].reshape(-1, 1) + self.gamma * (1 - dones[i].reshape(-1, 1)) * (next_q_target_atoms - alpha * next_log_probs.reshape(-1, 1))
-                y = jnp.expand_dims(y, axis=1)  # (batch_size, 1, nr_target_atoms)
-
-                def huber_loss_fn(vector_critic_params: flax.core.FrozenDict):
-                    q_atoms = self.vector_critic.apply(vector_critic_params, states[i], actions[i])
-                    q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, -1)
-                    q_atoms = jnp.expand_dims(q_atoms, axis=2)  # (batch_size, nr_total_atoms, 1)
-                    
-                    cumulative_prob = (jnp.arange(self.nr_total_atoms, dtype=jnp.float32) + 0.5) / self.nr_total_atoms
-                    cumulative_prob = jnp.expand_dims(cumulative_prob, axis=(0, -1))  # (1, nr_total_atoms, 1)
-
-                    delta_i_j = y - q_atoms
-                    abs_delta_i_j = jnp.abs(delta_i_j)
-                    huber_loss = jnp.where(abs_delta_i_j <= self.huber_kappa, 0.5 * delta_i_j ** 2, self.huber_kappa * (abs_delta_i_j - 0.5 * self.huber_kappa))
-                    loss = jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa
-
-                    return loss.mean()
+            def huber_loss_fn(vector_critic_params: flax.core.FrozenDict):
+                q_atoms = self.vector_critic.apply(vector_critic_params, states, actions)
+                q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, -1)
+                q_atoms = jnp.expand_dims(q_atoms, axis=2)  # (batch_size, nr_total_atoms, 1)
                 
-                q_loss, grads = jax.value_and_grad(huber_loss_fn, has_aux=False)(vector_critic_state.params)
-                vector_critic_state = vector_critic_state.apply_gradients(grads=grads)
-                q_losses.append(q_loss)
+                cumulative_prob = (jnp.arange(self.nr_total_atoms, dtype=jnp.float32) + 0.5) / self.nr_total_atoms
+                cumulative_prob = jnp.expand_dims(cumulative_prob, axis=(0, -1))  # (1, nr_total_atoms, 1)
 
-                # Update targets
-                vector_critic_state = vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
+                delta_i_j = y - q_atoms
+                abs_delta_i_j = jnp.abs(delta_i_j)
+                huber_loss = jnp.where(abs_delta_i_j <= self.huber_kappa, 0.5 * delta_i_j ** 2, self.huber_kappa * (abs_delta_i_j - 0.5 * self.huber_kappa))
+                loss = jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa
+
+                return loss.mean()
+            
+            q_loss, grads = jax.value_and_grad(huber_loss_fn, has_aux=False)(vector_critic_state.params)
+            vector_critic_state = vector_critic_state.apply_gradients(grads=grads)
+
+            # Update targets
+            vector_critic_state = vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
 
 
             # Update policy
-            policy_losses = []
-            entropies = []
-            alphas = []
+            key, subkey = jax.random.split(key)
 
-            for i in range(self.policy_update_steps):
-                key, subkey = jax.random.split(key)
+            def loss_fn(policy_params: flax.core.FrozenDict):
+                dist = self.policy.apply(policy_params, states)
+                current_actions = dist.sample(seed=subkey)
+                current_log_probs = dist.log_prob(current_actions).reshape(-1, 1)
 
-                def loss_fn(policy_params: flax.core.FrozenDict):
-                    dist = self.policy.apply(policy_params, states[i])
-                    current_actions = dist.sample(seed=subkey)
-                    current_log_probs = dist.log_prob(current_actions).reshape(-1, 1)
+                q_atoms = self.vector_critic.apply(vector_critic_state.params, states, current_actions)
+                q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)
+                mean_q_atoms = jnp.mean(q_atoms, axis=1)
 
-                    q_atoms = self.vector_critic.apply(vector_critic_state.params, states[i], current_actions)
-                    q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)
-                    mean_q_atoms = jnp.mean(q_atoms, axis=1)
+                alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
 
-                    alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
-
-                    policy_loss = (alpha * current_log_probs - mean_q_atoms).mean()
-                    return policy_loss, (-current_log_probs.mean(), alpha)
-                
-                (policy_loss, (entropy, alpha)), grads = jax.value_and_grad(loss_fn, has_aux=True)(policy_state.params)
-                policy_state = policy_state.apply_gradients(grads=grads)
-                policy_losses.append(policy_loss)
-                entropies.append(entropy)
-                alphas.append(alpha)
+                policy_loss = (alpha * current_log_probs - mean_q_atoms).mean()
+                return policy_loss, (-current_log_probs.mean(), alpha)
+            
+            (policy_loss, (entropy, alpha)), grads = jax.value_and_grad(loss_fn, has_aux=True)(policy_state.params)
+            policy_state = policy_state.apply_gradients(grads=grads)
 
 
             # Update entropy coefficient
-            entropy_losses = []
-
-            for i in range(self.entropy_update_steps):
-                def loss_fn(entropy_coefficient_params: flax.core.FrozenDict):
-                    alpha = self.entropy_coefficient.apply(entropy_coefficient_params)
-                    return alpha * (entropies[i] - self.target_entropy)
-            
-                entropy_loss, grads = jax.value_and_grad(loss_fn, has_aux=False)(entropy_coefficient_state.params)
-                entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=grads)
-                entropy_losses.append(entropy_loss)
+            def loss_fn(entropy_coefficient_params: flax.core.FrozenDict):
+                alpha = self.entropy_coefficient.apply(entropy_coefficient_params)
+                return alpha * (entropy - self.target_entropy)
+        
+            entropy_loss, grads = jax.value_and_grad(loss_fn, has_aux=False)(entropy_coefficient_state.params)
+            entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=grads)
 
 
-            return jnp.array(q_losses), jnp.array(policy_losses), jnp.array(entropies), jnp.array(alphas), jnp.array(entropy_losses), policy_state, vector_critic_state, entropy_coefficient_state, key
+            return q_loss, policy_loss, entropy, alpha, entropy_loss, policy_state, vector_critic_state, entropy_coefficient_state, key
 
 
         self.set_train_mode()
@@ -291,17 +271,17 @@ class TQC():
 
             # Optimizing - Prepare batches
             if should_optimize:
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, self.max_nr_batches_needed)
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size)
 
 
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
-                q_loss, policy_loss, entropies, alphas, entropy_loss, self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
-                q_loss_buffer.extend(q_loss)
-                policy_loss_buffer.extend(policy_loss)
-                entropy_loss_buffer.extend(entropy_loss)
-                entropy_buffer.extend(entropies)
-                alpha_buffer.extend(alphas)
+                q_loss, policy_loss, entropy, alpha, entropy_loss, self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
+                q_loss_buffer.append(q_loss)
+                policy_loss_buffer.append(policy_loss)
+                entropy_loss_buffer.append(entropy_loss)
+                entropy_buffer.append(entropy)
+                alpha_buffer.append(alpha)
             
             optimize_end_time = time.time()
             optimize_time_buffer.append(optimize_end_time - acting_end_time)

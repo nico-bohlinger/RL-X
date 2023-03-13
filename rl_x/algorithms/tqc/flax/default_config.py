@@ -19,9 +19,6 @@ def get_config(algorithm_name):
     config.nr_atoms_per_net = 25
     config.nr_dropped_atoms_per_net = 2
     config.huber_kappa = 1.0
-    config.q_update_steps = 1
-    config.policy_update_steps = 1
-    config.entropy_update_steps = 1
     config.target_entropy = "auto"
     config.log_std_min = -20
     config.log_std_max = 2
