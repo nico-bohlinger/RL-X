@@ -4,6 +4,7 @@ import pickle
 import random
 import time
 from collections import deque
+import tree
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -22,8 +23,8 @@ from rl_x.algorithms.tqc.flax.rl_train_state import RLTrainState
 rlx_logger = logging.getLogger("rl_x")
 
 
-class TQC():
-    def __init__(self, config, env, run_path, writer) -> None:
+class TQC:
+    def __init__(self, config, env, run_path, writer):
         self.config = config
         self.env = env
         self.writer = writer
@@ -138,27 +139,28 @@ class TQC():
                 policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState,
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, key: jax.random.PRNGKey
             ):
-            # Update critic
-            key, action_sample_key = jax.random.split(key)
+            def loss_fn(policy_params: flax.core.FrozenDict, vector_critic_params: flax.core.FrozenDict, vector_critic_target_params: flax.core.FrozenDict, entropy_coefficient_params: flax.core.FrozenDict,
+                        states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray,
+                        key1: jax.random.PRNGKey, key2: jax.random.PRNGKey
+                ):
+                # Update critic
+                dist = self.policy.apply(policy_params, next_states)
+                dist = jax.lax.stop_gradient(dist)
+                next_actions = dist.sample(seed=key1)
+                next_log_probs = dist.log_prob(next_actions)
 
-            dist = self.policy.apply(policy_state.params, next_states)
-            next_actions = dist.sample(seed=action_sample_key)
-            next_log_probs = dist.log_prob(next_actions)
+                alpha = self.entropy_coefficient.apply(entropy_coefficient_params)
+                alpha = jax.lax.stop_gradient(alpha)
 
-            alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
+                next_q_target_atoms = self.vector_critic.apply(vector_critic_target_params, next_states, next_actions)
+                next_q_target_atoms = jax.lax.stop_gradient(next_q_target_atoms)
+                next_q_target_atoms = jnp.sort(next_q_target_atoms.reshape(self.nr_total_atoms))[:self.nr_target_atoms]
 
-            next_q_target_atoms = self.vector_critic.apply(vector_critic_state.target_params, next_states, next_actions)
-            next_q_target_atoms = jnp.transpose(next_q_target_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)  # (batch_size, nr_total_atoms)
-            next_q_target_atoms = jnp.sort(next_q_target_atoms)
-            next_q_target_atoms = next_q_target_atoms[:, :self.nr_target_atoms]
+                y = rewards + self.gamma * (1 - dones) * (next_q_target_atoms - alpha * next_log_probs)
+                y = jnp.expand_dims(y, axis=0)  # (1, nr_target_atoms)
 
-            y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (next_q_target_atoms - alpha * next_log_probs.reshape(-1, 1))
-            y = jnp.expand_dims(y, axis=1)  # (batch_size, 1, nr_target_atoms)
-
-            def huber_loss_fn(vector_critic_params: flax.core.FrozenDict):
                 q_atoms = self.vector_critic.apply(vector_critic_params, states, actions)
-                q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, -1)
-                q_atoms = jnp.expand_dims(q_atoms, axis=2)  # (batch_size, nr_total_atoms, 1)
+                q_atoms = jnp.expand_dims(q_atoms.reshape(self.nr_total_atoms), axis=1)  # (nr_total_atoms, 1)
                 
                 cumulative_prob = (jnp.arange(self.nr_total_atoms, dtype=jnp.float32) + 0.5) / self.nr_total_atoms
                 cumulative_prob = jnp.expand_dims(cumulative_prob, axis=(0, -1))  # (1, nr_total_atoms, 1)
@@ -166,49 +168,64 @@ class TQC():
                 delta_i_j = y - q_atoms
                 abs_delta_i_j = jnp.abs(delta_i_j)
                 huber_loss = jnp.where(abs_delta_i_j <= self.huber_kappa, 0.5 * delta_i_j ** 2, self.huber_kappa * (abs_delta_i_j - 0.5 * self.huber_kappa))
-                loss = jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa
+                q_loss = jnp.mean(jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa)
 
-                return loss.mean()
+
+                # Update policy
+                dist = self.policy.apply(policy_params, states)
+                current_actions = dist.sample(seed=key2)
+                current_log_probs = dist.log_prob(current_actions)
+                entropy = -current_log_probs
+
+                q_atoms = self.vector_critic.apply(vector_critic_params, states, current_actions)
+                q_atoms = jax.lax.stop_gradient(q_atoms)
+                mean_q_atoms = jnp.mean(q_atoms)
+
+                alpha = self.entropy_coefficient.apply(entropy_coefficient_params)
+                alpha_sg = jax.lax.stop_gradient(alpha)
+
+                policy_loss = alpha_sg * current_log_probs - mean_q_atoms
+
+
+                # Update entropy coefficient
+                entropy_loss = alpha * (entropy - self.target_entropy)
+
+
+                # Combine losses
+                loss = q_loss + policy_loss + entropy_loss
+
+
+                # Create metrics
+                metrics = {
+                    "train/q_loss": q_loss,
+                    "train/policy_loss": policy_loss,
+                    "train/entropy_loss": entropy_loss,
+                    "train/entropy": entropy,
+                    "train/alpha": alpha
+                }
+
+                return loss, (metrics)
             
-            q_loss, grads = jax.value_and_grad(huber_loss_fn, has_aux=False)(vector_critic_state.params)
-            vector_critic_state = vector_critic_state.apply_gradients(grads=grads)
+
+            keys = jax.random.split(key, (self.batch_size * 2) + 1)
+            key, keys1, keys2 = keys[0], keys[1::2], keys[2::2]
+
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, None, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
+            safe_mean = lambda x: jnp.mean(x) if x is not None else x
+            mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
+
+            (loss, (metrics)), (policy_gradients, vector_critic_gradients, entropy_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 3), has_aux=True)(
+                policy_state.params, vector_critic_state.params, vector_critic_state.target_params, entropy_coefficient_state.params,
+                states, next_states, actions, rewards, dones, keys1, keys2)
+
+            vector_critic_state = vector_critic_state.apply_gradients(grads=vector_critic_gradients)
+            policy_state = policy_state.apply_gradients(grads=policy_gradients)
+            entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=entropy_gradients)
 
             # Update targets
             vector_critic_state = vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
 
-
-            # Update policy
-            key, subkey = jax.random.split(key)
-
-            def loss_fn(policy_params: flax.core.FrozenDict):
-                dist = self.policy.apply(policy_params, states)
-                current_actions = dist.sample(seed=subkey)
-                current_log_probs = dist.log_prob(current_actions).reshape(-1, 1)
-
-                q_atoms = self.vector_critic.apply(vector_critic_state.params, states, current_actions)
-                q_atoms = jnp.transpose(q_atoms, (1, 0, 2)).reshape(self.batch_size, self.nr_total_atoms)
-                mean_q_atoms = jnp.mean(q_atoms, axis=1)
-
-                alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
-
-                policy_loss = (alpha * current_log_probs - mean_q_atoms).mean()
-                return policy_loss, (-current_log_probs.mean(), alpha)
-            
-            (policy_loss, (entropy, alpha)), grads = jax.value_and_grad(loss_fn, has_aux=True)(policy_state.params)
-            policy_state = policy_state.apply_gradients(grads=grads)
-
-
-            # Update entropy coefficient
-            def loss_fn(entropy_coefficient_params: flax.core.FrozenDict):
-                alpha = self.entropy_coefficient.apply(entropy_coefficient_params)
-                return alpha * (entropy - self.target_entropy)
-        
-            entropy_loss, grads = jax.value_and_grad(loss_fn, has_aux=False)(entropy_coefficient_state.params)
-            entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=grads)
-
-
-            return q_loss, policy_loss, entropy, alpha, entropy_loss, policy_state, vector_critic_state, entropy_coefficient_state, key
-
+            return policy_state, vector_critic_state, entropy_coefficient_state, metrics, key
 
         self.set_train_mode()
 
@@ -216,21 +233,15 @@ class TQC():
 
         saving_return_buffer = deque(maxlen=100)
         episode_info_buffer = deque(maxlen=self.logging_freq)
-        acting_time_buffer = deque(maxlen=self.logging_freq)
-        optimize_time_buffer = deque(maxlen=self.logging_freq)
-        saving_time_buffer = deque(maxlen=self.logging_freq)
-        fps_buffer = deque(maxlen=self.logging_freq)
-        q_loss_buffer = deque(maxlen=self.logging_freq)
-        policy_loss_buffer = deque(maxlen=self.logging_freq)
-        entropy_loss_buffer = deque(maxlen=self.logging_freq)
-        entropy_buffer = deque(maxlen=self.logging_freq)
-        alpha_buffer = deque(maxlen=self.logging_freq)
+        time_metrics_buffer = deque(maxlen=self.logging_freq)
+        loss_metrics_buffer = deque(maxlen=self.logging_freq)
 
         state = self.env.reset()
 
         global_step = 0
         while global_step < self.total_timesteps:
             start_time = time.time()
+            time_metrics = {}
 
 
             # Acting
@@ -259,7 +270,7 @@ class TQC():
             saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos])
 
             acting_end_time = time.time()
-            acting_time_buffer.append(acting_end_time - start_time)
+            time_metrics["time/acting_time"] = acting_end_time - start_time
 
 
             # What to do in this step after acting
@@ -276,15 +287,11 @@ class TQC():
 
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
-                q_loss, policy_loss, entropy, alpha, entropy_loss, self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
-                q_loss_buffer.append(q_loss)
-                policy_loss_buffer.append(policy_loss)
-                entropy_loss_buffer.append(entropy_loss)
-                entropy_buffer.append(entropy)
-                alpha_buffer.append(alpha)
+                policy_state, vector_critic_state, entropy_coefficient_state, loss_metrics, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
+                loss_metrics_buffer.append(loss_metrics)
             
             optimize_end_time = time.time()
-            optimize_time_buffer.append(optimize_end_time - acting_end_time)
+            time_metrics["time/optimize_time"] = optimize_end_time - acting_end_time
 
 
             # Saving
@@ -295,18 +302,16 @@ class TQC():
                     self.save()
             
             saving_end_time = time.time()
-            saving_time_buffer.append(saving_end_time - optimize_end_time)
+            time_metrics["time/saving_time"] = saving_end_time - optimize_end_time
 
-            fps_buffer.append(self.nr_envs / (saving_end_time - start_time))
+            time_metrics["time/fps"] = self.nr_envs / (saving_end_time - start_time)
+
+            time_metrics_buffer.append(time_metrics)
 
 
             # Logging                
             if should_log:
-                if self.track_console:
-                    rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
-                    self.log_console("global_step", global_step)
-                else:
-                    rlx_logger.info(f"Step: {global_step}")
+                self.start_logging(global_step)
 
                 if len(episode_info_buffer) > 0:
                     self.log("rollout/ep_rew_mean", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
@@ -315,37 +320,18 @@ class TQC():
                     for name in names:
                         if name != "r" and name != "l" and name != "t":
                             self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
-                self.log("time/fps", np.mean(fps_buffer), global_step)
-                self.log("time/acting_time", np.mean(acting_time_buffer), global_step)
-                self.log("time/optimize_time", np.mean(optimize_time_buffer), global_step)
-                self.log("time/saving_time", np.mean(saving_time_buffer), global_step)
-                self.log("train/learning_rate", self.policy_state.opt_state.hyperparams["learning_rate"].item(), global_step)
-                self.log("train/q_loss", self.get_buffer_mean(q_loss_buffer), global_step)
-                self.log("train/policy_loss", self.get_buffer_mean(policy_loss_buffer), global_step)
-                self.log("train/entropy_loss", self.get_buffer_mean(entropy_loss_buffer), global_step)
-                self.log("train/entropy", self.get_buffer_mean(entropy_buffer), global_step)
-                self.log("train/alpha", self.get_buffer_mean(alpha_buffer), global_step)
-
-                if self.track_console:
-                    rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
+                mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in time_metrics_buffer[0].keys()}
+                mean_lr_metrics = {"train/learning_rate": self.policy_state.opt_state.hyperparams["learning_rate"].item()}
+                mean_loss_metrics = {} if not should_learning_start else {key: np.mean([metrics[key] for metrics in loss_metrics_buffer]) for key in loss_metrics_buffer[0].keys()}
+                mean_combined_metrics = {**mean_time_metrics, **mean_lr_metrics, **mean_loss_metrics}
+                for key, value in mean_combined_metrics.items():
+                    self.log(f"{key}", value, global_step)
 
                 episode_info_buffer.clear()
-                acting_time_buffer.clear()
-                optimize_time_buffer.clear()
-                saving_time_buffer.clear()
-                fps_buffer.clear()
-                q_loss_buffer.clear()
-                policy_loss_buffer.clear()
-                entropy_loss_buffer.clear()
-                entropy_buffer.clear()
-                alpha_buffer.clear()
+                time_metrics_buffer.clear()
+                loss_metrics_buffer.clear()
 
-
-    def get_buffer_mean(self, buffer):
-        if len(buffer) > 0:
-            return np.mean(buffer)
-        else:
-            return 0.0
+                self.end_logging()
 
 
     def log(self, name, value, step):
@@ -358,7 +344,20 @@ class TQC():
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
         rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │")
-        
+
+    
+    def start_logging(self, step):
+        if self.track_console:
+            rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
+            self.log_console("global_step", step)
+        else:
+            rlx_logger.info(f"Step: {step}")
+
+
+    def end_logging(self):
+        if self.track_console:
+            rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
+
 
     def save(self):
         jax_file_path = self.save_path + "/model_best_jax_0"
