@@ -7,6 +7,7 @@ from collections import deque
 import tree
 import numpy as np
 import jax
+from jax.lax import stop_gradient
 import jax.numpy as jnp
 import flax
 from flax.training.train_state import TrainState
@@ -140,26 +141,24 @@ class TQC:
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, key: jax.random.PRNGKey
             ):
             def loss_fn(policy_params: flax.core.FrozenDict, vector_critic_params: flax.core.FrozenDict, vector_critic_target_params: flax.core.FrozenDict, entropy_coefficient_params: flax.core.FrozenDict,
-                        states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray,
+                        state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, done: np.ndarray,
                         key1: jax.random.PRNGKey, key2: jax.random.PRNGKey
                 ):
                 # Update critic
-                dist = self.policy.apply(policy_params, next_states)
-                dist = jax.lax.stop_gradient(dist)
-                next_actions = dist.sample(seed=key1)
-                next_log_probs = dist.log_prob(next_actions)
+                dist = stop_gradient(self.policy.apply(policy_params, next_state))
+                next_action = dist.sample(seed=key1)
+                next_log_prob = dist.log_prob(next_action)
 
-                alpha = self.entropy_coefficient.apply(entropy_coefficient_params)
-                alpha = jax.lax.stop_gradient(alpha)
+                alpha_with_grad = self.entropy_coefficient.apply(entropy_coefficient_params)
+                alpha = stop_gradient(alpha_with_grad)
 
-                next_q_target_atoms = self.vector_critic.apply(vector_critic_target_params, next_states, next_actions)
-                next_q_target_atoms = jax.lax.stop_gradient(next_q_target_atoms)
+                next_q_target_atoms = stop_gradient(self.vector_critic.apply(vector_critic_target_params, next_state, next_action))
                 next_q_target_atoms = jnp.sort(next_q_target_atoms.reshape(self.nr_total_atoms))[:self.nr_target_atoms]
 
-                y = rewards + self.gamma * (1 - dones) * (next_q_target_atoms - alpha * next_log_probs)
+                y = reward + self.gamma * (1 - done) * (next_q_target_atoms - alpha * next_log_prob)
                 y = jnp.expand_dims(y, axis=0)  # (1, nr_target_atoms)
 
-                q_atoms = self.vector_critic.apply(vector_critic_params, states, actions)
+                q_atoms = self.vector_critic.apply(vector_critic_params, state, action)
                 q_atoms = jnp.expand_dims(q_atoms.reshape(self.nr_total_atoms), axis=1)  # (nr_total_atoms, 1)
                 
                 cumulative_prob = (jnp.arange(self.nr_total_atoms, dtype=jnp.float32) + 0.5) / self.nr_total_atoms
@@ -172,23 +171,19 @@ class TQC:
 
 
                 # Update policy
-                dist = self.policy.apply(policy_params, states)
-                current_actions = dist.sample(seed=key2)
-                current_log_probs = dist.log_prob(current_actions)
-                entropy = -current_log_probs
+                dist = self.policy.apply(policy_params, state)
+                current_action = dist.sample(seed=key2)
+                current_log_prob = dist.log_prob(current_action)
+                entropy = stop_gradient(-current_log_prob)
 
-                q_atoms = self.vector_critic.apply(vector_critic_params, states, current_actions)
-                q_atoms = jax.lax.stop_gradient(q_atoms)
+                q_atoms = stop_gradient(self.vector_critic.apply(vector_critic_params, state, current_action))
                 mean_q_atoms = jnp.mean(q_atoms)
 
-                alpha = self.entropy_coefficient.apply(entropy_coefficient_params)
-                alpha_sg = jax.lax.stop_gradient(alpha)
-
-                policy_loss = alpha_sg * current_log_probs - mean_q_atoms
+                policy_loss = alpha * current_log_prob - mean_q_atoms
 
 
                 # Update entropy coefficient
-                entropy_loss = alpha * (entropy - self.target_entropy)
+                entropy_loss = alpha_with_grad * (entropy - self.target_entropy)
 
 
                 # Combine losses
@@ -218,14 +213,15 @@ class TQC:
                 policy_state.params, vector_critic_state.params, vector_critic_state.target_params, entropy_coefficient_state.params,
                 states, next_states, actions, rewards, dones, keys1, keys2)
 
-            vector_critic_state = vector_critic_state.apply_gradients(grads=vector_critic_gradients)
             policy_state = policy_state.apply_gradients(grads=policy_gradients)
+            vector_critic_state = vector_critic_state.apply_gradients(grads=vector_critic_gradients)
             entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=entropy_gradients)
 
             # Update targets
             vector_critic_state = vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
 
             return policy_state, vector_critic_state, entropy_coefficient_state, metrics, key
+
 
         self.set_train_mode()
 
@@ -287,7 +283,7 @@ class TQC:
 
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
-                policy_state, vector_critic_state, entropy_coefficient_state, loss_metrics, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
+                self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, loss_metrics, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
                 loss_metrics_buffer.append(loss_metrics)
             
             optimize_end_time = time.time()
@@ -309,7 +305,7 @@ class TQC:
             time_metrics_buffer.append(time_metrics)
 
 
-            # Logging                
+            # Logging
             if should_log:
                 self.start_logging(global_step)
 
