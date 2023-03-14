@@ -176,7 +176,7 @@ class TQC:
                 current_log_prob = dist.log_prob(current_action)
                 entropy = stop_gradient(-current_log_prob)
 
-                q_atoms = stop_gradient(self.vector_critic.apply(vector_critic_params, state, current_action))
+                q_atoms = self.vector_critic.apply(stop_gradient(vector_critic_params), state, current_action)
                 mean_q_atoms = jnp.mean(q_atoms)
 
                 policy_loss = alpha * current_log_prob - mean_q_atoms
