@@ -68,7 +68,7 @@ class TQC:
         self.env_as_high = env.action_space.high
 
         self.policy, self.get_processed_action = get_policy(config, env)
-        self.vector_critic = get_critic(config, env)
+        self.critic = get_critic(config, env)
         
         if self.target_entropy == "auto":
             self.target_entropy = -np.prod(env.get_single_action_space_shape()).item()
@@ -77,7 +77,7 @@ class TQC:
         self.entropy_coefficient = EntropyCoefficient(1.0)
 
         self.policy.apply = jax.jit(self.policy.apply)
-        self.vector_critic.apply = jax.jit(self.vector_critic.apply)
+        self.critic.apply = jax.jit(self.critic.apply)
         self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
 
         def q_linear_schedule(step):
@@ -108,10 +108,10 @@ class TQC:
             tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.policy_learning_rate)
         )
 
-        self.vector_critic_state = RLTrainState.create(
-            apply_fn=self.vector_critic.apply,
-            params=self.vector_critic.init(critic_key, state, action),
-            target_params=self.vector_critic.init(critic_key, state, action),
+        self.critic_state = RLTrainState.create(
+            apply_fn=self.critic.apply,
+            params=self.critic.init(critic_key, state, action),
+            target_params=self.critic.init(critic_key, state, action),
             tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.q_learning_rate)
         )
 
@@ -137,14 +137,14 @@ class TQC:
 
         @jax.jit
         def update(
-                policy_state: TrainState, vector_critic_state: RLTrainState, entropy_coefficient_state: TrainState,
+                policy_state: TrainState, critic_state: RLTrainState, entropy_coefficient_state: TrainState,
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, key: jax.random.PRNGKey
             ):
-            def loss_fn(policy_params: flax.core.FrozenDict, vector_critic_params: flax.core.FrozenDict, vector_critic_target_params: flax.core.FrozenDict, entropy_coefficient_params: flax.core.FrozenDict,
+            def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict, critic_target_params: flax.core.FrozenDict, entropy_coefficient_params: flax.core.FrozenDict,
                         state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, done: np.ndarray,
                         key1: jax.random.PRNGKey, key2: jax.random.PRNGKey
                 ):
-                # Update critic
+                # Critic loss
                 dist = stop_gradient(self.policy.apply(policy_params, next_state))
                 next_action = dist.sample(seed=key1)
                 next_log_prob = dist.log_prob(next_action)
@@ -152,13 +152,13 @@ class TQC:
                 alpha_with_grad = self.entropy_coefficient.apply(entropy_coefficient_params)
                 alpha = stop_gradient(alpha_with_grad)
 
-                next_q_target_atoms = stop_gradient(self.vector_critic.apply(vector_critic_target_params, next_state, next_action))
+                next_q_target_atoms = stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
                 next_q_target_atoms = jnp.sort(next_q_target_atoms.reshape(self.nr_total_atoms))[:self.nr_target_atoms]
 
                 y = reward + self.gamma * (1 - done) * (next_q_target_atoms - alpha * next_log_prob)
                 y = jnp.expand_dims(y, axis=0)  # (1, nr_target_atoms)
 
-                q_atoms = self.vector_critic.apply(vector_critic_params, state, action)
+                q_atoms = self.critic.apply(critic_params, state, action)
                 q_atoms = jnp.expand_dims(q_atoms.reshape(self.nr_total_atoms), axis=1)  # (nr_total_atoms, 1)
                 
                 cumulative_prob = (jnp.arange(self.nr_total_atoms, dtype=jnp.float32) + 0.5) / self.nr_total_atoms
@@ -170,19 +170,19 @@ class TQC:
                 q_loss = jnp.mean(jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa)
 
 
-                # Update policy
+                # Policy loss
                 dist = self.policy.apply(policy_params, state)
                 current_action = dist.sample(seed=key2)
                 current_log_prob = dist.log_prob(current_action)
                 entropy = stop_gradient(-current_log_prob)
 
-                q_atoms = self.vector_critic.apply(stop_gradient(vector_critic_params), state, current_action)
+                q_atoms = self.critic.apply(stop_gradient(critic_params), state, current_action)
                 mean_q_atoms = jnp.mean(q_atoms)
 
                 policy_loss = alpha * current_log_prob - mean_q_atoms
 
 
-                # Update entropy coefficient
+                # Entropy loss
                 entropy_loss = alpha_with_grad * (entropy - self.target_entropy)
 
 
@@ -192,11 +192,12 @@ class TQC:
 
                 # Create metrics
                 metrics = {
-                    "train/q_loss": q_loss,
-                    "train/policy_loss": policy_loss,
-                    "train/entropy_loss": entropy_loss,
-                    "train/entropy": entropy,
-                    "train/alpha": alpha
+                    "loss/q_loss": q_loss,
+                    "loss/policy_loss": policy_loss,
+                    "loss/entropy_loss": entropy_loss,
+                    "entropy/entropy": entropy,
+                    "entropy/alpha": alpha,
+                    "q_value/q_value": mean_q_atoms,
                 }
 
                 return loss, (metrics)
@@ -209,18 +210,23 @@ class TQC:
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
 
-            (loss, (metrics)), (policy_gradients, vector_critic_gradients, entropy_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 3), has_aux=True)(
-                policy_state.params, vector_critic_state.params, vector_critic_state.target_params, entropy_coefficient_state.params,
+            (loss, (metrics)), (policy_gradients, critic_gradients, entropy_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 3), has_aux=True)(
+                policy_state.params, critic_state.params, critic_state.target_params, entropy_coefficient_state.params,
                 states, next_states, actions, rewards, dones, keys1, keys2)
 
             policy_state = policy_state.apply_gradients(grads=policy_gradients)
-            vector_critic_state = vector_critic_state.apply_gradients(grads=vector_critic_gradients)
+            critic_state = critic_state.apply_gradients(grads=critic_gradients)
             entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=entropy_gradients)
 
             # Update targets
-            vector_critic_state = vector_critic_state.replace(target_params=optax.incremental_update(vector_critic_state.params, vector_critic_state.target_params, self.tau))
+            critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
 
-            return policy_state, vector_critic_state, entropy_coefficient_state, metrics, key
+            metrics["lr/learning_rate"] = policy_state.opt_state.hyperparams["learning_rate"]
+            metrics["gradients/policy_gradients"] = optax.global_norm(policy_gradients)
+            metrics["gradients/critic_gradients"] = optax.global_norm(critic_gradients)
+            metrics["gradients/entropy_gradients"] = optax.global_norm(entropy_gradients)
+
+            return policy_state, critic_state, entropy_coefficient_state, metrics, key
 
 
         self.set_train_mode()
@@ -230,11 +236,14 @@ class TQC:
         saving_return_buffer = deque(maxlen=100)
         episode_info_buffer = deque(maxlen=self.logging_freq)
         time_metrics_buffer = deque(maxlen=self.logging_freq)
-        loss_metrics_buffer = deque(maxlen=self.logging_freq)
+        optimization_metrics_buffer = deque(maxlen=self.logging_freq)
 
         state = self.env.reset()
 
         global_step = 0
+        nr_updates = 0
+        nr_episodes = 0
+        steps_metrics = {}
         while global_step < self.total_timesteps:
             start_time = time.time()
             time_metrics = {}
@@ -255,6 +264,7 @@ class TQC:
                     maybe_terminal_observation = self.env.get_terminal_observation(info, i)
                     if maybe_terminal_observation is not None:
                         actual_next_state[i] = maybe_terminal_observation
+                    nr_episodes += 1
             
             replay_buffer.add(state, actual_next_state, action, reward, done)
 
@@ -283,8 +293,9 @@ class TQC:
 
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
-                self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, loss_metrics, self.key = update(self.policy_state, self.vector_critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
-                loss_metrics_buffer.append(loss_metrics)
+                self.policy_state, self.critic_state, self.entropy_coefficient_state, optimization_metrics, self.key = update(self.policy_state, self.critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
+                optimization_metrics_buffer.append(optimization_metrics)
+                nr_updates += 1
             
             optimize_end_time = time.time()
             time_metrics["time/optimize_time"] = optimize_end_time - acting_end_time
@@ -307,25 +318,28 @@ class TQC:
 
             # Logging
             if should_log:
+                steps_metrics["steps/nr_env_steps"] = global_step
+                steps_metrics["steps/nr_updates"] = nr_updates
+                steps_metrics["steps/nr_episodes"] = nr_episodes
+
                 self.start_logging(global_step)
 
                 if len(episode_info_buffer) > 0:
-                    self.log("rollout/ep_rew_mean", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
-                    self.log("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
+                    self.log("rollout/episode_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
+                    self.log("rollout/episode_length", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
                     names = list(episode_info_buffer[0].keys())
                     for name in names:
                         if name != "r" and name != "l" and name != "t":
                             self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
                 mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in time_metrics_buffer[0].keys()}
-                mean_lr_metrics = {"train/learning_rate": self.policy_state.opt_state.hyperparams["learning_rate"].item()}
-                mean_loss_metrics = {} if not should_learning_start else {key: np.mean([metrics[key] for metrics in loss_metrics_buffer]) for key in loss_metrics_buffer[0].keys()}
-                mean_combined_metrics = {**mean_time_metrics, **mean_lr_metrics, **mean_loss_metrics}
-                for key, value in mean_combined_metrics.items():
+                mean_optimization_metrics = {} if not should_learning_start else {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in optimization_metrics_buffer[0].keys()}
+                combined_metrics = {**steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
+                for key, value in combined_metrics.items():
                     self.log(f"{key}", value, global_step)
 
                 episode_info_buffer.clear()
                 time_metrics_buffer.clear()
-                loss_metrics_buffer.clear()
+                optimization_metrics_buffer.clear()
 
                 self.end_logging()
 
@@ -345,7 +359,6 @@ class TQC:
     def start_logging(self, step):
         if self.track_console:
             rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
-            self.log_console("global_step", step)
         else:
             rlx_logger.info(f"Step: {step}")
 
@@ -361,7 +374,7 @@ class TQC:
 
         checkpoints.save_checkpoint(
             ckpt_dir=self.save_path,
-            target={"policy": self.policy_state, "vector_critic": self.vector_critic_state, "entropy_coefficient": self.entropy_coefficient_state},
+            target={"policy": self.policy_state, "critic": self.critic_state, "entropy_coefficient": self.entropy_coefficient_state},
             step=0,
             prefix="model_best_jax_",
             overwrite=True
@@ -390,12 +403,12 @@ class TQC:
         step = int(splitted_checkpoint_name[-1])
         restored_train_state = checkpoints.restore_checkpoint(
             ckpt_dir=checkpoint_dir,
-            target={"policy": model.policy_state, "vector_critic": model.vector_critic_state, "entropy_coefficient": model.entropy_coefficient_state},
+            target={"policy": model.policy_state, "critic": model.critic_state, "entropy_coefficient": model.entropy_coefficient_state},
             step=step,
             prefix=jax_file_name
         )
         model.policy_state = restored_train_state["policy"]
-        model.vector_critic_state = restored_train_state["vector_critic"]
+        model.critic_state = restored_train_state["critic"]
         model.entropy_coefficient_state = restored_train_state["entropy_coefficient"]
 
         return model
