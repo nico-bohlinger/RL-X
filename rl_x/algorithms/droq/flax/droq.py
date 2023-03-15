@@ -203,7 +203,7 @@ class DroQ():
                 policy_state = policy_state.apply_gradients(grads=grads)
                 policy_losses.append(policy_loss)
                 entropies.append(entropy)
-                alpha_buffer.append(alpha)
+                alphas.append(alpha)
 
             return jnp.array(policy_losses), jnp.array(entropies), jnp.array(alphas), policy_state, key
 
@@ -299,7 +299,7 @@ class DroQ():
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key
                 )
-                q_loss_buffer.extend(jax.device_get(q_losses))
+                q_loss_buffer.extend(q_losses)
 
             q_update_end_time = time.time()
             q_update_time_buffer.append(q_update_end_time - acting_end_time)
@@ -311,8 +311,8 @@ class DroQ():
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, self.key
                 )
-                policy_loss_buffer.append(jax.device_get(policy_losses))
-                alpha_buffer.append(jax.device_get(alphas))
+                policy_loss_buffer.extend(policy_losses)
+                alpha_buffer.extend(alphas)
 
             policy_update_end_time = time.time()
             policy_update_time_buffer.append(policy_update_end_time - q_update_end_time)
@@ -321,8 +321,8 @@ class DroQ():
             # Optimizing - Entropy
             if should_update_entropy:
                 entropy_losses, self.entropy_coefficient_state, self.key = update_entropy_coefficient(self.entropy_coefficient_state, batch_entropies, self.key)
-                entropy_buffer.extend(jax.device_get(batch_entropies))
-                entropy_loss_buffer.append(jax.device_get(entropy_losses))
+                entropy_buffer.extend(batch_entropies)
+                entropy_loss_buffer.extend(entropy_losses)
 
             entropy_update_end_time = time.time()
             entropy_update_time_buffer.append(entropy_update_end_time - policy_update_end_time)

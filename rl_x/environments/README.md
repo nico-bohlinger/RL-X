@@ -27,18 +27,21 @@
 
 ## Standard environment structure
 ```
-pong_v5
-│   __init__.py
-│   create_env.py
-│   default_config.py
-│   wrappers.py
+gym
+└───mujoco
+│   └───humanoid_v4
+│   │   │   __init__.py
+│   │   │   create_env.py
+│   │   │   default_config.py
+│   │   │   wrappers.py
 ```
 
 **\_\_init__.py**
 - Registers the environment with the environment manager
 - Needs to import create_env() and get_config() functions for the registration
-- Creates a constant for the environment name which can be imported for running an experiment
-    - See: ```experiments/experiment.py```
+- Creates a constant for the environment name which can be imported for running an experiment. Environment names use their directory structure as the name.
+    - Example: ```--config.environment.name="gym.mujoco.humanoid_v4"```
+    - See: ```experiments/start_experiment.py```
 
 **create_env.py**
 - Defines the create_env() function for the registration
@@ -49,7 +52,7 @@ pong_v5
 - Those configs can be later overwritten via the command line
 - They are available under the config.environment namespace
     - Example: ```--config.environment.nr_envs=10```
-    - See: ```experiments/experiment.sh```
+    - See: ```experiments/start_experiment.sh```
 
 **wrappers.py**
 - Wrappers around the environment

@@ -1,5 +1,6 @@
 import os
 import sys
+import importlib
 from absl import app
 from absl import flags
 from absl import logging as absl_logging
@@ -14,6 +15,12 @@ from rl_x.runner.default_config import get_config as get_runner_config
 from rl_x.algorithms.algorithm_manager import get_algorithm_config, get_algorithm_model_class
 from rl_x.environments.environment_manager import get_environment_config, get_environment_create_env
 
+from rl_x.algorithms.ppo.pytorch import PPO_PYTORCH
+from rl_x.environments.gym.mujoco.humanoid_v4 import GYM_MUJOCO_HUMANOID_V4
+
+DEFAULT_ALGORITHM = PPO_PYTORCH
+DEFAULT_ENVIRONMENT = GYM_MUJOCO_HUMANOID_V4
+DEFAULT_RUNNER_MODE = RunnerMode.TRAIN
 
 # Silence jax logging
 absl_logging.set_verbosity(absl_logging.ERROR)
@@ -31,11 +38,13 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class Runner:
-    def __init__(self, algorithm_name, environment_name):
+    def __init__(self):
+        algorithm_name, environment_name, self._mode = self.parse_arguments()
+
         self._model_class = get_algorithm_model_class(algorithm_name)
         self._create_env = get_environment_create_env(environment_name)
         
-        runner_default_config = get_runner_config()
+        runner_default_config = get_runner_config(self._mode)
         algorithm_default_config = get_algorithm_config(algorithm_name)
         environment_default_config = get_environment_config(environment_name)
         combined_default_config = config_dict.ConfigDict()
@@ -60,13 +69,40 @@ class Runner:
         sys.excepthook = handle_exception
 
     
+    def parse_arguments(self):
+        algorithm_name = [arg for arg in sys.argv if arg.startswith("--config.algorithm.name=")]
+        environment_name = [arg for arg in sys.argv if arg.startswith("--config.environment.name=")]
+        runner_mode = [arg for arg in sys.argv if arg.startswith("--config.runner.mode=")]
 
-    def run(self, mode: RunnerMode):
-        if mode == RunnerMode.SHOW_CONFIG:
+        if algorithm_name:
+            algorithm_name = algorithm_name[0].split("=")[1]
+            del sys.argv[sys.argv.index("--config.algorithm.name=" + algorithm_name)]
+            importlib.import_module(f"rl_x.algorithms.{algorithm_name}")
+        else:
+            algorithm_name = DEFAULT_ALGORITHM
+        
+        if environment_name:
+            environment_name = environment_name[0].split("=")[1]
+            del sys.argv[sys.argv.index("--config.environment.name=" + environment_name)]
+            importlib.import_module(f"rl_x.environments.{environment_name}")
+        else:
+            environment_name = DEFAULT_ENVIRONMENT
+
+        if runner_mode:
+            runner_mode = runner_mode[0].split("=")[1]
+            del sys.argv[sys.argv.index("--config.runner.mode=" + runner_mode)]
+        else:
+            runner_mode = DEFAULT_RUNNER_MODE
+
+        return algorithm_name, environment_name, runner_mode
+
+
+    def run(self):
+        if self._mode == RunnerMode.SHOW_CONFIG:
             main_func = self._show_config
-        elif mode == RunnerMode.TRAIN:
+        elif self._mode == RunnerMode.TRAIN:
             main_func = self._train
-        elif mode == RunnerMode.TEST:
+        elif self._mode == RunnerMode.TEST:
             main_func = self._test
         else:
             raise ValueError("Invalid mode")

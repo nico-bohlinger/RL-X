@@ -1,7 +1,4 @@
-from enum import Enum
-
-
-class RunnerMode(Enum):
-    TRAIN = 0
-    TEST = 1
-    SHOW_CONFIG = 2
+class RunnerMode:
+    TRAIN = "train"
+    TEST = "test"
+    SHOW_CONFIG = "show_config"

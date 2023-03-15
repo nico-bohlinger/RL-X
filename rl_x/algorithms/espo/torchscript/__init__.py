@@ -3,5 +3,7 @@ from rl_x.algorithms.espo.torchscript.espo import ESPO
 from rl_x.algorithms.espo.torchscript.default_config import get_config
 
 
-ESPO_TORCHSCRIPT = "ESPO TorchScript"
+algorithm_name = __file__.split("rl_x/algorithms/")[1].split("/__init__.py")[0].replace("/", ".")
+
+ESPO_TORCHSCRIPT = algorithm_name
 register_algorithm(ESPO_TORCHSCRIPT, get_config, ESPO)

@@ -2,8 +2,10 @@ from ml_collections import config_dict
 import time
 
 
-def get_config():
+def get_config(runner_mode):
     config = config_dict.ConfigDict()
+
+    config.mode = runner_mode
 
     config.track_console = False
     config.track_tb = False

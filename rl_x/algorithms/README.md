@@ -29,15 +29,16 @@ ppo
 **\_\_init__.py**
 - Registers the algorithm with the algorithm manager
 - Needs to import get_config() function for the registration
-- Creates a constant for the algorithm name which can be imported for running an experiment
-    - See: ```experiments/experiment.py```
+- Creates a constant for the algorithm name which can be specified for running an experiment. Algorithm names use their directory structure as the name.
+    - Example: ```--config.algorithm.name="ppo.pytorch"```
+    - See: ```experiments/start_experiment.sh```
 
 **default_config.py**
 - Defines the get_config() function for the registration
 - Those configs can be later overwritten via the command line
 - They are available under the config.algorithm namespace
     - Example: ```--config.algorithm.nr_steps=512```
-    - See: ```experiments/experiment.sh```
+    - See: ```experiments/start_experiment.sh```
 
 **\<algorithm name\>.py**
 - Defines the algorithm class for the registration

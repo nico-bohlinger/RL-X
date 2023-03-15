@@ -8,17 +8,26 @@
 - Those configs can be later overwritten via the command line
 - They are available under the config.runner namespace
     - Example: ```--config.runner.track_console=True```
-    - See: ```experiments/experiment.sh```
+    - See: ```experiments/start_experiment.sh```
 
 **runner_mode.py**
 - Contains all possible runner modes
     - TRAIN: Runs the training loop
     - TEST: Runs the testing loop, with ```--config.runner.nr_test_episodes``` many episodes
     - SHOW_CONFIG: Prints out all available configs of the given algorithm, environment and runner combination
+- Can be set via the command line
+    - Example: ```--config.runner.mode="train"```
+    - See: ```experiments/start_experiment.sh```
 
 **runner.py**
-- Takes algorithm and environment and parses all configs to run an experiment
+- Parses all configs to run an experiment
+- Sets the default algorithm, environment and runner mode
+    - Default algorithm: ```ppo.pytorch```
+    - Default environment: ```gym.mujoco.humanoid_v4```
+    - Default runner mode: ```train```
 
 
 ## Usage for experiments
-See ```experiments/experiment.py``` for an example of how to run an experiment by importing the algorithm, environment and runner and setting the runner mode.
+See ```experiments/experiment.py``` for an example of how to run an experiment by importing the runner.
+
+See ```experiments/start_experiment.sh``` for an example of how to run an experiment and setting all configs via the command line.

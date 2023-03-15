@@ -4,7 +4,7 @@ from ml_collections import config_dict
 def get_config(algorithm_name):
     config = config_dict.ConfigDict()
 
-    config.algorithm_name = algorithm_name
+    config.name = algorithm_name
     
     config.device = "gpu"  # cpu, gpu
     config.total_timesteps = 1e9

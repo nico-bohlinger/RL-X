@@ -80,24 +80,14 @@ class TQC:
         self.critic.apply = jax.jit(self.critic.apply)
         self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
 
-        def q_linear_schedule(step):
+        def linear_schedule(step):
             total_steps = self.total_timesteps
-            fraction = 1.0 - (step / (total_steps * self.q_update_steps))
-            return self.learning_rate * fraction
-    
-        def policy_linear_schedule(step):
-            total_steps = self.total_timesteps
-            fraction = 1.0 - (step / (total_steps * self.policy_update_steps))
-            return self.learning_rate * fraction
-
-        def entropy_linear_schedule(step):
-            total_steps = self.total_timesteps
-            fraction = 1.0 - (step / (total_steps * self.entropy_update_steps))
+            fraction = 1.0 - (step / total_steps)
             return self.learning_rate * fraction
         
-        self.q_learning_rate = q_linear_schedule if self.anneal_learning_rate else self.learning_rate
-        self.policy_learning_rate = policy_linear_schedule if self.anneal_learning_rate else self.learning_rate
-        self.entropy_learning_rate = entropy_linear_schedule if self.anneal_learning_rate else self.learning_rate
+        self.q_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
+        self.policy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
+        self.entropy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
         state = jnp.array([self.env.observation_space.sample()])
         action = jnp.array([self.env.action_space.sample()])
@@ -222,9 +212,9 @@ class TQC:
             critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
 
             metrics["lr/learning_rate"] = policy_state.opt_state.hyperparams["learning_rate"]
-            metrics["gradients/policy_gradients"] = optax.global_norm(policy_gradients)
-            metrics["gradients/critic_gradients"] = optax.global_norm(critic_gradients)
-            metrics["gradients/entropy_gradients"] = optax.global_norm(entropy_gradients)
+            metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
+            metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
+            metrics["gradients/entropy_grad_norm"] = optax.global_norm(entropy_gradients)
 
             return policy_state, critic_state, entropy_coefficient_state, metrics, key
 
@@ -318,11 +308,11 @@ class TQC:
 
             # Logging
             if should_log:
+                self.start_logging(global_step)
+
                 steps_metrics["steps/nr_env_steps"] = global_step
                 steps_metrics["steps/nr_updates"] = nr_updates
                 steps_metrics["steps/nr_episodes"] = nr_episodes
-
-                self.start_logging(global_step)
 
                 if len(episode_info_buffer) > 0:
                     self.log("rollout/episode_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)

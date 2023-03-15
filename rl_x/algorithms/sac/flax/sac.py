@@ -314,7 +314,7 @@ class SAC():
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key
                 )
-                q_loss_buffer.extend(jax.device_get(q_losses))
+                q_loss_buffer.extend(q_losses)
 
             q_update_end_time = time.time()
             q_update_time_buffer.append(q_update_end_time - acting_end_time)
@@ -334,8 +334,8 @@ class SAC():
                         self.policy_state, self.vector_critic_state, self.entropy_coefficient_state,
                         batch_states, self.key
                 )
-                policy_loss_buffer.append(jax.device_get(policy_losses))
-                alpha_buffer.append(jax.device_get(alphas))
+                policy_loss_buffer.extend(policy_losses)
+                alpha_buffer.extend(alphas)
 
             policy_update_end_time = time.time()
             policy_update_time_buffer.append(policy_update_end_time - q_target_update_end_time)
@@ -348,8 +348,8 @@ class SAC():
                     batch_entropies = jnp.concatenate([batch_entropies, additional_entropies])
 
                 entropy_losses, self.entropy_coefficient_state, self.key = update_entropy_coefficient(self.entropy_coefficient_state, batch_entropies, self.key)
-                entropy_buffer.extend(jax.device_get(batch_entropies))
-                entropy_loss_buffer.append(jax.device_get(entropy_losses))
+                entropy_buffer.extend(batch_entropies)
+                entropy_loss_buffer.extend(entropy_losses)
 
             entropy_update_end_time = time.time()
             entropy_update_time_buffer.append(entropy_update_end_time - policy_update_end_time)

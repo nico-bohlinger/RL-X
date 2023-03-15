@@ -1,5 +1,11 @@
 #!/bin/bash
 python experiment.py \
+    --config.algorithm.name="ppo.pytorch" \
+    --config.algorithm.total_timesteps=10000 \
+    --config.environment.name="gym.mujoco.humanoid_v4" \
+    --config.environment.nr_envs=1 \
+    --config.environment.seed=0 \
+    --config.runner.mode="train" \
     --config.runner.track_console=False \
     --config.runner.track_tb=True \
     --config.runner.track_wandb=True \
@@ -8,8 +14,4 @@ python experiment.py \
     --config.runner.project_name="placeholder" \
     --config.runner.exp_name="placeholder" \
     --config.runner.notes="placeholder" \
-    --config.algorithm.total_timesteps=10000 \
-    --config.environment.nr_envs=1 \
-    --config.environment.seed=0
-
-echo "finished"
+    >log/out_and_err.txt 2>&1 &
