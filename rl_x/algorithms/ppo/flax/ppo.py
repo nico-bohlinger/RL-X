@@ -213,6 +213,9 @@ class PPO:
                 policy_state = policy_state.apply_gradients(grads=policy_gradients)
                 critic_state = critic_state.apply_gradients(grads=critic_gradients)
 
+                metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
+                metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
+
                 carry = (policy_state, critic_state, batch_states, batch_actions, batch_log_probs, batch_returns, batch_advantages)
 
                 return carry, (metrics)
@@ -223,6 +226,7 @@ class PPO:
 
             # Calculate mean metrics
             mean_metrics = {key: jnp.mean(metrics[key]) for key in metrics}
+            mean_metrics["lr/learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
             mean_metrics["v_value/explained_variance"] = 1 - jnp.var(storage.returns - storage.values) / (jnp.var(storage.returns) + 1e-8)
             mean_metrics["policy/std_dev"] = jnp.mean(jnp.exp(policy_state.params["params"]["policy_logstd"]))
 
