@@ -16,16 +16,16 @@ def get_policy(config, env, device):
         env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(device)
         env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(device)
         return Policy(env, config.algorithm.std_dev, config.algorithm.nr_hidden_units, env_as_low, env_as_high,
-                     config.algorithm.clip_range, config.algorithm.ent_coef)
+                     config.algorithm.clip_range, config.algorithm.entropy_coef)
     else:
         raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
 
 
 class Policy(nn.Module):
-    def __init__(self, env, std_dev, nr_hidden_units, env_as_low, env_as_high, clip_range: float, ent_coef: float):
+    def __init__(self, env, std_dev, nr_hidden_units, env_as_low, env_as_high, clip_range: float, entropy_coef: float):
         super().__init__()
         self.clip_range = clip_range
-        self.ent_coef = ent_coef
+        self.entropy_coef = entropy_coef
         self.policy_as_low = -1
         self.policy_as_high = 1
         self.env_as_low = env_as_low
@@ -98,6 +98,6 @@ class Policy(nn.Module):
         pg_loss = torch.maximum(pg_loss1, pg_loss2).mean()
 
         entropy_loss = entropy.mean()
-        loss = pg_loss - self.ent_coef * entropy_loss
+        loss = pg_loss - self.entropy_coef * entropy_loss
 
         return loss, pg_loss, entropy_loss, approx_kl_div, clip_fraction

@@ -13,15 +13,15 @@ def get_critic(config, env):
     observation_space_type = env.get_observation_space_type()
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return Critic(env, config.algorithm.nr_hidden_units, config.algorithm.vf_coef)
+        return Critic(env, config.algorithm.nr_hidden_units, config.algorithm.critic_coef)
     else:
         raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
 
 
 class Critic(nn.Module):
-    def __init__(self, env, nr_hidden_units, vf_coef: float):
+    def __init__(self, env, nr_hidden_units, critic_coef: float):
         super().__init__()
-        self.vf_coef = vf_coef
+        self.critic_coef = critic_coef
         single_os_shape = env.observation_space.shape
 
         self.critic = nn.Sequential(
@@ -47,6 +47,6 @@ class Critic(nn.Module):
     @torch.jit.export
     def loss(self, states, returns):
         new_value = self.get_value(states).reshape(-1)
-        v_loss = (0.5 * (new_value - returns) ** 2).mean()
+        critic_loss = (0.5 * (new_value - returns) ** 2).mean()
 
-        return self.vf_coef * v_loss, v_loss
+        return self.critic_coef * critic_loss, critic_loss

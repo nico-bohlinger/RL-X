@@ -159,7 +159,6 @@ class TQC:
                 huber_loss = jnp.where(abs_delta_i_j <= self.huber_kappa, 0.5 * delta_i_j ** 2, self.huber_kappa * (abs_delta_i_j - 0.5 * self.huber_kappa))
                 q_loss = jnp.mean(jnp.abs(cumulative_prob - (delta_i_j < 0).astype(jnp.float32)) * huber_loss / self.huber_kappa)
 
-
                 # Policy loss
                 dist = self.policy.apply(policy_params, state)
                 current_action = dist.sample(seed=key2)
@@ -171,14 +170,11 @@ class TQC:
 
                 policy_loss = alpha * current_log_prob - mean_q_atoms
 
-
                 # Entropy loss
                 entropy_loss = alpha_with_grad * (entropy - self.target_entropy)
 
-
                 # Combine losses
                 loss = q_loss + policy_loss + entropy_loss
-
 
                 # Create metrics
                 metrics = {
@@ -223,7 +219,7 @@ class TQC:
 
         replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.observation_space.shape, self.env.action_space.shape)
 
-        saving_return_buffer = deque(maxlen=100)
+        saving_return_buffer = deque(maxlen=100 * self.nr_envs)
         episode_info_buffer = deque(maxlen=self.logging_freq)
         time_metrics_buffer = deque(maxlen=self.logging_freq)
         optimization_metrics_buffer = deque(maxlen=self.logging_freq)
@@ -263,7 +259,7 @@ class TQC:
 
             episode_infos = self.env.get_episode_infos(info)
             episode_info_buffer.extend(episode_infos)
-            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos])
+            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos if "r" in ep_info])
 
             acting_end_time = time.time()
             time_metrics["time/acting_time"] = acting_end_time - start_time
@@ -315,8 +311,8 @@ class TQC:
                 steps_metrics["steps/nr_episodes"] = nr_episodes
 
                 if len(episode_info_buffer) > 0:
-                    self.log("rollout/episode_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
-                    self.log("rollout/episode_length", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
+                    self.log("rollout/episode_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
+                    self.log("rollout/episode_length", np.mean([ep_info["l"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
                     names = list(episode_info_buffer[0].keys())
                     for name in names:
                         if name != "r" and name != "l" and name != "t":

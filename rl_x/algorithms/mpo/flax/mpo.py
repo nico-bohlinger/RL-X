@@ -306,7 +306,7 @@ class MPO():
                     "loss/critic_loss": critic_loss,
                     "kl/q_kl": jnp.mean(kl_nonparametric) / self.kl_epsilon,
                     "kl/action_penalty_kl": jnp.mean(penalty_kl_nonparametric) / self.kl_epsilon_penalty,
-                    "Q_vals/Q_pred": jnp.mean(q_atoms_pred),
+                    "q_vals/q_pred": jnp.mean(q_atoms_pred),
                     "policy/std_dev": jnp.mean(current_stddev)
                 }
 
@@ -369,6 +369,8 @@ class MPO():
                 steps=steps
             )
 
+            metrics["lr/agent_learning_rate"] = new_train_state.agent_optimizer_state[1].hyperparams["learning_rate"]
+            metrics["lr/dual_learning_rate"] = new_train_state.dual_optimizer_state[1].hyperparams["learning_rate"]
             metrics["gradients/agent_gradients_norm"] = agent_gradients_norm
             metrics["gradients/dual_gradients_norm"] = dual_gradients_norm
 
@@ -385,19 +387,20 @@ class MPO():
         done_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
         log_prob_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
 
-        saving_return_buffer = deque(maxlen=100)
+        saving_return_buffer = deque(maxlen=100 * self.nr_envs)
         episode_info_buffer = deque(maxlen=self.logging_freq)
-        acting_time_buffer = deque(maxlen=self.logging_freq)
-        optimize_time_buffer = deque(maxlen=self.logging_freq)
-        saving_time_buffer = deque(maxlen=self.logging_freq)
-        fps_buffer = deque(maxlen=self.logging_freq)
-        metrics_buffer = deque(maxlen=self.logging_freq)
+        time_metrics_buffer = deque(maxlen=self.logging_freq)
+        optimization_metrics_buffer = deque(maxlen=self.logging_freq)
 
         state = self.env.reset()
 
         global_step = 0
+        nr_updates = 0
+        nr_episodes = 0
+        steps_metrics = {}
         while global_step < self.total_timesteps:
             start_time = time.time()
+            time_metrics = {}
 
 
             # Acting
@@ -411,6 +414,7 @@ class MPO():
             
             next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
             
+            nr_episodes += np.sum(done)
             global_step += self.nr_envs
             
             state_stack = np.roll(state_stack, shift=-1, axis=1)
@@ -432,10 +436,10 @@ class MPO():
 
             episode_infos = self.env.get_episode_infos(info)
             episode_info_buffer.extend(episode_infos)
-            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos])
+            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos if "r" in ep_info])
 
             acting_end_time = time.time()
-            acting_time_buffer.append(acting_end_time - start_time)
+            time_metrics["time/acting_time"] = acting_end_time - start_time
 
 
             # What to do in this step after acting
@@ -452,12 +456,13 @@ class MPO():
 
             # Optimizing - Critic, policy, Lagrange multipliers
             if should_optimize:
-                self.train_state, metrics, self.key = update(
+                self.train_state, optimization_metrics, self.key = update(
                     self.train_state, batch_states, batch_actions, batch_rewards, batch_dones, batch_log_probs, self.key)
-                metrics_buffer.append(metrics)
+                optimization_metrics_buffer.append(optimization_metrics)
+                nr_updates += 1
 
             optimize_end_time = time.time()
-            optimize_time_buffer.append(optimize_end_time - acting_end_time)
+            time_metrics["time/optimize_time"] = optimize_end_time - acting_end_time
 
 
             # Saving
@@ -468,46 +473,39 @@ class MPO():
                     self.save()
             
             saving_end_time = time.time()
-            saving_time_buffer.append(saving_end_time - optimize_end_time)
+            time_metrics["time/saving_time"] = saving_end_time - optimize_end_time
 
-            fps_buffer.append(self.nr_envs / (saving_end_time - start_time))
+            time_metrics["time/fps"] = self.nr_envs / (saving_end_time - start_time)
+
+            time_metrics_buffer.append(time_metrics)
 
 
-            # Logging                
+            # Logging
             if should_log:
-                if self.track_console:
-                    rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
-                    self.log_console("global_step", global_step)
-                else:
-                    rlx_logger.info(f"Step: {global_step}")
+                self.start_logging(global_step)
+
+                steps_metrics["steps/nr_env_steps"] = global_step
+                steps_metrics["steps/nr_updates"] = nr_updates
+                steps_metrics["steps/nr_episodes"] = nr_episodes
 
                 if len(episode_info_buffer) > 0:
-                    self.log("rollout/ep_rew_mean", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
-                    self.log("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
+                    self.log("rollout/episode_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
+                    self.log("rollout/episode_length", np.mean([ep_info["l"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
                     names = list(episode_info_buffer[0].keys())
                     for name in names:
                         if name != "r" and name != "l" and name != "t":
                             self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
-                self.log("time/fps", np.mean(fps_buffer), global_step)
-                self.log("time/acting_time", np.mean(acting_time_buffer), global_step)
-                self.log("time/optimize_time", np.mean(optimize_time_buffer), global_step)
-                self.log("time/saving_time", np.mean(saving_time_buffer), global_step)
-                self.log("lr/agent_learning_rate", self.train_state.agent_optimizer_state[1].hyperparams["learning_rate"].item(), global_step)
-                self.log("lr/dual_learning_rate", self.train_state.dual_optimizer_state[1].hyperparams["learning_rate"].item(), global_step)
-                if should_learning_start:
-                    mean_metrics = {key: np.mean([metrics[key] for metrics in metrics_buffer]) for key in metrics_buffer[0].keys()}
-                    for key, value in mean_metrics.items():
-                        self.log(f"{key}", value, global_step)
-
-                if self.track_console:
-                    rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
+                mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in time_metrics_buffer[0].keys()}
+                mean_optimization_metrics = {} if not should_learning_start else {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in optimization_metrics_buffer[0].keys()}
+                combined_metrics = {**steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
+                for key, value in combined_metrics.items():
+                    self.log(f"{key}", value, global_step)
 
                 episode_info_buffer.clear()
-                acting_time_buffer.clear()
-                optimize_time_buffer.clear()
-                saving_time_buffer.clear()
-                fps_buffer.clear()
-                metrics_buffer.clear()
+                time_metrics_buffer.clear()
+                optimization_metrics_buffer.clear()
+
+                self.end_logging()
 
 
     def get_buffer_mean(self, buffer):
@@ -527,7 +525,19 @@ class MPO():
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
         rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │")
-        
+
+
+    def start_logging(self, step):
+        if self.track_console:
+            rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
+        else:
+            rlx_logger.info(f"Step: {step}")
+
+
+    def end_logging(self):
+        if self.track_console:
+            rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
+
 
     def save(self):
         jax_file_path = self.save_path + "/model_best_jax_0"

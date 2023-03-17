@@ -155,21 +155,17 @@ class PPO:
                 pg_loss = jnp.maximum(pg_loss1, pg_loss2)
                 
                 entropy_loss = entropy.sum(1)
-                policy_loss = pg_loss - self.entropy_coef * entropy_loss
                 
-
                 # Critic loss
                 new_value = self.critic.apply(critic_params, state_b)
                 critic_loss = 0.5 * (new_value - return_b) ** 2
 
-
                 # Combine losses
-                loss = policy_loss + self.critic_coef * critic_loss
+                loss = pg_loss - self.entropy_coef * entropy_loss + self.critic_coef * critic_loss
 
-
-                # Create metric
+                # Create metrics
                 metrics = {
-                    "loss/policy_loss": policy_loss,
+                    "loss/policy_gradient_loss": pg_loss,
                     "loss/critic_loss": critic_loss,
                     "loss/entropy_loss": entropy_loss,
                     "policy_ratio/approx_kl": approx_kl_div,
