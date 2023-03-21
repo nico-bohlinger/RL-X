@@ -39,8 +39,8 @@ class ESPO:
         self.gamma = config.algorithm.gamma
         self.gae_lambda = config.algorithm.gae_lambda
         self.max_ratio_delta = config.algorithm.max_ratio_delta
-        self.ent_coef = config.algorithm.ent_coef
-        self.vf_coef = config.algorithm.vf_coef
+        self.entropy_coef = config.algorithm.entropy_coef
+        self.critic_coef = config.algorithm.critic_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
         self.nr_hidden_units = config.algorithm.nr_hidden_units
@@ -87,12 +87,20 @@ class ESPO:
             log_probs = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device)
         )
         
+        saving_return_buffer = deque(maxlen=100 * self.nr_envs)
+        episode_info_buffer = deque(maxlen=100 * self.nr_envs)
+        time_metrics_buffer = deque(maxlen=1)
+        optimization_metrics_buffer = deque(maxlen=1)
+        
         state = torch.tensor(self.env.reset(), dtype=torch.float32).to(self.device)
-        saving_return_buffer = deque(maxlen=100)
         rng = default_rng()
         global_step = 0
+        nr_updates = 0
+        nr_episodes = 0
+        steps_metrics = {}
         while global_step < self.total_timesteps:
             start_time = time.time()
+            time_metrics = {}
         
 
             # Acting
@@ -109,6 +117,7 @@ class ESPO:
                         maybe_terminal_observation = self.env.get_terminal_observation(info, i)
                         if maybe_terminal_observation is not None:
                             actual_next_state[i] = torch.tensor(maybe_terminal_observation, dtype=torch.float32).to(self.device)
+                        nr_episodes += 1
 
                 batch.states[step] = state
                 batch.actions[step] = action
@@ -121,9 +130,10 @@ class ESPO:
 
                 episode_infos = self.env.get_episode_infos(info)
                 episode_info_buffer.extend(episode_infos)
-            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_info_buffer])
+            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info])
             
             acting_end_time = time.time()
+            time_metrics["time/acting_time"] = acting_end_time - start_time
 
 
             # Calculating advantages and returns
@@ -142,6 +152,7 @@ class ESPO:
             returns = advantages + batch.values
             
             calc_adv_return_end_time = time.time()
+            time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
 
 
             # Optimizing
@@ -159,15 +170,11 @@ class ESPO:
             batch_values = batch.values.reshape(-1)
             batch_log_probs = batch.log_probs.reshape(-1)
 
-            pg_losses = []
-            value_losses = []
-            entropy_losses = []
-            loss_losses = []
-            ratio_deltas = []
-
+            metrics_list = []
             for epoch in range(self.max_epochs):
                 minibatch_indices = rng.choice(self.batch_size, size=self.minibatch_size, replace=False)
 
+                # Policy loss
                 new_log_prob, entropy = self.policy.get_logprob_entropy(batch_states[minibatch_indices], batch_actions[minibatch_indices])
                 new_value = self.critic.get_value(batch_states[minibatch_indices]).reshape(-1)
                 logratio = new_log_prob - batch_log_probs[minibatch_indices]
@@ -181,13 +188,34 @@ class ESPO:
                 minibatch_advantages = (minibatch_advantages - minibatch_advantages.mean()) / (minibatch_advantages.std() + 1e-8)
 
                 pg_loss = (-minibatch_advantages * ratio).mean()
-                v_loss = (0.5 * (new_value - batch_returns[minibatch_indices]) ** 2).mean()
-                entropy_loss = entropy.mean()
-                loss = pg_loss + self.vf_coef * v_loss - self.ent_coef * entropy_loss
 
+                entropy_loss = entropy.mean()
+
+                # Critic loss
+                critic_loss = (0.5 * (new_value - batch_returns[minibatch_indices]) ** 2).mean()
+                
+                # Combine losses
+                loss = pg_loss + self.critic_coef * critic_loss - self.entropy_coef * entropy_loss
+
+                # Backprop
                 self.policy_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
                 loss.backward()
+
+                policy_grad_norm = 0.0
+                critic_grad_norm = 0.0
+                for param in self.policy.parameters():
+                    policy_grad_norm += param.grad.detach().data.norm(2).item() ** 2
+                for param in self.critic.parameters():
+                    critic_grad_norm += param.grad.detach().data.norm(2).item() ** 2
+                policy_grad_norm = policy_grad_norm ** 0.5
+                critic_grad_norm = critic_grad_norm ** 0.5
+
+                nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
+                self.policy_optimizer.step()
+                self.critic_optimizer.step()
+
                 nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
                 self.policy_optimizer.step()
@@ -195,11 +223,17 @@ class ESPO:
 
                 episode_ratio_delta = self.delta_calc_operator(torch.abs(ratio - 1))
 
-                pg_losses.append(pg_loss.item())
-                value_losses.append(v_loss.item())
-                entropy_losses.append(entropy_loss.item())
-                loss_losses.append(loss.item())
-                ratio_deltas.append(episode_ratio_delta.item())
+                # Create metrics
+                metrics = {
+                    "loss/policy_gradient_loss": pg_loss.item(),
+                    "loss/critic_loss": critic_loss.item(),
+                    "loss/entropy_loss": entropy_loss.item(),
+                    "policy_ratio/ratio_delta": episode_ratio_delta.item(),
+                    "policy_ratio/approx_kl": approx_kl_div,
+                    "gradients/policy_grad_norm": policy_grad_norm,
+                    "gradients/critic_grad_norm": critic_grad_norm,
+                }
+                metrics_list.append(metrics)
 
                 if episode_ratio_delta > self.max_ratio_delta:
                     break
@@ -208,7 +242,17 @@ class ESPO:
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+            metrics = {key: np.mean([metrics[key] for metrics in metrics_list]) for key in metrics_list[0].keys()}
+            metrics["optim/nr_epochs"] = epoch + 1
+            metrics["lr/learning_rate"] = learning_rate
+            metrics["v_value/explained_variance"] = explained_var
+            metrics["policy/std_dev"] = np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy()))
+            optimization_metrics_buffer.append(metrics)
+
+            nr_updates += epoch + 1
+
             optimizing_end_time = time.time()
+            time_metrics["time/optimizing_time"] = optimizing_end_time - calc_adv_return_end_time
 
 
             # Saving
@@ -221,40 +265,38 @@ class ESPO:
                     self.save()
             
             saving_end_time = time.time()
+            time_metrics["time/saving_time"] = saving_end_time - optimizing_end_time
+
+            time_metrics["time/fps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
+
+            time_metrics_buffer.append(time_metrics)
 
 
             # Logging
-            if self.track_console:
-                rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
-                self.log_console("global_step", global_step)
-            else:
-                rlx_logger.info(f"Step: {global_step}")
+            self.start_logging(global_step)
+
+            steps_metrics["steps/nr_env_steps"] = global_step
+            steps_metrics["steps/nr_updates"] = nr_updates
+            steps_metrics["steps/nr_episodes"] = nr_episodes
 
             if len(episode_info_buffer) > 0:
-                self.log("rollout/ep_rew_mean", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
-                self.log("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
+                self.log("rollout/episode_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
+                self.log("rollout/episode_length", np.mean([ep_info["l"] for ep_info in episode_info_buffer if "l" in ep_info]), global_step)
                 names = list(episode_info_buffer[0].keys())
                 for name in names:
                     if name != "r" and name != "l" and name != "t":
-                        self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
-            self.log("time/fps", int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time)), global_step)
-            self.log("time/acting_time", acting_end_time - start_time, global_step)
-            self.log("time/calc_adv_and_return_time", calc_adv_return_end_time - acting_end_time, global_step)
-            self.log("time/optimizing_time", optimizing_end_time - calc_adv_return_end_time, global_step)
-            self.log("time/saving_time", saving_end_time - optimizing_end_time, global_step)
-            self.log("train/learning_rate", learning_rate, global_step)
-            self.log("train/epochs", epoch + 1, global_step)
-            self.log("train/ratio_delta", np.mean(ratio_deltas), global_step)
-            self.log("train/last_approx_kl", approx_kl_div, global_step)
-            self.log("train/policy_gradient_loss", np.mean(pg_losses), global_step)
-            self.log("train/value_loss", np.mean(value_losses), global_step)
-            self.log("train/entropy_loss", np.mean(entropy_losses), global_step)
-            self.log("train/loss", np.mean(loss_losses), global_step)
-            self.log("train/std", np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy())), global_step)
-            self.log("train/explained_variance", explained_var, global_step)
+                        self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info]), global_step)
+            mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in sorted(time_metrics_buffer[0].keys())}
+            mean_optimization_metrics = {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in sorted(optimization_metrics_buffer[0].keys())}
+            combined_metrics = {**steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
+            for key, value in combined_metrics.items():
+                self.log(f"{key}", value, global_step)
 
-            if self.track_console:
-                rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
+            episode_info_buffer.clear()
+            time_metrics_buffer.clear()
+            optimization_metrics_buffer.clear()
+
+            self.end_logging()
 
 
     def log(self, name, value, step):
@@ -267,6 +309,18 @@ class ESPO:
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
         rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │")
+
+
+    def start_logging(self, step):
+        if self.track_console:
+            rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
+        else:
+            rlx_logger.info(f"Step: {step}")
+
+
+    def end_logging(self):
+        if self.track_console:
+            rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
 
     def save(self):

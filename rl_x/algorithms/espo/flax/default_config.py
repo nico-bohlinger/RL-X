@@ -17,8 +17,8 @@ def get_config(algorithm_name):
     config.gae_lambda = 0.95
     config.max_ratio_delta = 0.25
     config.delta_calc_operator = "mean"  # mean, median
-    config.ent_coef = 0.0
-    config.vf_coef = 0.5
+    config.entropy_coef = 0.0
+    config.critic_coef = 0.5
     config.max_grad_norm = 0.5
     config.std_dev = 1.0
     config.nr_hidden_units = 256

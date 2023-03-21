@@ -272,12 +272,12 @@ class PPO:
             steps_metrics["steps/nr_episodes"] = nr_episodes
 
             if len(episode_info_buffer) > 0:
-                self.log("rollout/ep_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
-                self.log("rollout/ep_length", np.mean([ep_info["l"] for ep_info in episode_info_buffer if "l" in ep_info]), global_step)
+                self.log("rollout/episode_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
+                self.log("rollout/episode_length", np.mean([ep_info["l"] for ep_info in episode_info_buffer if "l" in ep_info]), global_step)
                 names = list(episode_info_buffer[0].keys())
                 for name in names:
                     if name != "r" and name != "l" and name != "t":
-                        self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
+                        self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info]), global_step)
             mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in sorted(time_metrics_buffer[0].keys())}
             mean_optimization_metrics = {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in sorted(optimization_metrics_buffer[0].keys())}
             combined_metrics = {**steps_metrics, **mean_time_metrics, **mean_optimization_metrics}

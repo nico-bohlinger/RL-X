@@ -283,7 +283,7 @@ class SAC():
                     names = list(episode_info_buffer[0].keys())
                     for name in names:
                         if name != "r" and name != "l" and name != "t":
-                            self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info.keys()]), global_step)
+                            self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info]), global_step)
                 self.log("time/fps", np.mean(fps_buffer), global_step)
                 self.log("time/acting_time", np.mean(acting_time_buffer), global_step)
                 self.log("time/q_update_time", np.mean(q_update_time_buffer), global_step)
