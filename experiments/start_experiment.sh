@@ -1,4 +1,5 @@
 #!/bin/bash
+{
 python experiment.py \
     --config.algorithm.name="ppo.pytorch" \
     --config.algorithm.total_timesteps=10000 \
@@ -15,3 +16,9 @@ python experiment.py \
     --config.runner.exp_name="placeholder" \
     --config.runner.notes="placeholder" \
     >log/out_and_err.txt 2>&1 &
+pid=$!
+
+echo "Experiment started"
+wait $pid
+echo "Experiment finished"
+} &
