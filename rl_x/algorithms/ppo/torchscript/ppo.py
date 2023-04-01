@@ -170,6 +170,7 @@ class PPO:
                     loss1, pg_loss, entropy_loss, approx_kl_div, clip_fraction = self.policy.loss(batch_states[minibatch_indices], batch_actions[minibatch_indices],
                                                                                                   batch_log_probs[minibatch_indices], batch_advantages[minibatch_indices])
                     loss2, critic_loss = self.critic.loss(batch_states[minibatch_indices], batch_returns[minibatch_indices])
+                    approx_kl_divs.append(approx_kl_div.item())
 
                     # Backprop
                     self.policy_optimizer.zero_grad()
@@ -197,7 +198,6 @@ class PPO:
                         "loss/critic_loss": critic_loss.item(),
                         "loss/entropy_loss": entropy_loss.item(),
                         "policy_ratio/clip_fraction": clip_fraction.item(),
-                        "policy_ratio/approx_kl": approx_kl_div.item(),
                         "gradients/policy_grad_norm": policy_grad_norm,
                         "gradients/critic_grad_norm": critic_grad_norm,
                     }
@@ -210,6 +210,7 @@ class PPO:
             metrics = {key: np.mean([metrics[key] for metrics in metrics_list]) for key in metrics_list[0].keys()}
             metrics["lr/learning_rate"] = learning_rate
             metrics["v_value/explained_variance"] = explained_var
+            metrics["policy_ratio/approx_kl"] = np.mean(approx_kl_divs)
             metrics["policy/std_dev"] = np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy()))
             optimization_metrics_buffer.append(metrics)
 
