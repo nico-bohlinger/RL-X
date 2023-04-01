@@ -184,6 +184,7 @@ class PPO:
             vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
+            grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
             key, subkey = jax.random.split(key)
             batch_indices = jnp.tile(jnp.arange(self.batch_size), (self.nr_epochs, 1))
@@ -196,7 +197,7 @@ class PPO:
                 minibatch_advantages = batch_advantages[minibatch_indices]
                 minibatch_advantages = (minibatch_advantages - jnp.mean(minibatch_advantages)) / (jnp.std(minibatch_advantages) + 1e-8)
 
-                (loss, (metrics)), (policy_gradients, critic_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(
+                (loss, (metrics)), (policy_gradients, critic_gradients) = grad_loss_fn(
                     policy_state.params,
                     critic_state.params,
                     batch_states[minibatch_indices],

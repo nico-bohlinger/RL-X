@@ -193,21 +193,21 @@ class ESPO:
                 self.policy_optimizer.step()
                 self.critic_optimizer.step()
 
-                episode_ratio_delta = self.delta_calc_operator(torch.abs(ratio - 1))
+                ratio_delta = self.delta_calc_operator(torch.abs(ratio - 1))
 
                 # Create metrics
                 metrics = {
                     "loss/policy_gradient_loss": pg_loss.item(),
                     "loss/critic_loss": critic_loss.item(),
                     "loss/entropy_loss": entropy_loss.item(),
-                    "policy_ratio/ratio_delta": episode_ratio_delta.item(),
+                    "policy_ratio/ratio_delta": ratio_delta.item(),
                     "policy_ratio/approx_kl": approx_kl_div.item(),
                     "gradients/policy_grad_norm": policy_grad_norm,
                     "gradients/critic_grad_norm": critic_grad_norm,
                 }
                 metrics_list.append(metrics)
 
-                if episode_ratio_delta > self.max_ratio_delta:
+                if ratio_delta > self.max_ratio_delta:
                     break
             
             y_pred, y_true = batch_values.cpu().numpy(), batch_returns.cpu().numpy()

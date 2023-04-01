@@ -9,6 +9,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 
 **Implementation Details**
 - Allows for calculating the delta with the mean or median of the ratio
+- Flax version doesn't accurately linearly anneal the learning rate
 
 **Supported frameworks**
 - PyTorch, TorchScript, JAX (Flax)

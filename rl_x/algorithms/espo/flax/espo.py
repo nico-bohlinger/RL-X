@@ -50,7 +50,6 @@ class ESPO:
         self.nr_hidden_units = config.algorithm.nr_hidden_units
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
         self.nr_updates = config.algorithm.total_timesteps // self.batch_size
-        self.nr_minibatches = self.batch_size // self.minibatch_size
 
         if config.algorithm.delta_calc_operator == "mean":
             self.delta_calc_operator = jnp.mean
@@ -78,7 +77,8 @@ class ESPO:
         self.critic.apply = jax.jit(self.critic.apply)
 
         def linear_schedule(count):
-            fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates
+            # This gets jit compiled so we don't know the current number of epochs already run
+            fraction = 1.0 - (count // self.nr_epochs) / self.nr_updates
             return self.learning_rate * fraction
 
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
@@ -142,67 +142,94 @@ class ESPO:
             return storage
         
 
-        @jax.jit
         def update(policy_state: TrainState, critic_state: TrainState, storage: Storage, key: jax.random.PRNGKey):
+            for epoch in range(self.max_epochs):
+                policy_state, critic_state, ratio_delta, metrics, key = update_epoch(policy_state, critic_state, storage, key)
+
+                if ratio_delta > self.max_ratio_delta:
+                    break
+            
+            metrics = {key: jnp.mean(metrics[key]) for key in metrics}
+            metrics["optim/nr_epochs"] = epoch + 1
+            metrics["lr/learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
+            metrics["v_value/explained_variance"] = 1 - jnp.var(storage.returns - storage.values) / (jnp.var(storage.returns) + 1e-8)
+            metrics["policy/std_dev"] = jnp.mean(jnp.exp(policy_state.params["params"]["policy_logstd"]))
+            
+            return policy_state, critic_state, epoch, metrics, key
+
+
+        @jax.jit
+        def update_epoch(policy_state: TrainState, critic_state: TrainState, storage: Storage, key: jax.random.PRNGKey):
+            def loss_fn(policy_params, critic_params, state_b, action_b, log_prob_b, return_b, advantage_b):
+                # Policy loss
+                action_mean, action_logstd = self.policy.apply(policy_params, state_b)
+                action_std = jnp.exp(action_logstd)
+                new_log_prob = -0.5 * ((action_b - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
+                new_log_prob = new_log_prob.sum(1)
+                entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
+                
+                logratio = new_log_prob - log_prob_b
+                ratio = jnp.exp(logratio)
+                ratio_delta = self.delta_calc_operator(jnp.abs(ratio - 1))
+                approx_kl_div = (ratio - 1) - logratio
+
+                pg_loss = -advantage_b * ratio
+                
+                entropy_loss = entropy.sum(1)
+
+                # Critic loss
+                new_value = self.critic.apply(critic_params, state_b)
+                critic_loss = 0.5 * (new_value - return_b) ** 2
+
+                # Combine losses
+                loss = pg_loss - self.entropy_coef * entropy_loss + self.critic_coef * critic_loss
+
+                # Create metrics
+                metrics = {
+                    "loss/policy_gradient_loss": pg_loss,
+                    "loss/critic_loss": critic_loss,
+                    "loss/entropy_loss": entropy_loss,
+                    "policy_ratio/ratio_delta": ratio_delta,
+                    "policy_ratio/approx_kl": approx_kl_div,
+                }
+
+                return loss, (metrics, ratio_delta)
+            
+
             batch_states = storage.states.reshape((-1,) + self.os_shape)
             batch_actions = storage.actions.reshape((-1,) + self.as_shape)
             batch_advantages = storage.advantages.reshape(-1)
             batch_returns = storage.returns.reshape(-1)
             batch_log_probs = storage.log_probs.reshape(-1)
 
-            def policy_loss(policy_params, minibatch_states, minibatch_actions, minibatch_log_probs, minibatch_advantages):
-                action_mean, action_logstd = self.policy.apply(policy_params, minibatch_states)
-                action_std = jnp.exp(action_logstd)
-                new_log_prob = -0.5 * ((minibatch_actions - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
-                entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
-                new_log_prob = new_log_prob.sum(1)
-                
-                logratio = new_log_prob - minibatch_log_probs
-                ratio = jnp.exp(logratio)
-                approx_kl_div = jnp.mean((ratio - 1) - logratio)
-                clip_fraction = jnp.mean(jnp.float32((jnp.abs(ratio - 1) > self.clip_range)))
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0), out_axes=0)
+            safe_mean = lambda x: jnp.mean(x) if x is not None else x
+            mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
+            grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
-                minibatch_advantages = (minibatch_advantages - jnp.mean(minibatch_advantages)) / (jnp.std(minibatch_advantages) + 1e-8)
+            key, subkey = jax.random.split(key)
+            minibatch_indices = jax.random.choice(subkey, self.batch_size, shape=(self.minibatch_size,), replace=False)
 
-                pg_loss1 = -minibatch_advantages * ratio
-                pg_loss2 = -minibatch_advantages * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range)
-                pg_loss = jnp.mean(jnp.maximum(pg_loss1, pg_loss2))
-                
-                entropy_loss = jnp.mean(entropy.sum(1))
-                loss = pg_loss - self.ent_coef * entropy_loss
+            minibatch_advantages = batch_advantages[minibatch_indices]
+            minibatch_advantages = (minibatch_advantages - jnp.mean(minibatch_advantages)) / (jnp.std(minibatch_advantages) + 1e-8)
 
-                return loss, (pg_loss, entropy_loss, approx_kl_div, clip_fraction)
-            
-            def critic_loss(critic_params, minibatch_states, minibatch_returns):
-                new_value = self.critic.apply(critic_params, minibatch_states).reshape(-1)
-                v_loss = jnp.mean(0.5 * (new_value - minibatch_returns) ** 2)
-
-                return self.vf_coef * v_loss, (v_loss)
-
-            policy_loss_grad_fn = jax.value_and_grad(policy_loss, has_aux=True)
-            critic_loss_grad_fn = jax.value_and_grad(critic_loss, has_aux=True)
-
-            (loss1, (pg_loss, entropy_loss, approx_kl_div, clip_fraction)), policy_grads = policy_loss_grad_fn(
+            (loss, (metrics, ratio_delta)), (policy_gradients, critic_gradients) = grad_loss_fn(
                 policy_state.params,
+                critic_state.params,
                 batch_states[minibatch_indices],
                 batch_actions[minibatch_indices],
                 batch_log_probs[minibatch_indices],
-                batch_advantages[minibatch_indices]
+                batch_returns[minibatch_indices],
+                minibatch_advantages
             )
-            (loss2, (v_loss)), critic_grads = critic_loss_grad_fn(
-                critic_state.params,
-                batch_states[minibatch_indices],
-                batch_returns[minibatch_indices]
-            )
-            policy_state = policy_state.apply_gradients(grads=policy_grads)
-            critic_state = critic_state.apply_gradients(grads=critic_grads)
 
-            return policy_state, critic_state, ratio, loss1 + loss2, pg_loss, v_loss, entropy_loss, approx_kl_div
+            policy_state = policy_state.apply_gradients(grads=policy_gradients)
+            critic_state = critic_state.apply_gradients(grads=critic_gradients)
 
+            metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
+            metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
 
-        @jax.jit
-        def calculate_explained_variance(values: jnp.array, returns: jnp.array):
-            return 1 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
+            return policy_state, critic_state, ratio_delta, metrics, key
         
 
         self.set_train_mode()
@@ -222,7 +249,7 @@ class ESPO:
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
         episode_info_buffer = deque(maxlen=100 * self.nr_envs)
         time_metrics_buffer = deque(maxlen=1)
-        optimization_metrics_buffer = deque(maxlen=self.nr_epochs * self.nr_minibatches)
+        optimization_metrics_buffer = deque(maxlen=1)
 
         state = self.env.reset()
         global_step = 0
@@ -269,20 +296,8 @@ class ESPO:
 
 
             # Optimizing
-            for epoch in range(self.max_epochs):
-                self.key, subkey = jax.random.split(self.key)
-                minibatch_indices = jax.random.choice(subkey, self.batch_size, shape=(self.minibatch_size,), replace=False)
-                self.policy_state, self.critic_state, ratio, loss, pg_loss, v_loss, entropy_loss, approx_kl_div = update(self.policy_state, self.critic_state, storage, minibatch_indices)
-                
-                episode_ratio_delta = self.delta_calc_operator(jnp.abs(ratio - 1))
-
-                if episode_ratio_delta > self.max_ratio_delta:
-                    break
-
-            explained_var = calculate_explained_variance(storage.values, storage.returns)
-
+            self.policy_state, self.critic_state, epoch, metrics, self.key = update(self.policy_state, self.critic_state, storage, self.key)
             optimization_metrics_buffer.append(metrics)
-
             nr_updates += epoch + 1
 
             optimizing_end_time = time.time()
