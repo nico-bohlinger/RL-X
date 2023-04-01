@@ -18,13 +18,10 @@ def get_config(algorithm_name):
     config.ensemble_size = 10
     config.in_target_minimization_size = 2
     config.q_update_steps = 20
-    config.policy_update_steps = 1
-    config.entropy_update_steps = 1
-    config.entropy_coef = "auto"
     config.target_entropy = "auto"
     config.log_std_min = -20
     config.log_std_max = 2
     config.nr_hidden_units = 256
-    config.logging_freq = 3000
+    config.logging_freq = 100
 
     return config

@@ -29,7 +29,7 @@ python experiment.py --config.algorithm.gamma=0.9
 
 **Change algorithm and environment**
 ```
-python experiment.py --config.algorithm.name="sac.pytorch" --config.environment.name="envpool.mujoco.humanoid_v4"
+python experiment.py --config.algorithm.name="sac.flax" --config.environment.name="envpool.mujoco.humanoid_v4"
 ```
 
 **Structure and run experiments with a bash script**

@@ -37,14 +37,6 @@ class SAC():
         self.batch_size = config.algorithm.batch_size
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
-        self.q_update_freq = config.algorithm.q_update_freq
-        self.q_update_steps = config.algorithm.q_update_steps
-        self.q_target_update_freq = config.algorithm.q_target_update_freq
-        self.policy_update_freq = config.algorithm.policy_update_freq
-        self.policy_update_steps = config.algorithm.policy_update_steps
-        self.entropy_update_freq = config.algorithm.entropy_update_freq
-        self.entropy_update_steps = config.algorithm.entropy_update_steps
-        self.entropy_coef = config.algorithm.entropy_coef
         self.target_entropy = config.algorithm.target_entropy
         self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
@@ -66,12 +58,9 @@ class SAC():
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
         self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate)
 
-        if self.entropy_coef == "auto":
-            self.entropy_coefficient = torch.jit.script(EntropyCoefficient(config, env, self.device).to(self.device))
-            self.alpha = self.entropy_coefficient()
-            self.entropy_optimizer = optim.Adam([self.entropy_coefficient.log_alpha], lr=self.learning_rate)
-        else:
-            self.alpha = torch.tensor(float(self.entropy_coef)).to(self.device)
+        self.entropy_coefficient = torch.jit.script(EntropyCoefficient(config, env, self.device).to(self.device))
+        self.alpha = self.entropy_coefficient()
+        self.entropy_optimizer = optim.Adam([self.entropy_coefficient.log_alpha], lr=self.learning_rate)
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -83,26 +72,20 @@ class SAC():
 
         replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.observation_space.shape, self.env.action_space.shape, self.device)
 
-        saving_return_buffer = deque(maxlen=100)
+        saving_return_buffer = deque(maxlen=100 * self.nr_envs)
         episode_info_buffer = deque(maxlen=self.logging_freq)
-        acting_time_buffer = deque(maxlen=self.logging_freq)
-        q_update_time_buffer = deque(maxlen=self.logging_freq)
-        q_target_update_time_buffer = deque(maxlen=self.logging_freq)
-        policy_update_time_buffer = deque(maxlen=self.logging_freq)
-        entropy_update_time_buffer = deque(maxlen=self.logging_freq)
-        saving_time_buffer = deque(maxlen=self.logging_freq)
-        fps_buffer = deque(maxlen=self.logging_freq)
-        q_loss_buffer = deque(maxlen=self.logging_freq)
-        policy_loss_buffer = deque(maxlen=self.logging_freq)
-        entropy_loss_buffer = deque(maxlen=self.logging_freq)
-        entropy_buffer = deque(maxlen=self.logging_freq)
-        alpha_buffer = deque(maxlen=self.logging_freq)
+        time_metrics_buffer = deque(maxlen=self.logging_freq)
+        optimization_metrics_buffer = deque(maxlen=self.logging_freq)
 
         state = self.env.reset()
 
         global_step = 0
+        nr_updates = 0
+        nr_episodes = 0
+        steps_metrics = {}
         while global_step < self.total_timesteps:
             start_time = time.time()
+            time_metrics = {}
 
 
             # Acting
@@ -121,6 +104,7 @@ class SAC():
                     maybe_terminal_observation = self.env.get_terminal_observation(info, i)
                     if maybe_terminal_observation is not None:
                         actual_next_state[i] = maybe_terminal_observation
+                    nr_episodes += 1
             
             replay_buffer.add(state, actual_next_state, action, reward, done)
 
@@ -129,19 +113,16 @@ class SAC():
 
             episode_infos = self.env.get_episode_infos(info)
             episode_info_buffer.extend(episode_infos)
-            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos])
-        
+            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos if "r" in ep_info])
+
             acting_end_time = time.time()
-            acting_time_buffer.append(acting_end_time - start_time)
+            time_metrics["time/acting_time"] = acting_end_time - start_time
 
 
             # What to do in this step after acting
             should_learning_start = global_step > self.learning_starts
-            should_update_q = should_learning_start and global_step % self.q_update_freq == 0
-            should_update_q_target = should_learning_start and global_step % self.q_target_update_freq == 0
-            should_update_policy = should_learning_start and global_step % self.policy_update_freq == 0
-            should_update_entropy = should_learning_start and self.entropy_coef == "auto" and global_step % self.entropy_update_freq == 0
-            should_try_to_save = should_learning_start and self.save_model and episode_infos 
+            should_optimize = should_learning_start
+            should_try_to_save = should_learning_start and self.save_model and episode_infos
             should_log = global_step % self.logging_freq == 0
 
 
@@ -150,98 +131,85 @@ class SAC():
             if self.anneal_learning_rate:
                 fraction = 1 - (global_step / self.total_timesteps)
                 learning_rate = fraction * self.learning_rate
-                param_groups = self.policy_optimizer.param_groups + self.q_optimizer.param_groups
-                if self.entropy_coef == "auto":
-                    param_groups += self.entropy_optimizer.param_groups
+                param_groups = self.policy_optimizer.param_groups + self.q_optimizer.param_groups + self.entropy_optimizer.param_groups
                 for param_group in param_groups:
                     param_group["lr"] = learning_rate
 
-
+            
             # Optimizing - Prepare batches
-            if should_update_q or should_update_policy or should_update_entropy:
-                max_nr_batches_needed = max(should_update_q * self.q_update_steps, should_update_policy * self.policy_update_steps, should_update_entropy * self.entropy_update_steps)
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, max_nr_batches_needed)
+            if should_optimize:
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size)
 
 
-            # Optimizing - Q-functions
-            if should_update_q:
-                for i in range(self.q_update_steps):
-                    with torch.no_grad():
-                        next_actions, _, next_log_probs = self.policy.get_action(batch_next_states[i])
-                    
-                    q_loss = self.critic.loss(batch_states[i], batch_next_states[i], batch_actions[i], next_actions, next_log_probs, batch_rewards[i], batch_dones[i], self.alpha)
+            # Optimizing - Q-functions, policy and entropy coefficient
+            if should_optimize:
+                # Critic loss
+                with torch.no_grad():
+                    next_actions, _, next_log_probs = self.policy.get_action(batch_next_states)
+                
+                q_loss = self.critic.loss(batch_states, batch_next_states, batch_actions, next_actions, next_log_probs, batch_rewards, batch_dones, self.alpha)
 
-                    self.q_optimizer.zero_grad()
-                    q_loss.backward()
-                    self.q_optimizer.step()
+                self.q_optimizer.zero_grad()
+                q_loss.backward()
+                q1_grad_norm = 0.0
+                q2_grad_norm = 0.0
+                for param in self.critic.q1.parameters():
+                    q1_grad_norm += param.grad.detach().data.norm(2).item() ** 2
+                for param in self.critic.q2.parameters():
+                    q2_grad_norm += param.grad.detach().data.norm(2).item() ** 2
+                critic_grad_norm = q1_grad_norm ** 0.5 + q2_grad_norm ** 0.5
+                self.q_optimizer.step()
 
-                    q_loss_buffer.append(q_loss.item())
-
-            q_update_end_time = time.time()
-            q_update_time_buffer.append(q_update_end_time - acting_end_time)
-
-
-            # Optimizing - Q-function targets
-            if should_update_q_target:
+                # Update critic targets
                 for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
                     target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
                 for param, target_param in zip(self.critic.q2.parameters(), self.critic.q2_target.parameters()):
                     target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
-            q_target_update_end_time = time.time()
-            q_target_update_time_buffer.append(q_target_update_end_time - q_update_end_time)
+                # Policy loss
+                current_actions, _, current_log_probs = self.policy.get_action(batch_states)
+                q1 = self.critic.q1(batch_states, current_actions)
+                q2 = self.critic.q2(batch_states, current_actions)
+                policy_loss, min_q = self.policy.loss(current_log_probs, q1, q2, self.alpha)
 
+                self.policy_optimizer.zero_grad()
+                policy_loss.backward()
+                policy_grad_norm = 0.0
+                for param in self.policy.parameters():
+                    policy_grad_norm += param.grad.detach().data.norm(2).item() ** 2
+                policy_grad_norm = policy_grad_norm ** 0.5
+                self.policy_optimizer.step()
 
-            # Optimizing - Policy
-            if should_update_policy:
-                batch_entropies = []
+                # Entropy loss
+                entropy = -current_log_probs.detach().mean()
+                entropy_loss = self.entropy_coefficient.loss(entropy)
 
-                for i in range(self.policy_update_steps):
-                    current_actions, _, current_log_probs = self.policy.get_action(batch_states[i])
+                self.entropy_optimizer.zero_grad()
+                entropy_loss.backward()
+                entropy_grad_norm = self.entropy_coefficient.log_alpha.grad.detach().data.norm(2).item() ** 2
+                self.entropy_optimizer.step()
 
-                    q1 = self.critic.q1(batch_states[i], current_actions)
-                    q2 = self.critic.q2(batch_states[i], current_actions)
-                    
-                    policy_loss = self.policy.loss(current_log_probs, q1, q2, self.alpha)
+                self.alpha = self.entropy_coefficient()
 
-                    self.policy_optimizer.zero_grad()
-                    policy_loss.backward()
-                    self.policy_optimizer.step()
+                # Create metrics
+                optimization_metrics = {
+                    "entropy/alpha": self.alpha.item(),
+                    "entropy/entropy": entropy.item(),
+                    "gradients/policy_grad_norm": policy_grad_norm,
+                    "gradients/critic_grad_norm": critic_grad_norm,
+                    "gradients/entropy_grad_norm": entropy_grad_norm,
+                    "loss/q_loss": q_loss.item(),
+                    "loss/policy_loss": policy_loss.item(),
+                    "loss/entropy_loss": entropy_loss.item(),
+                    "lr/learning_rate": learning_rate,
+                    "q_value/q_value": min_q.mean().item(),
+                }
 
-                    policy_loss_buffer.append(policy_loss.item())
-                    alpha_buffer.append(self.alpha.item())
-
-                    entropy = -current_log_probs.detach().mean()
-                    batch_entropies.append(entropy)
-
-            policy_update_end_time = time.time()
-            policy_update_time_buffer.append(policy_update_end_time - q_target_update_end_time)
+                optimization_metrics_buffer.append(optimization_metrics)
+                nr_updates += 1
             
-
-            # Optimizing - Entropy
-            if should_update_entropy:
-                for i in range(self.entropy_update_steps):
-                    # Check if entropy was already calculated in policy optimization
-                    if len(batch_entropies) >= i + 1:
-                        entropy = batch_entropies[i]
-                    else:
-                        with torch.no_grad():
-                            _, _, current_log_probs = self.policy.get_action(batch_actions[i])
-                            entropy = -current_log_probs.detach().mean()
-
-                    entropy_loss = self.entropy_coefficient.loss(entropy)
-
-                    self.entropy_optimizer.zero_grad()
-                    entropy_loss.backward()
-                    self.entropy_optimizer.step()
-
-                    self.alpha = self.entropy_coefficient()
-
-                    entropy_buffer.append(entropy.item())
-                    entropy_loss_buffer.append(entropy_loss.item())
-
-            entropy_update_end_time = time.time()
-            entropy_update_time_buffer.append(entropy_update_end_time - policy_update_end_time)
+            optimize_end_time = time.time()
+            time_metrics["time/optimize_time"] = optimize_end_time - acting_end_time
 
 
             # Saving
@@ -252,63 +220,39 @@ class SAC():
                     self.save()
             
             saving_end_time = time.time()
-            saving_time_buffer.append(saving_end_time - entropy_update_end_time)
+            time_metrics["time/saving_time"] = saving_end_time - optimize_end_time
 
-            fps_buffer.append(self.nr_envs / (saving_end_time - start_time))
+            time_metrics["time/fps"] = self.nr_envs / (saving_end_time - start_time)
+
+            time_metrics_buffer.append(time_metrics)
 
 
-            # Logging                
+            # Logging
             if should_log:
-                if self.track_console:
-                    rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
-                    self.log_console("global_step", global_step)
-                else:
-                    rlx_logger.info(f"Step: {global_step}")
+                self.start_logging(global_step)
+
+                steps_metrics["steps/nr_env_steps"] = global_step
+                steps_metrics["steps/nr_updates"] = nr_updates
+                steps_metrics["steps/nr_episodes"] = nr_episodes
 
                 if len(episode_info_buffer) > 0:
-                    self.log("rollout/ep_rew_mean", np.mean([ep_info["r"] for ep_info in episode_info_buffer]), global_step)
-                    self.log("rollout/ep_len_mean", np.mean([ep_info["l"] for ep_info in episode_info_buffer]), global_step)
+                    self.log("rollout/episode_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
+                    self.log("rollout/episode_length", np.mean([ep_info["l"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
                     names = list(episode_info_buffer[0].keys())
                     for name in names:
                         if name != "r" and name != "l" and name != "t":
                             self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info]), global_step)
-                self.log("time/fps", np.mean(fps_buffer), global_step)
-                self.log("time/acting_time", np.mean(acting_time_buffer), global_step)
-                self.log("time/q_update_time", np.mean(q_update_time_buffer), global_step)
-                self.log("time/q_target_update_time", np.mean(q_target_update_time_buffer), global_step)
-                self.log("time/policy_update_time", np.mean(policy_update_time_buffer), global_step)
-                self.log("time/entropy_update_time", np.mean(entropy_update_time_buffer), global_step)
-                self.log("time/saving_time", np.mean(saving_time_buffer), global_step)
-                self.log("train/learning_rate", learning_rate, global_step)
-                self.log("train/q_loss", self.get_buffer_mean(q_loss_buffer), global_step)
-                self.log("train/policy_loss", self.get_buffer_mean(policy_loss_buffer), global_step)
-                self.log("train/entropy_loss", self.get_buffer_mean(entropy_loss_buffer), global_step)
-                self.log("train/entropy", self.get_buffer_mean(entropy_buffer), global_step)
-                self.log("train/alpha", self.get_buffer_mean(alpha_buffer), global_step)
-
-                if self.track_console:
-                    rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
+                mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in time_metrics_buffer[0].keys()}
+                mean_optimization_metrics = {} if not should_learning_start else {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in optimization_metrics_buffer[0].keys()}
+                combined_metrics = {**steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
+                for key, value in combined_metrics.items():
+                    self.log(f"{key}", value, global_step)
 
                 episode_info_buffer.clear()
-                acting_time_buffer.clear()
-                q_update_time_buffer.clear()
-                q_target_update_time_buffer.clear()
-                policy_update_time_buffer.clear()
-                entropy_update_time_buffer.clear()
-                saving_time_buffer.clear()
-                fps_buffer.clear()
-                q_loss_buffer.clear()
-                policy_loss_buffer.clear()
-                entropy_loss_buffer.clear()
-                entropy_buffer.clear()
-                alpha_buffer.clear()
+                time_metrics_buffer.clear()
+                optimization_metrics_buffer.clear()
 
-
-    def get_buffer_mean(self, buffer):
-        if len(buffer) > 0:
-            return np.mean(buffer)
-        else:
-            return 0.0
+                self.end_logging()
 
 
     def log(self, name, value, step):
@@ -322,6 +266,18 @@ class SAC():
         value = np.format_float_positional(value, trim="-")
         rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │")
 
+    
+    def start_logging(self, step):
+        if self.track_console:
+            rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
+        else:
+            rlx_logger.info(f"Step: {step}")
+
+
+    def end_logging(self):
+        if self.track_console:
+            rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
+
 
     def save(self):
         file_path = self.save_path + "/model_best.pt"
@@ -332,12 +288,11 @@ class SAC():
             "q2_state_dict": self.critic.q2.state_dict(),
             "q1_target_state_dict": self.critic.q1_target.state_dict(),
             "q2_target_state_dict": self.critic.q2_target.state_dict(),
+            "log_alpha": self.entropy_coefficient.log_alpha,
             "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
             "q_optimizer_state_dict": self.q_optimizer.state_dict(),
+            "entropy_optimizer_state_dict": self.entropy_optimizer.state_dict(),
         }
-        if self.entropy_coef == "auto":
-            save_dict["log_alpha"] = self.entropy_coefficient.log_alpha
-            save_dict["entropy_optimizer_state_dict"] = self.entropy_optimizer.state_dict()
         torch.save(save_dict, file_path)
         if self.track_wandb:
             wandb.save(file_path, base_path=os.path.dirname(file_path))
@@ -352,10 +307,10 @@ class SAC():
         model.critic.q2.load_state_dict(checkpoint["q2_state_dict"])
         model.critic.q1_target.load_state_dict(checkpoint["q1_target_state_dict"])
         model.critic.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
-        if config.algorithm.entropy_coef == "auto":
-            model.entropy_coefficient.log_alpha = checkpoint["log_alpha"]
-            model.entropy_optimizer.load_state_dict(checkpoint["entropy_optimizer_state_dict"])
-
+        model.entropy_coefficient.log_alpha = checkpoint["log_alpha"]
+        model.policy_optimizer.load_state_dict(checkpoint["policy_optimizer_state_dict"])
+        model.q_optimizer.load_state_dict(checkpoint["q_optimizer_state_dict"])
+        model.entropy_optimizer.load_state_dict(checkpoint["entropy_optimizer_state_dict"])
         return model
 
     

@@ -192,11 +192,12 @@ class TQC:
             vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, None, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
+            grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 3), has_aux=True)
 
             keys = jax.random.split(key, (self.batch_size * 2) + 1)
             key, keys1, keys2 = keys[0], keys[1::2], keys[2::2]
 
-            (loss, (metrics)), (policy_gradients, critic_gradients, entropy_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 3), has_aux=True)(
+            (loss, (metrics)), (policy_gradients, critic_gradients, entropy_gradients) = grad_loss_fn(
                 policy_state.params, critic_state.params, critic_state.target_params, entropy_coefficient_state.params,
                 states, next_states, actions, rewards, dones, keys1, keys2)
 

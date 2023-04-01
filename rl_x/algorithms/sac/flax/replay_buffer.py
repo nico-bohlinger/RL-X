@@ -26,12 +26,12 @@ class ReplayBuffer():
         self.size = min(self.size + 1, self.capacity)
     
 
-    def sample(self, nr_samples, nr_batches):
-        idx1 = np.random.randint(self.size, size=nr_samples * nr_batches)
-        idx2 = np.random.randint(self.nr_envs, size=nr_samples * nr_batches)
-        states = self.states[idx1, idx2].reshape((nr_batches, nr_samples) + self.os_shape)
-        next_states = self.next_states[idx1, idx2].reshape((nr_batches, nr_samples) + self.os_shape)
-        actions = self.actions[idx1, idx2].reshape((nr_batches, nr_samples) + self.as_shape)
-        rewards = self.rewards[idx1, idx2].reshape((nr_batches, nr_samples))
-        dones = self.dones[idx1, idx2].reshape((nr_batches, nr_samples))
+    def sample(self, nr_samples):
+        idx1 = np.random.randint(self.size, size=nr_samples)
+        idx2 = np.random.randint(self.nr_envs, size=nr_samples)
+        states = self.states[idx1, idx2].reshape((nr_samples,) + self.os_shape)
+        next_states = self.next_states[idx1, idx2].reshape((nr_samples,) + self.os_shape)
+        actions = self.actions[idx1, idx2].reshape((nr_samples,) + self.as_shape)
+        rewards = self.rewards[idx1, idx2].reshape((nr_samples,))
+        dones = self.dones[idx1, idx2].reshape((nr_samples,))
         return states, next_states, actions, rewards, dones

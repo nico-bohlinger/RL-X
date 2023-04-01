@@ -15,19 +15,10 @@ def get_config(algorithm_name):
     config.batch_size = 256
     config.tau = 0.005
     config.gamma = 0.99
-    config.q_update_freq = 1
-    config.q_update_steps = 1
-    config.q_target_update_freq = 1
-    config.q_target_update = 1
-    config.policy_update_freq = 1
-    config.policy_update_steps = 1
-    config.entropy_update_freq = 1
-    config.entropy_update_steps = 1
-    config.entropy_coef = "auto"
     config.target_entropy = "auto"
     config.log_std_min = -20
     config.log_std_max = 2
     config.nr_hidden_units = 256
-    config.logging_freq = 3000
+    config.logging_freq = 300
 
     return config

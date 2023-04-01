@@ -85,10 +85,10 @@ class MPO():
         self.env_as_high = env.action_space.high
 
         self.policy, self.get_processed_action = get_policy(config, env)
-        self.vector_critic = get_critic(config, env)
+        self.critic = get_critic(config, env)
 
         self.policy.apply = jax.jit(self.policy.apply)
-        self.vector_critic.apply = jax.jit(self.vector_critic.apply)
+        self.critic.apply = jax.jit(self.critic.apply)
 
         def agent_linear_schedule(step):
             total_steps = self.total_timesteps
@@ -117,7 +117,7 @@ class MPO():
 
         agent_params = AgentParams(
             policy_params=self.policy.init(policy_key, state),
-            critic_params=self.vector_critic.init(critic_key, state, action)
+            critic_params=self.critic.init(critic_key, state, action)
         )
         
         dual_variable_shape = [np.prod(env.get_single_action_space_shape()).item()]
@@ -167,7 +167,7 @@ class MPO():
                 ):
                 # Compute predictions. Atoms for TQC critic loss
                 pred_policy = self.policy.apply(agent_params.policy_params, states)
-                q_atoms_pred = self.vector_critic.apply(agent_params.critic_params, states[:-1], actions[:-1])
+                q_atoms_pred = self.critic.apply(agent_params.critic_params, states[:-1], actions[:-1])
                 q_atoms_pred = jnp.transpose(q_atoms_pred, (1, 0, 2)).reshape(self.trace_length - 1, self.nr_total_atoms)
                 q_atoms_pred = jnp.expand_dims(q_atoms_pred, axis=2)
 
@@ -177,7 +177,7 @@ class MPO():
 
                 a_improvement = target_policy.sample(self.nr_samples, seed=key)
 
-                vmap_critic_call = jax.vmap(self.vector_critic.apply, in_axes=(None, None, 0))
+                vmap_critic_call = jax.vmap(self.critic.apply, in_axes=(None, None, 0))
                 q_improvement = vmap_critic_call(agent_target_params.critic_params, states, a_improvement)
                 q_improvement = jnp.transpose(q_improvement, (0, 2, 1, 3)).reshape(self.nr_samples, self.trace_length, self.nr_total_atoms)
                 q_improvement = jnp.mean(q_improvement, axis=2)
@@ -193,7 +193,7 @@ class MPO():
 
                 ###
                 # Retrace calculation defined in rlax and used by acme: https://github.com/deepmind/rlax/blob/master/rlax/_src/multistep.py#L380#L433
-                q_t = self.vector_critic.apply(agent_target_params.critic_params, states[1:-1], actions[1:-1])
+                q_t = self.critic.apply(agent_target_params.critic_params, states[1:-1], actions[1:-1])
                 q_t = jnp.transpose(q_t, (1, 0, 2)).reshape(self.trace_length - 2, self.nr_total_atoms)
                 q_t = jnp.sort(q_t)[:, :self.nr_target_atoms]
                 v_t = value_atoms_target[1:, :]
@@ -339,8 +339,9 @@ class MPO():
             vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
+            grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
-            (loss, (metrics)), (agent_gradients, dual_gradients) = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, actions, rewards, dones, log_probs, keys)
+            (loss, (metrics)), (agent_gradients, dual_gradients) = grad_loss_fn(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, actions, rewards, dones, log_probs, keys)
 
             agent_gradients_norm = optax.global_norm(agent_gradients)
             dual_gradients_norm = optax.global_norm(dual_gradients)

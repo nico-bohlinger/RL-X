@@ -8,7 +8,6 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 ## RL-X implementation
 
 **Implementation Details**
-- Supports setting different update frequencies and number of steps for the policy, critic and temperature
 - Supports automatically adjusted temperature
 
 **Supported frameworks**

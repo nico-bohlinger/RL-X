@@ -75,4 +75,4 @@ class Policy(nn.Module):
         min_q = torch.minimum(q1, q2)
         policy_loss = (alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
 
-        return policy_loss
+        return policy_loss, min_q
