@@ -68,6 +68,8 @@ To add a completely new environment or permanently a new one from an already pro
 
 For concrete implementations see the provided environments, e.g. ```rl_x/environments/gym/mujoco``` or ```rl_x/environments/envpool/atari```.
 
+A prototype for a custom environment interface with simple socket communication can be found in ```rl_x/environments/custom_environments```.
+
 
 ## Mix and match environments and algorithms
 If the wrappers of an environment provide all data in the standard format, i.e. like the already implemented environments, then environments and algorithms can be freely combined.  
