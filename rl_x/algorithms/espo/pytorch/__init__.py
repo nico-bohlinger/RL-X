@@ -1,9 +1,7 @@
-from rl_x.algorithms.algorithm_manager import register_algorithm
+from rl_x.algorithms.algorithm_manager import extract_algorithm_name_from_file, register_algorithm
 from rl_x.algorithms.espo.pytorch.espo import ESPO
 from rl_x.algorithms.espo.pytorch.default_config import get_config
 
 
-algorithm_name = __file__.split("rl_x/algorithms/")[1].split("/__init__.py")[0].replace("/", ".")
-
-ESPO_PYTORCH = algorithm_name
+ESPO_PYTORCH = extract_algorithm_name_from_file(__file__)
 register_algorithm(ESPO_PYTORCH, get_config, ESPO)

@@ -3,7 +3,6 @@ ml-collections >= 0.1.1
 wandb >= 0.13.7
 torch >= 1.13.1
 gymnasium[mujoco,atari] >= 0.27.0
-mujoco_py >= 2.1.2.14
 envpool >= 0.8.0
 numpy >= 1.23.0
 tensorflow >= 2.11.0

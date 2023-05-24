@@ -39,7 +39,7 @@ gym
 **\_\_init__.py**
 - Registers the environment with the environment manager
 - Needs to import create_env() and get_config() functions for the registration
-- Creates a constant for the environment name which can be imported for running an experiment. Environment names use their directory structure as the name.
+- Creates a constant for the environment name which can be imported for running an experiment. The name is extracted from the environment's directory structure.
     - Example: ```--config.environment.name="gym.mujoco.humanoid_v4"```
     - See: ```experiments/start_experiment.py```
 
