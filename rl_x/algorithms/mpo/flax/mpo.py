@@ -161,9 +161,9 @@ class MPO():
 
 
         @jax.jit
-        def update(train_state: TrainingState, states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey):
+        def update(train_state: TrainingState, states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey):
             def loss_fn(agent_params: flax.core.FrozenDict, dual_params: flax.core.FrozenDict, agent_target_params: flax.core.FrozenDict,
-                        states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey
+                        states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey
                 ):
                 # Compute predictions. Atoms for TQC critic loss
                 pred_policy = self.policy.apply(agent_params.policy_params, states)
@@ -198,7 +198,7 @@ class MPO():
                 q_t = jnp.sort(q_t)[:, :self.nr_target_atoms]
                 v_t = value_atoms_target[1:, :]
                 r_t = rewards[:-1]
-                discount_t = self.gamma * (1 - dones[:-1])
+                discount_t = self.gamma * (1 - terminations[:-1])
                 log_rhos = target_policy.log_prob(actions) - log_probs
                 c_t = self.retrace_lambda * jnp.minimum(1.0, jnp.exp(log_rhos[1:-1]))
 
@@ -341,7 +341,7 @@ class MPO():
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
-            (loss, (metrics)), (agent_gradients, dual_gradients) = grad_loss_fn(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, actions, rewards, dones, log_probs, keys)
+            (loss, (metrics)), (agent_gradients, dual_gradients) = grad_loss_fn(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, actions, rewards, terminations, log_probs, keys)
 
             agent_gradients_norm = optax.global_norm(agent_gradients)
             dual_gradients_norm = optax.global_norm(dual_gradients)
@@ -385,7 +385,7 @@ class MPO():
         state_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.observation_space.shape, dtype=np.float32)
         action_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.action_space.shape, dtype=np.float32)
         reward_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
-        done_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
+        terminated_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
         log_prob_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
@@ -413,7 +413,8 @@ class MPO():
                 action, log_prob, self.key = get_action_and_log_prob(self.train_state.agent_target_params.policy_params, state, self.key)
                 processed_action = self.get_processed_action(action)
             
-            next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
+            next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+            done = terminated | truncated
             
             nr_episodes += np.sum(done)
             global_step += self.nr_envs
@@ -421,17 +422,17 @@ class MPO():
             state_stack = np.roll(state_stack, shift=-1, axis=1)
             action_stack = np.roll(action_stack, shift=-1, axis=1)
             reward_stack = np.roll(reward_stack, shift=-1, axis=1)
-            done_stack = np.roll(done_stack, shift=-1, axis=1)
+            terminated_stack = np.roll(terminated_stack, shift=-1, axis=1)
             log_prob_stack = np.roll(log_prob_stack, shift=-1, axis=1)
 
             state_stack[:, -1] = state
             action_stack[:, -1] = action
             reward_stack[:, -1] = reward
-            done_stack[:, -1] = done
+            terminated_stack[:, -1] = terminated
             log_prob_stack[:, -1] = log_prob
 
             if global_step / self.nr_envs >= self.trace_length:
-                replay_buffer.add(state_stack, action_stack, reward_stack, done_stack, log_prob_stack)
+                replay_buffer.add(state_stack, action_stack, reward_stack, terminated_stack, log_prob_stack)
 
             state = next_state
 
@@ -452,13 +453,13 @@ class MPO():
 
             # Optimizing - Prepare batches
             if should_optimize:
-                batch_states, batch_actions, batch_rewards, batch_dones, batch_log_probs = replay_buffer.sample(self.batch_size)
+                batch_states, batch_actions, batch_rewards, batch_terminations, batch_log_probs = replay_buffer.sample(self.batch_size)
 
 
             # Optimizing - Critic, policy, Lagrange multipliers
             if should_optimize:
                 self.train_state, optimization_metrics, self.key = update(
-                    self.train_state, batch_states, batch_actions, batch_rewards, batch_dones, batch_log_probs, self.key)
+                    self.train_state, batch_states, batch_actions, batch_rewards, batch_terminations, batch_log_probs, self.key)
                 optimization_metrics_buffer.append(optimization_metrics)
                 nr_updates += 1
 
@@ -597,7 +598,8 @@ class MPO():
             state = self.env.reset()
             while not done:
                 processed_action = get_action(self.train_state.agent_params.policy_params, state)
-                state, reward, done, info = self.env.step(jax.device_get(processed_action))
+                state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                done = terminated | truncated
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
     

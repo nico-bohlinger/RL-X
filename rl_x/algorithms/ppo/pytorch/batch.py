@@ -1,8 +1,8 @@
 class Batch:
-    def __init__(self, states, actions, rewards, values, dones, log_probs):
+    def __init__(self, states, actions, rewards, values, terminations, log_probs):
         self.states = states
         self.actions = actions
         self.rewards = rewards
         self.values = values
-        self.dones = dones
+        self.terminations = terminations
         self.log_probs = log_probs

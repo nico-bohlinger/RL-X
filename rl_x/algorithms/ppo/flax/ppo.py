@@ -121,16 +121,16 @@ class PPO:
         
 
         @jax.jit
-        def calculate_gae_advantages(critic_state: TrainState, next_states: jnp.array, rewards: np.ndarray, dones: np.ndarray, storage: Storage):
+        def calculate_gae_advantages(critic_state: TrainState, next_states: jnp.array, rewards: np.ndarray, terminations: np.ndarray, storage: Storage):
             def compute_advantages(carry, t):
-                prev_advantage, delta, dones = carry
-                advantage = delta[t] + self.gamma * self.gae_lambda * (1 - dones[t]) * prev_advantage
-                return (advantage, delta, dones), advantage
+                prev_advantage, delta, terminations = carry
+                advantage = delta[t] + self.gamma * self.gae_lambda * (1 - terminations[t]) * prev_advantage
+                return (advantage, delta, terminations), advantage
 
             next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
-            delta = rewards + self.gamma * next_values * (1.0 - dones) - storage.values
+            delta = rewards + self.gamma * next_values * (1.0 - terminations) - storage.values
             init_advantages = delta[-1]
-            _, advantages = jax.lax.scan(compute_advantages, (init_advantages, delta, dones), jnp.arange(self.nr_steps - 2, -1, -1))
+            _, advantages = jax.lax.scan(compute_advantages, (init_advantages, delta, terminations), jnp.arange(self.nr_steps - 2, -1, -1))
             advantages = jnp.concatenate([advantages[::-1], jnp.array([init_advantages])])
             storage = storage.replace(
                 advantages=advantages,
@@ -245,7 +245,7 @@ class PPO:
             returns=jnp.zeros((self.nr_steps, self.nr_envs)),
         )
         rewards = np.zeros((self.nr_steps, self.nr_envs))
-        dones = np.zeros((self.nr_steps, self.nr_envs))
+        terminations = np.zeros((self.nr_steps, self.nr_envs))
         next_states = np.zeros((self.nr_steps, self.nr_envs) + self.os_shape)
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
@@ -266,18 +266,19 @@ class PPO:
             # Acting
             for step in range(self.nr_steps):
                 processed_action, storage, self.key = get_action_and_value(self.policy_state, self.critic_state, state, storage, step, self.key)
-                next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
+                next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                done = terminated | truncated
                 actual_next_state = next_state.copy()
                 for i, single_done in enumerate(done):
                     if single_done:
-                        maybe_terminal_observation = self.env.get_terminal_observation(info, i)
-                        if maybe_terminal_observation is not None:
-                            actual_next_state[i] = maybe_terminal_observation
+                        maybe_final_observation = self.env.get_final_observation(info, i)
+                        if maybe_final_observation is not None:
+                            actual_next_state[i] = maybe_final_observation
                         nr_episodes += 1
 
                 next_states[step] = actual_next_state
                 rewards[step] = reward
-                dones[step] = done
+                terminations[step] = terminated
                 state = next_state
                 global_step += self.nr_envs
 
@@ -290,7 +291,7 @@ class PPO:
 
 
             # Calculating advantages and returns
-            storage = calculate_gae_advantages(self.critic_state, next_states, rewards, dones, storage)
+            storage = calculate_gae_advantages(self.critic_state, next_states, rewards, terminations, storage)
             
             calc_adv_return_end_time = time.time()
             time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
@@ -430,7 +431,8 @@ class PPO:
             state = self.env.reset()
             while not done:
                 processed_action = get_action(self.policy_state, state)
-                state, reward, done, info = self.env.step(jax.device_get(processed_action))
+                state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                done = terminated | truncated
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
     

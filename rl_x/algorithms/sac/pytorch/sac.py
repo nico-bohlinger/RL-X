@@ -102,16 +102,17 @@ class SAC():
                 action = action.detach().cpu().numpy()
                 processed_action = processed_action.detach().cpu().numpy()
             
-            next_state, reward, done, info = self.env.step(processed_action)
+            next_state, reward, terminated, truncated, info = self.env.step(processed_action)
+            done = terminated | truncated
             actual_next_state = next_state.copy()
             for i, single_done in enumerate(done):
                 if single_done:
-                    maybe_terminal_observation = self.env.get_terminal_observation(info, i)
-                    if maybe_terminal_observation is not None:
-                        actual_next_state[i] = maybe_terminal_observation
+                    maybe_final_observation = self.env.get_final_observation(info, i)
+                    if maybe_final_observation is not None:
+                        actual_next_state[i] = maybe_final_observation
                     nr_episodes += 1
             
-            replay_buffer.add(state, actual_next_state, action, reward, done)
+            replay_buffer.add(state, actual_next_state, action, reward, terminated)
 
             state = next_state
             global_step += self.nr_envs
@@ -143,7 +144,7 @@ class SAC():
             
             # Optimizing - Prepare batches
             if should_optimize:
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size)
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size)
 
 
             # Optimizing - Q-functions, policy and entropy coefficient
@@ -154,7 +155,7 @@ class SAC():
                     next_q1_target = self.q1_target(batch_next_states, next_actions)
                     next_q2_target = self.q2_target(batch_next_states, next_actions)
                     min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
-                    y = batch_rewards.reshape(-1, 1) + self.gamma * (1 - batch_dones.reshape(-1, 1)) * (min_next_q_target - self.alpha.detach() * next_log_probs)
+                    y = batch_rewards.reshape(-1, 1) + self.gamma * (1 - batch_terminations.reshape(-1, 1)) * (min_next_q_target - self.alpha.detach() * next_log_probs)
 
                 q1 = self.q1(batch_states, batch_actions)
                 q2 = self.q2(batch_states, batch_actions)
@@ -336,7 +337,8 @@ class SAC():
             state = self.env.reset()
             while not done:
                 processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                state, reward, done, info = self.env.step(processed_action.cpu().numpy())
+                state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
+                done = terminated | truncated
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
 

@@ -27,7 +27,8 @@ class RecordEpisodeStatistics(VecEnvWrapper):
         return observations
 
     def step_wait(self):
-        observations, rewards, dones, infos = self.venv.step_wait()
+        observations, rewards, terminations, truncatations, infos = self.venv.step_wait()
+        dones = terminations | truncatations
         self.episode_returns += rewards
         self.episode_lengths += 1
         for i in range(len(dones)):
@@ -42,7 +43,7 @@ class RecordEpisodeStatistics(VecEnvWrapper):
                 self.episode_count += 1
                 self.episode_returns[i] = 0
                 self.episode_lengths[i] = 0
-        return observations, rewards, dones, infos
+        return observations, rewards, terminations, truncatations, infos
 
 
 class RLXInfo(gym.Wrapper):
@@ -61,8 +62,8 @@ class RLXInfo(gym.Wrapper):
         return episode_infos
     
 
-    def get_terminal_observation(self, info, id):
-        return info[id]["terminal_observation"]
+    def get_final_observation(self, info, id):
+        return info[id]["final_observation"]
 
     
     def get_action_space_type(self):
@@ -125,7 +126,7 @@ class NonblockingVecEnv(SubprocVecEnv):
                     all_invented = False
                     counter += 1
                 else:
-                    answer = ([0.0] * self.observation_space.shape[0], 0.0, False, {}, {})
+                    answer = ([0.0] * self.observation_space.shape[0], 0.0, False, False, {}, {})
                     results.append(answer)
                     self.invented[i] = True
                 i += 1
@@ -135,6 +136,6 @@ class NonblockingVecEnv(SubprocVecEnv):
                 rlx_logger.warning("All invented")
 
         self.waiting = False
-        obs, rews, dones, infos, _ = zip(*results)
+        obs, rews, terminations, truncations, infos, _ = zip(*results)
 
-        return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), infos
+        return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(terminations), np.stack(truncations), infos

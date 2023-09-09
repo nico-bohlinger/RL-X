@@ -139,10 +139,10 @@ class AQE():
         @jax.jit
         def update(
                 policy_state: TrainState, critic_state: RLTrainState, entropy_coefficient_state: TrainState,
-                states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, key: jax.random.PRNGKey
+                states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, key: jax.random.PRNGKey
             ):
             def critic_loss_fn(critic_params: flax.core.FrozenDict,
-                        state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, done: np.ndarray,
+                        state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray,
                         key1: jax.random.PRNGKey
                 ):
                 # Critic loss
@@ -155,7 +155,7 @@ class AQE():
                 next_q_target = self.critic.apply(critic_state.target_params, next_state, next_action)
                 next_q_target = jnp.mean(jnp.sort(next_q_target.reshape(self.nr_total_q_values))[:self.nr_target_q_values])
 
-                y = reward + self.gamma * (1 - done) * (next_q_target - alpha * next_log_prob)
+                y = reward + self.gamma * (1 - terminated) * (next_q_target - alpha * next_log_prob)
 
                 qs = self.critic.apply(critic_params, state, action)
 
@@ -218,7 +218,7 @@ class AQE():
                 keys = jax.random.split(key, self.batch_size + 1)
                 key, keys1 = keys[0], keys[1:]
 
-                (loss, (metrics)), (critic_gradients) = grad_critic_loss_fn(critic_state.params, states[i], next_states[i], actions[i], rewards[i], dones[i], keys1)
+                (loss, (metrics)), (critic_gradients) = grad_critic_loss_fn(critic_state.params, states[i], next_states[i], actions[i], rewards[i], terminations[i], keys1)
                 
                 critic_state = critic_state.apply_gradients(grads=critic_gradients)
                 critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
@@ -275,16 +275,17 @@ class AQE():
                 action, self.key = get_action(self.policy_state, state, self.key)
                 processed_action = self.get_processed_action(action)
             
-            next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
+            next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+            done = terminated | truncated
             actual_next_state = next_state.copy()
             for i, single_done in enumerate(done):
                 if single_done:
-                    maybe_terminal_observation = self.env.get_terminal_observation(info, i)
-                    if maybe_terminal_observation is not None:
-                        actual_next_state[i] = maybe_terminal_observation
+                    maybe_final_observation = self.env.get_final_observation(info, i)
+                    if maybe_final_observation is not None:
+                        actual_next_state[i] = maybe_final_observation
                     nr_episodes += 1
             
-            replay_buffer.add(state, actual_next_state, action, reward, done)
+            replay_buffer.add(state, actual_next_state, action, reward, terminated)
 
             state = next_state
             global_step += self.nr_envs
@@ -307,12 +308,12 @@ class AQE():
             # Optimizing - Prepare batches
             if should_optimize:
                 nr_batches_needed = self.q_update_steps
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size, nr_batches_needed)
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size, nr_batches_needed)
 
             
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
-                self.policy_state, self.critic_state, self.entropy_coefficient_state, optimization_metrics, self.key = update(self.policy_state, self.critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
+                self.policy_state, self.critic_state, self.entropy_coefficient_state, optimization_metrics, self.key = update(self.policy_state, self.critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations, self.key)
                 optimization_metrics_buffer.append(optimization_metrics)
                 nr_policy_updates += 1
                 nr_q_updates += self.q_update_steps
@@ -448,7 +449,8 @@ class AQE():
             state = self.env.reset()
             while not done:
                 processed_action = get_action(self.policy_state, state)
-                state, reward, done, info = self.env.step(jax.device_get(processed_action))
+                state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                done = terminated | truncated
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
     

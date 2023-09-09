@@ -40,6 +40,7 @@ class Connection:
             self.last_reaction = {
                 "observation": [0] * self.observation_count,
                 "reward": 0,
-                "done": False,
+                "terminated": False,
+                "truncated": False,
             }
         return self.last_reaction

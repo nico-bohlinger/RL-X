@@ -6,7 +6,7 @@ from rl_x.environments.envpool.mujoco.humanoid_v4.wrappers import RecordEpisodeS
 def create_env(config):
     env = envpool.make("Humanoid-v4", env_type="gymnasium", seed=config.environment.seed, num_envs=config.environment.nr_envs)
     env.num_envs = config.environment.nr_envs
-    env = RecordEpisodeStatistics(env, config.environment.dones_at_timeout)
+    env = RecordEpisodeStatistics(env)
     env = RLXInfo(env)
     env.action_space = env.action_space
     env.observation_space = env.observation_space

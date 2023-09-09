@@ -22,8 +22,8 @@ class RLXInfo(gym.Wrapper):
         return episode_infos
     
 
-    def get_terminal_observation(self, info, id):
-        return info[id]["terminal_observation"]
+    def get_final_observation(self, info, id):
+        return info[id]["final_observation"]
 
     
     def get_action_space_type(self):

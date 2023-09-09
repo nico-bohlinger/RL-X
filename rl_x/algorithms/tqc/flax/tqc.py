@@ -128,10 +128,10 @@ class TQC:
         @jax.jit
         def update(
                 policy_state: TrainState, critic_state: RLTrainState, entropy_coefficient_state: TrainState,
-                states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, key: jax.random.PRNGKey
+                states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, key: jax.random.PRNGKey
             ):
             def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict, critic_target_params: flax.core.FrozenDict, entropy_coefficient_params: flax.core.FrozenDict,
-                        state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, done: np.ndarray,
+                        state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray,
                         key1: jax.random.PRNGKey, key2: jax.random.PRNGKey
                 ):
                 # Critic loss
@@ -145,7 +145,7 @@ class TQC:
                 next_q_target_atoms = stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
                 next_q_target_atoms = jnp.sort(next_q_target_atoms.reshape(self.nr_total_atoms))[:self.nr_target_atoms]
 
-                y = reward + self.gamma * (1 - done) * (next_q_target_atoms - alpha * next_log_prob)
+                y = reward + self.gamma * (1 - terminated) * (next_q_target_atoms - alpha * next_log_prob)
                 y = jnp.expand_dims(y, axis=0)  # (1, nr_target_atoms)
 
                 q_atoms = self.critic.apply(critic_params, state, action)
@@ -199,7 +199,7 @@ class TQC:
 
             (loss, (metrics)), (policy_gradients, critic_gradients, entropy_gradients) = grad_loss_fn(
                 policy_state.params, critic_state.params, critic_state.target_params, entropy_coefficient_state.params,
-                states, next_states, actions, rewards, dones, keys1, keys2)
+                states, next_states, actions, rewards, terminations, keys1, keys2)
 
             policy_state = policy_state.apply_gradients(grads=policy_gradients)
             critic_state = critic_state.apply_gradients(grads=critic_gradients)
@@ -244,16 +244,17 @@ class TQC:
                 action, self.key = get_action(self.policy_state, state, self.key)
                 processed_action = self.get_processed_action(action)
             
-            next_state, reward, done, info = self.env.step(jax.device_get(processed_action))
+            next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+            done = terminated | truncated
             actual_next_state = next_state.copy()
             for i, single_done in enumerate(done):
                 if single_done:
-                    maybe_terminal_observation = self.env.get_terminal_observation(info, i)
-                    if maybe_terminal_observation is not None:
-                        actual_next_state[i] = maybe_terminal_observation
+                    maybe_final_observation = self.env.get_final_observation(info, i)
+                    if maybe_final_observation is not None:
+                        actual_next_state[i] = maybe_final_observation
                     nr_episodes += 1
             
-            replay_buffer.add(state, actual_next_state, action, reward, done)
+            replay_buffer.add(state, actual_next_state, action, reward, terminated)
 
             state = next_state
             global_step += self.nr_envs
@@ -275,12 +276,12 @@ class TQC:
 
             # Optimizing - Prepare batches
             if should_optimize:
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = replay_buffer.sample(self.batch_size)
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size)
 
 
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
-                self.policy_state, self.critic_state, self.entropy_coefficient_state, optimization_metrics, self.key = update(self.policy_state, self.critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, self.key)
+                self.policy_state, self.critic_state, self.entropy_coefficient_state, optimization_metrics, self.key = update(self.policy_state, self.critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations, self.key)
                 optimization_metrics_buffer.append(optimization_metrics)
                 nr_updates += 1
             
@@ -414,7 +415,8 @@ class TQC:
             state = self.env.reset()
             while not done:
                 processed_action = get_action(self.policy_state, state)
-                state, reward, done, info = self.env.step(jax.device_get(processed_action))
+                state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                done = terminated | truncated
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
     

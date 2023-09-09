@@ -77,7 +77,7 @@ class PPO:
             actions = torch.zeros((self.nr_steps, self.nr_envs) + self.as_shape, dtype=torch.float32).to(self.device),
             rewards = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             values = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
-            dones = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
+            terminations = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             log_probs = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device)
         )
 
@@ -102,21 +102,22 @@ class PPO:
                 with torch.no_grad():
                     action, processed_action, log_prob = self.policy.get_action_logprob(state)
                     value = self.critic.get_value(state)
-                next_state, reward, done, info = self.env.step(processed_action.cpu().numpy())
+                next_state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
+                done = terminated | truncated
                 next_state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
                 actual_next_state = next_state.clone()
                 for i, single_done in enumerate(done):
                     if single_done:
-                        maybe_terminal_observation = self.env.get_terminal_observation(info, i)
-                        if maybe_terminal_observation is not None:
-                            actual_next_state[i] = torch.tensor(maybe_terminal_observation, dtype=torch.float32).to(self.device)
+                        maybe_final_observation = self.env.get_final_observation(info, i)
+                        if maybe_final_observation is not None:
+                            actual_next_state[i] = torch.tensor(maybe_final_observation, dtype=torch.float32).to(self.device)
                         nr_episodes += 1
 
                 batch.states[step] = state
                 batch.actions[step] = action
                 batch.rewards[step] = torch.tensor(reward, dtype=torch.float32).to(self.device)
                 batch.values[step] = value.reshape(-1)
-                batch.dones[step]= torch.tensor(done, dtype=torch.float32).to(self.device)
+                batch.terminations[step]= torch.tensor(terminated, dtype=torch.float32).to(self.device)
                 batch.log_probs[step] = log_prob     
                 state = next_state
                 global_step += self.nr_envs
@@ -139,9 +140,9 @@ class PPO:
                     nextvalues = next_value
                 else:
                     nextvalues = batch.values[t + 1]
-                not_done = 1.0 - batch.dones[t]
-                delta = batch.rewards[t] + self.gamma * nextvalues * not_done - batch.values[t]
-                advantages[t] = lastgaelam = delta + self.gamma * self.gae_lambda * not_done * lastgaelam
+                not_terminated = 1.0 - batch.terminations[t]
+                delta = batch.rewards[t] + self.gamma * nextvalues * not_terminated - batch.values[t]
+                advantages[t] = lastgaelam = delta + self.gamma * self.gae_lambda * not_terminated * lastgaelam
             returns = advantages + batch.values
             
             calc_adv_return_end_time = time.time()
@@ -347,7 +348,8 @@ class PPO:
             state = self.env.reset()
             while not done:
                 processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                state, reward, done, info = self.env.step(processed_action.cpu().numpy())
+                state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
+                done = terminated | truncated
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
 

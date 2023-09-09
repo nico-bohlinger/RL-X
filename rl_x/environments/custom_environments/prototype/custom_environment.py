@@ -20,8 +20,7 @@ class CustomEnvironment(Env):
             info["episode"] = {}
             for extra_value_name, extra_value in zip(reaction["extraValueNames"], reaction["extraValues"]):
                 info["episode"][extra_value_name] = extra_value
-        truncated = False
-        return reaction["observation"], reaction["reward"], reaction["done"], truncated, info
+        return reaction["observation"], reaction["reward"], reaction["terminated"], reaction["truncated"], info
 
     def reset(self, seed=None):
         return self.connection.recv()["observation"], {}

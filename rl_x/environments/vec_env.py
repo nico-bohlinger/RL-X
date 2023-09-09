@@ -271,12 +271,12 @@ def _worker(
             cmd, data = remote.recv()
             if cmd == "step":
                 observation, reward, terminated, truncated, info = env.step(data)
-                done = terminated or truncated
+                done = terminated | truncated
                 info["TimeLimit.truncated"] = truncated and not terminated
                 if done:
-                    info["terminal_observation"] = observation
+                    info["final_observation"] = observation
                     observation, reset_info = env.reset()
-                remote.send((observation, reward, done, info, reset_info))
+                remote.send((observation, reward, terminated, truncated, info, reset_info))
             elif cmd == "seed":
                 remote.send(env.reset(seed=data))
             elif cmd == "reset":
@@ -340,8 +340,8 @@ class SubprocVecEnv(VecEnv):
     def step_wait(self) -> VecEnvStepReturn:
         results = [remote.recv() for remote in self.remotes]
         self.waiting = False
-        obs, rews, dones, infos, self.reset_infos = zip(*results)
-        return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), infos
+        obs, rews, terminations, truncations, infos, self.reset_infos = zip(*results)
+        return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(terminations), np.stack(truncations), infos
 
     def seed(self, seed: Optional[int] = None) -> List[Union[None, int]]:
         if seed is None:
@@ -445,7 +445,8 @@ class DummyVecEnv(VecEnv):
         self.keys, shapes, dtypes = obs_space_info(obs_space)
 
         self.buf_obs = OrderedDict([(k, np.zeros((self.num_envs,) + tuple(shapes[k]), dtype=dtypes[k])) for k in self.keys])
-        self.buf_dones = np.zeros((self.num_envs,), dtype=bool)
+        self.buf_terminations = np.zeros((self.num_envs,), dtype=bool)
+        self.buf_truncations = np.zeros((self.num_envs,), dtype=bool)
         self.buf_rews = np.zeros((self.num_envs,), dtype=np.float32)
         self.buf_infos = [{} for _ in range(self.num_envs)]
         self.actions = None
@@ -459,14 +460,16 @@ class DummyVecEnv(VecEnv):
             obs, self.buf_rews[env_idx], terminated, truncated, self.buf_infos[env_idx] = self.envs[env_idx].step(
                 self.actions[env_idx]
             )
-            self.buf_dones[env_idx] = terminated or truncated
+            done = terminated | truncated
+            self.buf_terminations[env_idx] = terminated
+            self.buf_truncations[env_idx] = truncated
             self.buf_infos[env_idx]["TimeLimit.truncated"] = truncated and not terminated
 
-            if self.buf_dones[env_idx]:
-                self.buf_infos[env_idx]["terminal_observation"] = obs
+            if done:
+                self.buf_infos[env_idx]["final_observation"] = obs
                 obs, self.reset_infos[env_idx] = self.envs[env_idx].reset()
             self._save_obs(env_idx, obs)
-        return (self._obs_from_buf(), np.copy(self.buf_rews), np.copy(self.buf_dones), deepcopy(self.buf_infos))
+        return (self._obs_from_buf(), np.copy(self.buf_rews), np.copy(self.buf_terminations), np.copy(self.buf_truncations),  deepcopy(self.buf_infos))
 
     def seed(self, seed: Optional[int] = None) -> List[Union[None, int]]:
         if seed is None:

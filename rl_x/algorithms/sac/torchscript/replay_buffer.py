@@ -12,18 +12,18 @@ class ReplayBuffer():
         self.next_states = np.zeros((self.capacity, nr_envs) + os_shape, dtype=np.float32)
         self.actions = np.zeros((self.capacity, nr_envs) + as_shape, dtype=np.float32)
         self.rewards = np.zeros((self.capacity, nr_envs), dtype=np.float32)
-        self.dones = np.zeros((self.capacity, nr_envs), dtype=np.float32)
+        self.terminations = np.zeros((self.capacity, nr_envs), dtype=np.float32)
         self.pos = 0
         self.size = 0
         self.device = device
     
 
-    def add(self, states, next_states, actions, rewards, dones):
+    def add(self, states, next_states, actions, rewards, terminations):
         self.states[self.pos] = states
         self.next_states[self.pos] = next_states
         self.actions[self.pos] = actions
         self.rewards[self.pos] = rewards
-        self.dones[self.pos] = dones
+        self.terminations[self.pos] = terminations
         self.pos = (self.pos + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
     
@@ -35,5 +35,5 @@ class ReplayBuffer():
         next_states = torch.tensor(self.next_states[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_samples,) + self.os_shape)
         actions = torch.tensor(self.actions[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_samples,) + self.as_shape)
         rewards = torch.tensor(self.rewards[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_samples,))
-        dones = torch.tensor(self.dones[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_samples,))
-        return states, next_states, actions, rewards, dones
+        terminations = torch.tensor(self.terminations[idx1, idx2], dtype=torch.float32).to(self.device).reshape((nr_samples,))
+        return states, next_states, actions, rewards, terminations

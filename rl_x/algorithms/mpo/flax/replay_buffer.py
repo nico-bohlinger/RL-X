@@ -11,17 +11,17 @@ class ReplayBuffer():
         self.states = np.zeros((self.capacity, nr_envs, trace_length) + os_shape, dtype=np.float32)
         self.actions = np.zeros((self.capacity, nr_envs, trace_length) + as_shape, dtype=np.float32)
         self.rewards = np.zeros((self.capacity, nr_envs, trace_length), dtype=np.float32)
-        self.dones = np.zeros((self.capacity, nr_envs, trace_length), dtype=np.float32)
+        self.terminations = np.zeros((self.capacity, nr_envs, trace_length), dtype=np.float32)
         self.log_probs = np.zeros((self.capacity, nr_envs, trace_length), dtype=np.float32)
         self.pos = 0
         self.size = 0
     
 
-    def add(self, states, actions, rewards, dones, log_probs):
+    def add(self, states, actions, rewards, terminations, log_probs):
         self.states[self.pos] = states
         self.actions[self.pos] = actions
         self.rewards[self.pos] = rewards
-        self.dones[self.pos] = dones
+        self.terminations[self.pos] = terminations
         self.log_probs[self.pos] = log_probs
         self.pos = (self.pos + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
@@ -33,6 +33,6 @@ class ReplayBuffer():
         states = self.states[idx1, idx2].reshape((nr_samples, self.trace_length) + self.os_shape)
         actions = self.actions[idx1, idx2].reshape((nr_samples, self.trace_length) + self.as_shape)
         rewards = self.rewards[idx1, idx2].reshape((nr_samples, self.trace_length))
-        dones = self.dones[idx1, idx2].reshape((nr_samples, self.trace_length))
+        terminations = self.terminations[idx1, idx2].reshape((nr_samples, self.trace_length))
         log_probs = self.log_probs[idx1, idx2].reshape((nr_samples, self.trace_length))
-        return states, actions, rewards, dones, log_probs
+        return states, actions, rewards, terminations, log_probs

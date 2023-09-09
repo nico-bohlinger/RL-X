@@ -85,7 +85,7 @@ class ESPO:
             actions = torch.zeros((self.nr_steps, self.nr_envs) + self.as_shape, dtype=torch.float32).to(self.device),
             rewards = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             values = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
-            dones = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
+            terminations = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             log_probs = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device)
         )
 
@@ -111,14 +111,15 @@ class ESPO:
                 with torch.no_grad():
                     action, processed_action, log_prob = self.policy.get_action_logprob(state)
                     value = self.critic.get_value(state)
-                next_state, reward, done, info = self.env.step(processed_action.cpu().numpy())
+                next_state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
+                done = terminated | truncated
                 next_state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
                 actual_next_state = next_state.clone()
                 for i, single_done in enumerate(done):
                     if single_done:
-                        maybe_terminal_observation = self.env.get_terminal_observation(info, i)
-                        if maybe_terminal_observation is not None:
-                            actual_next_state[i] = torch.tensor(maybe_terminal_observation, dtype=torch.float32).to(self.device)
+                        maybe_final_observation = self.env.get_final_observation(info, i)
+                        if maybe_final_observation is not None:
+                            actual_next_state[i] = torch.tensor(maybe_final_observation, dtype=torch.float32).to(self.device)
                             nr_episodes += 1
 
                 batch.states[step] = state
@@ -126,7 +127,7 @@ class ESPO:
                 batch.actions[step] = action
                 batch.rewards[step] = torch.tensor(reward, dtype=torch.float32).to(self.device)
                 batch.values[step] = value.reshape(-1)
-                batch.dones[step]= torch.tensor(done, dtype=torch.float32).to(self.device)
+                batch.terminations[step]= torch.tensor(terminated, dtype=torch.float32).to(self.device)
                 batch.log_probs[step] = log_prob     
                 state = next_state
                 global_step += self.nr_envs
@@ -142,7 +143,7 @@ class ESPO:
             # Calculating advantages and returns
             with torch.no_grad():
                 next_values = self.critic.get_value(batch.next_states).squeeze(-1)
-            advantages, returns = calculate_gae_advantages_and_returns(batch.rewards, batch.dones, batch.values, next_values, self.gamma, self.gae_lambda)
+            advantages, returns = calculate_gae_advantages_and_returns(batch.rewards, batch.terminations, batch.values, next_values, self.gamma, self.gae_lambda)
             
             calc_adv_return_end_time = time.time()
             time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
@@ -337,17 +338,18 @@ class ESPO:
             state = self.env.reset()
             while not done:
                 processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                state, reward, done, info = self.env.step(processed_action.cpu().numpy())
+                state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
+                done = terminated | truncated
             return_val = self.env.get_episode_infos(info)[0]["r"]
             rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
 
 
 @torch.jit.script
-def calculate_gae_advantages_and_returns(rewards, dones, values, next_values, gamma: float, gae_lambda: float):
-    delta = rewards + gamma * next_values * (1 - dones) - values
+def calculate_gae_advantages_and_returns(rewards, terminations, values, next_values, gamma: float, gae_lambda: float):
+    delta = rewards + gamma * next_values * (1 - terminations) - values
     advantages = torch.zeros_like(rewards)
     lastgaelam = torch.zeros_like(rewards[0])
     for t in range(values.shape[0] - 2, -1, -1):
-        lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - dones[t]) * lastgaelam
+        lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
     returns = advantages + values
     return advantages, returns

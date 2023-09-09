@@ -26,7 +26,8 @@ The environment has to respond in the following JSON format:
 {
     "observation": [0.0, 0.0, ...],
     "reward": 0.0,
-    "done": false,
+    "terminated": false,
+    "truncated": false,
     "extraValueNames": ["extraValue1", "extraValue2", ...],
     "extraValues": [0.0, 0.0, ...]
 }
@@ -35,4 +36,4 @@ The `extraValueNames` and `extraValues` fields are optional and can be used to p
 
 ## Asynchronous environments
 With the ```--config.environment.synchronized=False``` flag, the environment does not have to wait for every environment to step.  
-Instead it will only wait for ```--config.environment.async_threshold=0.8``` percent of the environments to step and fills the remaining slots with dummy (observation, reward, done) tuples.
+Instead it will only wait for ```--config.environment.async_threshold=0.8``` percent of the environments to step and fills the remaining slots with dummy (observation, reward, terminated, truncated, info) tuples.

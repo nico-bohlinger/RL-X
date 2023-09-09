@@ -34,13 +34,14 @@ class RecordEpisodeStatistics(gym.Wrapper):
         timestep = super(RecordEpisodeStatistics, self).step(action)
         observations = self.extract_obervation(timestep)
         rewards = timestep.reward
-        dones = timestep.step_type == 2  # 2 is StepType.LAST
+        terminations = timestep.step_type == 2  # 2 is StepType.LAST
+        dones = terminations  # dmc envs don't have truncated episodes
         infos = {}
 
         self.episode_returns += rewards
         self.episode_lengths += 1
         infos["episode"] = [None] * self.num_envs
-        infos["terminal_observation"] = [None] * self.num_envs
+        infos["final_observation"] = [None] * self.num_envs
         for i in range(len(dones)):
             if dones[i]:
                 episode_return = self.episode_returns[i]
@@ -53,10 +54,10 @@ class RecordEpisodeStatistics(gym.Wrapper):
                 self.episode_count += 1
                 self.episode_returns[i] = 0
                 self.episode_lengths[i] = 0
-                infos["terminal_observation"][i] = np.array(observations[i])
+                infos["final_observation"][i] = np.array(observations[i])
                 timestep_ = self.env.reset(np.array([i]))
                 observations[i] = self.extract_obervation(timestep_)
-        return (observations, rewards, dones, infos)
+        return (observations, rewards, terminations, np.zeros_like(terminations), infos)
     
 
 class RLXInfo(gym.Wrapper):
@@ -76,8 +77,8 @@ class RLXInfo(gym.Wrapper):
         return episode_infos
     
 
-    def get_terminal_observation(self, info, id):
-        return info["terminal_observation"][id]
+    def get_final_observation(self, info, id):
+        return info["final_observation"][id]
     
 
     def get_action_space_type(self):
