@@ -522,9 +522,8 @@ class DummyVecEnv(VecEnv):
 
     def env_is_wrapped(self, wrapper_class: Type[gym.Wrapper], indices: VecEnvIndices = None) -> List[bool]:
         target_envs = self._get_target_envs(indices)
-        from stable_baselines3.common import env_util
 
-        return [env_util.is_wrapped(env_i, wrapper_class) for env_i in target_envs]
+        return [is_wrapped(env_i, wrapper_class) for env_i in target_envs]
 
     def _get_target_envs(self, indices: VecEnvIndices) -> List[gym.Env]:
         indices = self._get_indices(indices)
@@ -572,3 +571,14 @@ def check_for_nested_spaces(obs_space: spaces.Space) -> None:
                 raise NotImplementedError(
                     "Nested observation spaces are not supported (Tuple/Dict space inside Tuple/Dict space)."
                 )
+            
+def unwrap_wrapper(env: gym.Env, wrapper_class: Type[gym.Wrapper]) -> Optional[gym.Wrapper]:
+    env_tmp = env
+    while isinstance(env_tmp, gym.Wrapper):
+        if isinstance(env_tmp, wrapper_class):
+            return env_tmp
+        env_tmp = env_tmp.env
+    return None
+
+def is_wrapped(env: Type[gym.Env], wrapper_class: Type[gym.Wrapper]) -> bool:
+    return unwrap_wrapper(env, wrapper_class) is not None
