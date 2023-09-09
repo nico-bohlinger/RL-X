@@ -48,6 +48,9 @@ For further infos on how to add more environments and algorithms read the respec
 git clone git@github.com:nico-bohlinger/RL-X.git
 pip install -e .
 ```
+
+Tested with Python 3.9.7 and 3.11.4.
+
 **MacOS**: EnvPool is not supported on MacOS yet. Remove it from the ```requirements.txt``` file before installing.
 
 **Windows**: EnvPool and JAX related packages are not supported on Windows yet. Remove them from the ```requirements.txt``` file before installing.

@@ -1,4 +1,10 @@
 import os
+
+# Silence tensorflow warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+# Guarantee enough memory for CUBLAS to initialize when using jax
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
+
 import sys
 import importlib
 from absl import app
@@ -27,12 +33,6 @@ absl_logging.set_verbosity(absl_logging.ERROR)
 
 # Silences the box bound precision warning for cartpole
 gym.logger.set_level(40)
-
-# Silence tensorflow warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-
-# Guarantee enough memory for CUBLAS to initialize when using jax
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
 
 rlx_logger = logging.getLogger("rl_x")
 
