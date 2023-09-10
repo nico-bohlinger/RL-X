@@ -2,8 +2,6 @@ import os
 
 # Silence tensorflow warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-# Guarantee enough memory for CUBLAS to initialize when using jax
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
 
 import sys
 import importlib
@@ -13,6 +11,7 @@ from absl import logging as absl_logging
 import logging
 from ml_collections import config_dict, config_flags
 import wandb
+import jax; jax.random.PRNGKey(0)  # Do this before importing tensorflow to ensure jax uses the currect cudnn version
 from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
 
