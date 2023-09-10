@@ -11,7 +11,7 @@ from absl import logging as absl_logging
 import logging
 from ml_collections import config_dict, config_flags
 import wandb
-import jax; jax.random.PRNGKey(0)  # Do this before importing tensorflow to ensure jax uses the currect cudnn version
+import jax; jax.random.PRNGKey(0)  # Do this before importing tensorflow to ensure jax uses the correct cudnn version. See https://github.com/google/jax/issues/17497
 from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
 
