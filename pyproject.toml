@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rl_x"
+version = "0.0.1"
+description = "RL-X: A framework for Reinforcement Learning research"
+authors = [{name = "Nico Bohlinger", email = "nico.bohlinger@gmail.com"}]
+license = {text = "MIT License"}
+dynamic = ["readme"]
+dependencies = [
+    "absl-py>=1.4.0",
+    "ml-collections>=0.1.1",
+    "wandb>=0.15.10",
+    "torch>=2.0.1",
+    "gymnasium[mujoco,atari]>=0.29.1",
+    "numpy>=1.24.3",
+    "tensorflow>=2.13.0",
+    "tensorboard>=2.13.0"
+]
+
+[project.optional-dependencies]
+jax = [
+    "jax>=0.4.14",
+    "jaxlib>=0.4.14",
+    "flax>=0.7.2",
+    "optax<=0.1.7",
+    "chex<=0.1.7",
+    "tensorflow_probability>=0.21.0"
+]
+envpool = [
+    "envpool>=0.8.3"
+]
+all = [
+    "rl_x[jax,envpool]"
+]
+
+[project.urls]
+repository = "https://github.com/nico-bohlinger/rl-x"
+
+[tool.setuptools.dynamic]
+readme = {file = "README.md", content_type = "text/markdown"}
+
+[tool.setuptools.packages.find]
+include = ["rl_x"]

@@ -46,14 +46,25 @@ For further infos on how to add more environments and algorithms read the respec
 
 ```
 git clone git@github.com:nico-bohlinger/RL-X.git
-pip install -e .
+cd RL-X
+pip install -e .[all]
 ```
 
 Tested with Python 3.9.7 and 3.11.4.
 
-**MacOS**: EnvPool is not supported on MacOS yet. Remove it from the ```requirements.txt``` file before installing.
+### Version Overview
+The following RL-X versions can be installed:
+- ```pip install -e .```: Installs only the core dependencies
+- ```pip install -e .[all]```: Core and all optional dependencies (see below)
+- ```pip install -e .[jax]```: Needed to run Flax-based algorithms
+- ```pip install -e .[envpool]```: Needed to run EnvPool environments
 
-**Windows**: EnvPool and JAX related packages are not supported on Windows yet. Remove them from the ```requirements.txt``` file before installing.
+> Remember that multiple versions can be combined, e.g. ```pip install -e .[jax,envpool]```.
+
+### OS Restrictions
+**MacOS**: EnvPool is not supported on MacOS yet, therefore don't install the ```[envpool]``` or ```[all]``` version.
+
+**Windows**: EnvPool and JAX related packages are not supported on Windows yet, therefore don't install the ```[jax]```, ```[envpool]``` or ```[all]``` version.
 
 
 ## Example
