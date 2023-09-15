@@ -1,6 +1,6 @@
 from rl_x.environments.environment_manager import extract_environment_name_from_file, register_environment
-from rl_x.environments.custom_environments.prototype.create_env import create_env
-from rl_x.environments.custom_environments.prototype.default_config import get_config
+from rl_x.environments.custom_interface.prototype.create_env import create_env
+from rl_x.environments.custom_interface.prototype.default_config import get_config
 
 
 CUSTOM_ENVIRONMENT_PROTOTYPE = extract_environment_name_from_file(__file__)

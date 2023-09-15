@@ -2,7 +2,7 @@ from gymnasium import Env
 from gymnasium.spaces import Box
 import numpy as np
 
-from rl_x.environments.custom_environments.prototype.connection import Connection
+from rl_x.environments.custom_interface.prototype.connection import Connection
 
 
 class CustomEnvironment(Env):

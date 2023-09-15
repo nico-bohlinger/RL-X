@@ -1,7 +1,7 @@
 from rl_x.environments.vec_env import DummyVecEnv
 
-from rl_x.environments.custom_environments.prototype.custom_environment import CustomEnvironment
-from rl_x.environments.custom_environments.prototype.wrappers import NonblockingVecEnv, RecordEpisodeStatistics, RLXInfo
+from rl_x.environments.custom_interface.prototype.custom_environment import CustomEnvironment
+from rl_x.environments.custom_interface.prototype.wrappers import NonblockingVecEnv, RecordEpisodeStatistics, RLXInfo
 
 
 def create_env(config):

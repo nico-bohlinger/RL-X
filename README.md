@@ -39,7 +39,7 @@ A framework for Reinforcement Learning research.
 Most of them have only one reference environment implemented.
 To try out more just change the environment name in the create_env.py files or add a proper new directory for it.
 
-A prototype for a custom environment interface with simple socket communication can be found in ```rl_x/environments/custom_environments```.
+A prototype for a custom environment interface with simple socket communication can be found in ```rl_x/environments/custom_interface```.
 
 For further infos on how to add more environments and algorithms read the respective README files.
 
