@@ -22,8 +22,14 @@ dependencies = [
 
 [project.optional-dependencies]
 jax = [
-    "jax>=0.4.14",
-    "jaxlib>=0.4.14",
+    "jax[cuda12_pip]>=0.4.14",
+    "rl_x[jax_addons]"
+]
+jax_cpu = [
+    "jax[cpu]>=0.4.14",
+    "rl_x[jax_addons]"
+]
+jax_addons = [
     "flax>=0.7.2",
     "optax<=0.1.7",
     "chex<=0.1.7",

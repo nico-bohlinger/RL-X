@@ -57,14 +57,13 @@ The following RL-X versions can be installed:
 - ```pip install -e .```: Installs only the core dependencies
 - ```pip install -e .[all]```: Core and all optional dependencies (see below)
 - ```pip install -e .[jax]```: Needed to run Flax-based algorithms
+- ```pip install -e .[jax_cpu]```: Needed to run Flax-based algorithms on CPU only
 - ```pip install -e .[envpool]```: Needed to run EnvPool environments
 
 > Remember that multiple versions can be combined, e.g. ```pip install -e .[jax,envpool]```.
 
 ### OS Restrictions
-**MacOS**: EnvPool is not supported on MacOS yet, therefore don't install the ```[envpool]``` or ```[all]``` version.
-
-**Windows**: EnvPool and JAX related packages are not supported on Windows yet, therefore don't install the ```[jax]```, ```[envpool]``` or ```[all]``` version.
+**MacOS & Windows**: EnvPool and JAX for GPU are not supported (out-of-the-box) on MacOS and Winodws yet, therefore don't install the ```[envpool]```, ```[jax]``` or ```[all]``` versions.
 
 
 ## Example
