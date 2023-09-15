@@ -9,6 +9,7 @@ from absl import app
 from absl import flags
 from absl import logging as absl_logging
 import logging
+import logging.handlers
 from ml_collections import config_dict, config_flags
 import wandb
 
@@ -63,10 +64,17 @@ class Runner:
         rlx_logger = logging.getLogger("rl_x")
         rlx_logger.setLevel(logging.INFO)
         rlx_logger.propagate = False
-        consoleHandler = logging.StreamHandler()
+        consoleHandler = logging.StreamHandler(sys.stdout)
         consoleHandler.setLevel(logging.INFO)
         consoleHandler.setFormatter(logging.Formatter("[%(asctime)s] [%(filename)s:%(lineno)d] %(levelname)s - %(message)s","%m-%d %H:%M:%S"))
-        rlx_logger.addHandler(consoleHandler)
+        memoryHandler = logging.handlers.MemoryHandler(100, logging.ERROR, consoleHandler)
+        rlx_logger.addHandler(memoryHandler)
+        def info(msg, flush=True, *args, **kwargs):
+            if rlx_logger.isEnabledFor(logging.INFO):
+                rlx_logger._log(logging.INFO, msg, args, **kwargs)
+            if flush:
+                rlx_logger.handlers[0].flush()
+        rlx_logger.info = info
         def handle_exception(exc_type, exc_value, exc_traceback):
             if issubclass(exc_type, KeyboardInterrupt):
                 sys.__excepthook__(exc_type, exc_value, exc_traceback)

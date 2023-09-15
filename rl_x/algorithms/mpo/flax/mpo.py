@@ -526,12 +526,12 @@ class MPO():
 
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
-        rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │")
+        rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │", flush=False)
 
 
     def start_logging(self, step):
         if self.track_console:
-            rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐")
+            rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐", flush=False)
         else:
             rlx_logger.info(f"Step: {step}")
 
