@@ -25,7 +25,6 @@ def import_cudnn_based_libraries(algorithm_name):
             jax.random.PRNGKey(0)
         except:
             pass
-    from torch.utils.tensorboard import SummaryWriter
 
 from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.default_config import get_config as get_runner_config
@@ -154,6 +153,7 @@ class Runner:
         run_path = f"runs/{self._config.runner.project_name}/{self._config.runner.exp_name}/{self._config.runner.run_name}"
         writer = None
         if self._config.runner.track_tb:
+            from torch.utils.tensorboard import SummaryWriter
             writer = SummaryWriter(run_path)
             all_config_items = self._config.runner.items() + self._config.algorithm.items() + self._config.environment.items()
             writer.add_text(
