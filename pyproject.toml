@@ -21,6 +21,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+jax-addons = [
+    "flax>=0.7.2",
+    "optax<=0.1.7",
+    "chex<=0.1.7",
+    "tensorflow_probability>=0.21.0"
+]
 jax = [
     "jax[cuda12_pip]>=0.4.14",
     "rl_x[jax_addons]"
@@ -28,12 +34,6 @@ jax = [
 jax_cpu = [
     "jax[cpu]>=0.4.14",
     "rl_x[jax_addons]"
-]
-jax_addons = [
-    "flax>=0.7.2",
-    "optax<=0.1.7",
-    "chex<=0.1.7",
-    "tensorflow_probability>=0.21.0"
 ]
 envpool = [
     "envpool>=0.8.3"
