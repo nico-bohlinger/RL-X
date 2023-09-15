@@ -21,7 +21,7 @@ class QNetwork(nn.Module):
         single_as_shape = env.get_single_action_space_shape()
 
         self.critic = nn.Sequential(
-            nn.Linear((np.prod(single_os_shape) + np.prod(single_as_shape)).item(), nr_hidden_units),
+            nn.Linear((np.prod(single_os_shape, dtype=int) + np.prod(single_as_shape, dtype=int)).item(), nr_hidden_units),
             nn.ReLU(),
             nn.Linear(nr_hidden_units, nr_hidden_units),
             nn.ReLU(),

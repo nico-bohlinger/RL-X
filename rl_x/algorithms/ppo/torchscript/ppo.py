@@ -111,7 +111,7 @@ class PPO:
                     if single_done:
                         maybe_final_observation = self.env.get_final_observation(info, i)
                         if maybe_final_observation is not None:
-                            actual_next_state[i] = torch.tensor(maybe_final_observation, dtype=torch.float32).to(self.device)
+                            actual_next_state[i] = torch.tensor(np.array(maybe_final_observation), dtype=torch.float32).to(self.device)
                         nr_episodes += 1
 
                 batch.states[step] = state

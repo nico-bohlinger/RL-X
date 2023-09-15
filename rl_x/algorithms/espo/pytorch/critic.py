@@ -21,7 +21,7 @@ class Critic(nn.Module):
         single_os_shape = env.observation_space.shape
 
         self.critic = nn.Sequential(
-            self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),
+            self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
             nn.Tanh(),
             self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),

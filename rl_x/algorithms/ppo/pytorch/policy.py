@@ -36,13 +36,13 @@ class ContinuousFlatValuesPolicy(nn.Module):
         single_as_shape = env.get_single_action_space_shape()
         
         self.policy_mean = nn.Sequential(
-            self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),
+            self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
             nn.Tanh(),
             self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),
-            self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape).item()), std=0.01),
+            self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape, dtype=int).item()), std=0.01),
         )
-        self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape).item()), np.log(std_dev).item()))
+        self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape, dtype=int).item()), np.log(std_dev).item()))
     
 
     def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
@@ -85,11 +85,11 @@ class DiscreteFlatValuesPolicy(nn.Module):
         single_as_shape = env.get_single_action_space_shape()
         
         self.policy_mean = nn.Sequential(
-            self.layer_init(nn.Linear(np.prod(single_os_shape).item(), nr_hidden_units)),
+            self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
             nn.Tanh(),
             self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),
-            self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape).item()), std=0.01),
+            self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape, dtype=int).item()), std=0.01),
         )
     
 
@@ -136,10 +136,10 @@ class ContinuousImagesPolicy(nn.Module):
             nn.Flatten(),
             nn.LazyLinear(512),
             nn.ReLU(),
-            self.layer_init(nn.Linear(512, np.prod(single_as_shape)), std=0.01)
+            self.layer_init(nn.Linear(512, np.prod(single_as_shape, dtype=int).item()), std=0.01)
         )
         self.policy_mean(torch.zeros(1, *env.observation_space.shape))  # Init the lazy linear layer
-        self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape)), np.log(std_dev)))
+        self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape, dtype=int).item()), np.log(std_dev)))
     
 
     def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
@@ -190,7 +190,7 @@ class DiscreteImagesPolicy(nn.Module):
             nn.Flatten(),
             nn.LazyLinear(512),
             nn.ReLU(),
-            self.layer_init(nn.Linear(512, np.prod(single_as_shape)), std=0.01)
+            self.layer_init(nn.Linear(512, np.prod(single_as_shape, dtype=int).item()), std=0.01)
         )
         self.policy_mean(torch.zeros(1, *env.observation_space.shape))  # Init the lazy linear layer
     

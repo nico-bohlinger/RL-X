@@ -28,6 +28,8 @@ A framework for Reinforcement Learning research.
 ## Usable Environments
 - [Gymnasium](https://github.com/Farama-Foundation/Gymnasium)
     - MuJoCo
+    - Atari
+    - Classic control
 - [EnvPool](https://github.com/sail-sg/envpool)
     - MuJoCo
     - Atari

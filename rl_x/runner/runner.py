@@ -2,6 +2,8 @@ import os
 
 # Silence tensorflow warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+# Guarantee enough memory for CUBLAS to initialize when using jax
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
 
 import sys
 import importlib
@@ -12,28 +14,27 @@ import logging
 import logging.handlers
 from ml_collections import config_dict, config_flags
 import wandb
-
-# Do this before importing tensorflow to ensure jax uses the correct cudnn version. See https://github.com/google/jax/issues/17497
-try:
-    import jax
-    jax.random.PRNGKey(0)
-except:
-    pass
-
-from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
+
+def import_cudnn_based_libraries(algorithm_name):
+    if "torch" in algorithm_name:
+        import torch
+    elif "jax" in algorithm_name or "flax" in algorithm_name:
+        try:
+            import jax
+            jax.random.PRNGKey(0)
+        except:
+            pass
+    from torch.utils.tensorboard import SummaryWriter
 
 from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.default_config import get_config as get_runner_config
 from rl_x.algorithms.algorithm_manager import get_algorithm_config, get_algorithm_model_class
 from rl_x.environments.environment_manager import get_environment_config, get_environment_create_env
 
-from rl_x.algorithms.ppo.pytorch import PPO_PYTORCH
-from rl_x.environments.gym.mujoco.humanoid_v4 import GYM_MUJOCO_HUMANOID_V4
-
-DEFAULT_ALGORITHM = PPO_PYTORCH
-DEFAULT_ENVIRONMENT = GYM_MUJOCO_HUMANOID_V4
-DEFAULT_RUNNER_MODE = RunnerMode.TRAIN
+DEFAULT_ALGORITHM = "ppo.pytorch"
+DEFAULT_ENVIRONMENT = "gym.mujoco.humanoid_v4"
+DEFAULT_RUNNER_MODE = "train"
 
 # Silence jax logging
 absl_logging.set_verbosity(absl_logging.ERROR)
@@ -47,6 +48,8 @@ rlx_logger = logging.getLogger("rl_x")
 class Runner:
     def __init__(self):
         algorithm_name, environment_name, self._mode = self.parse_arguments()
+
+        import_cudnn_based_libraries(algorithm_name)
 
         self._model_class = get_algorithm_model_class(algorithm_name)
         self._create_env = get_environment_create_env(environment_name)
@@ -71,7 +74,7 @@ class Runner:
         rlx_logger.addHandler(memoryHandler)
         def info(msg, flush=True, *args, **kwargs):
             if rlx_logger.isEnabledFor(logging.INFO):
-                rlx_logger._log(logging.INFO, msg, args, **kwargs)
+                rlx_logger._log(logging.INFO, msg, args, stacklevel=2, **kwargs)
             if flush:
                 rlx_logger.handlers[0].flush()
         rlx_logger.info = info
@@ -82,7 +85,7 @@ class Runner:
             rlx_logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
         sys.excepthook = handle_exception
 
-    
+
     def parse_arguments(self):
         algorithm_name = [arg for arg in sys.argv if arg.startswith("--config.algorithm.name=")]
         environment_name = [arg for arg in sys.argv if arg.startswith("--config.environment.name=")]
@@ -91,16 +94,16 @@ class Runner:
         if algorithm_name:
             algorithm_name = algorithm_name[0].split("=")[1]
             del sys.argv[sys.argv.index("--config.algorithm.name=" + algorithm_name)]
-            importlib.import_module(f"rl_x.algorithms.{algorithm_name}")
         else:
             algorithm_name = DEFAULT_ALGORITHM
+        importlib.import_module(f"rl_x.algorithms.{algorithm_name}")
         
         if environment_name:
             environment_name = environment_name[0].split("=")[1]
             del sys.argv[sys.argv.index("--config.environment.name=" + environment_name)]
-            importlib.import_module(f"rl_x.environments.{environment_name}")
         else:
             environment_name = DEFAULT_ENVIRONMENT
+        importlib.import_module(f"rl_x.environments.{environment_name}")
 
         if runner_mode:
             runner_mode = runner_mode[0].split("=")[1]
