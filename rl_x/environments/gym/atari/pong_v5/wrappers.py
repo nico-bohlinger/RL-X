@@ -62,7 +62,7 @@ class NoopResetEnv(gym.Wrapper):
         info = {}
         for _ in range(noops):
             obs, _, terminated, truncated, info = self.env.step(self.noop_action)
-            if terminated or truncated:
+            if terminated | truncated:
                 obs, info = self.env.reset(**kwargs)
         return obs, info
 
@@ -77,10 +77,10 @@ class FireResetEnv(gym.Wrapper):
     def reset(self, **kwargs):
         self.env.reset(**kwargs)
         obs, _, terminated, truncated, _ = self.env.step(1)
-        if terminated or truncated:
+        if terminated | truncated:
             self.env.reset(**kwargs)
         obs, _, terminated, truncated, _ = self.env.step(2)
-        if terminated or truncated:
+        if terminated | truncated:
             self.env.reset(**kwargs)
         return obs, {}
 
@@ -94,7 +94,7 @@ class EpisodicLifeEnv(gym.Wrapper):
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        self.was_real_done = terminated or truncated
+        self.was_real_done = terminated | truncated
         lives = self.env.unwrapped.ale.lives()
         if 0 < lives < self.lives:
             terminated = True
@@ -107,7 +107,7 @@ class EpisodicLifeEnv(gym.Wrapper):
             obs, info = self.env.reset(**kwargs)
         else:
             obs, _, terminated, truncated, info = self.env.step(0)
-            if terminated or truncated:
+            if terminated | truncated:
                 obs, info = self.env.reset(**kwargs)
         self.lives = self.env.unwrapped.ale.lives()
         return obs, info
@@ -127,7 +127,7 @@ class MaxAndSkipEnv(gym.Wrapper):
         terminated = truncated = False
         for i in range(self._skip):
             obs, reward, terminated, truncated, info = self.env.step(action)
-            done = terminated or truncated
+            done = terminated | truncated
             if i == self._skip - 2:
                 self._obs_buffer[0] = obs
             if i == self._skip - 1:

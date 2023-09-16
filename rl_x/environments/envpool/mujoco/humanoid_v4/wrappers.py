@@ -23,7 +23,7 @@ class RecordEpisodeStatistics(gym.Wrapper):
         observations, rewards, terminations, truncations, infos = super(RecordEpisodeStatistics, self).step(
             action
         )
-        dones = terminations or truncations
+        dones = terminations | truncations
         self.episode_returns += rewards
         self.episode_lengths += 1
         infos["episode"] = [None] * self.num_envs
