@@ -84,7 +84,9 @@ class ESPO:
             rewards = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             values = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             terminations = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
-            log_probs = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device)
+            log_probs = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
+            advantages = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
+            returns = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
         )
         
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
@@ -140,7 +142,6 @@ class ESPO:
             # Calculating advantages and returns
             with torch.no_grad():
                 next_value = self.critic.get_value(actual_next_state).reshape(1, -1)
-            advantages = torch.zeros_like(batch.rewards, dtype=torch.float32).to(self.device)
             lastgaelam = 0
             for t in reversed(range(self.nr_steps)):
                 if t == self.nr_steps - 1:
@@ -149,8 +150,8 @@ class ESPO:
                     nextvalues = batch.values[t + 1]
                 not_terminated = 1.0 - batch.terminations[t]
                 delta = batch.rewards[t] + self.gamma * nextvalues * not_terminated - batch.values[t]
-                advantages[t] = lastgaelam = delta + self.gamma * self.gae_lambda * not_terminated * lastgaelam
-            returns = advantages + batch.values
+                batch.advantages[t] = lastgaelam = delta + self.gamma * self.gae_lambda * not_terminated * lastgaelam
+            batch.returns = batch.advantages + batch.values
             
             calc_adv_return_end_time = time.time()
             time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
@@ -166,8 +167,8 @@ class ESPO:
             
             batch_states = batch.states.reshape((-1,) + self.os_shape)
             batch_actions = batch.actions.reshape((-1,) + self.as_shape)
-            batch_advantages = advantages.reshape(-1)
-            batch_returns = returns.reshape(-1)
+            batch_advantages = batch.advantages.reshape(-1)
+            batch_returns = batch.returns.reshape(-1)
             batch_values = batch.values.reshape(-1)
             batch_log_probs = batch.log_probs.reshape(-1)
 

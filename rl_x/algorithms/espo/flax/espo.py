@@ -16,7 +16,7 @@ import wandb
 
 from rl_x.algorithms.espo.flax.policy import get_policy
 from rl_x.algorithms.espo.flax.critic import get_critic
-from rl_x.algorithms.espo.flax.storage import Storage
+from rl_x.algorithms.espo.flax.batch import Batch
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -110,45 +110,38 @@ class ESPO:
     
     def train(self):
         @jax.jit
-        def get_action_and_value(policy_state: TrainState, critic_state: TrainState, state: np.ndarray, storage: Storage, step: int, key: jax.random.PRNGKey):
+        def get_action_and_value(policy_state: TrainState, critic_state: TrainState, state: np.ndarray , key: jax.random.PRNGKey):
             action_mean, action_logstd = self.policy.apply(policy_state.params, state)
             action_std = jnp.exp(action_logstd)
             key, subkey = jax.random.split(key)
             action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
             log_prob = -0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
             value = self.critic.apply(critic_state.params, state)
-            storage = storage.replace(
-                states=storage.states.at[step].set(state),
-                actions=storage.actions.at[step].set(action),
-                log_probs=storage.log_probs.at[step].set(log_prob.sum(1)),
-                values=storage.values.at[step].set(value.reshape(-1))
-            )
             processed_action = self.get_processed_action(action)
-            return processed_action, storage, key
+            return processed_action, action, value.reshape(-1), log_prob.sum(1), key
         
 
         @jax.jit
-        def calculate_gae_advantages(critic_state: TrainState, next_states: jnp.array, rewards: np.ndarray, terminations: np.ndarray, storage: Storage):
+        def calculate_gae_advantages(critic_state: TrainState, next_states: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, values: np.ndarray):
             def compute_advantages(carry, t):
                 prev_advantage, delta, terminations = carry
                 advantage = delta[t] + self.gamma * self.gae_lambda * (1 - terminations[t]) * prev_advantage
                 return (advantage, delta, terminations), advantage
 
             next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
-            delta = rewards + self.gamma * next_values * (1.0 - terminations) - storage.values
+            delta = rewards + self.gamma * next_values * (1.0 - terminations) - values
             init_advantages = delta[-1]
             _, advantages = jax.lax.scan(compute_advantages, (init_advantages, delta, terminations), jnp.arange(self.nr_steps - 2, -1, -1))
             advantages = jnp.concatenate([advantages[::-1], jnp.array([init_advantages])])
-            storage = storage.replace(
-                advantages=advantages,
-                returns=advantages + storage.values
-            )
-            return storage
+            returns = advantages + values
+            return advantages, returns
         
 
-        def update(policy_state: TrainState, critic_state: TrainState, storage: Storage, key: jax.random.PRNGKey):
+        def update(policy_state: TrainState, critic_state: TrainState,
+                   states: np.ndarray, actions: np.ndarray, advantages: np.ndarray, returns: np.ndarray, values: np.ndarray, log_probs: np.ndarray,
+                   key: jax.random.PRNGKey):
             for epoch in range(self.max_epochs):
-                policy_state, critic_state, ratio_delta, metrics, key = update_epoch(policy_state, critic_state, storage, key)
+                policy_state, critic_state, ratio_delta, metrics, key = update_epoch(policy_state, critic_state, states, actions, advantages, returns, log_probs, key)
 
                 if ratio_delta > self.max_ratio_delta:
                     break
@@ -156,14 +149,16 @@ class ESPO:
             metrics = {key: jnp.mean(metrics[key]) for key in metrics}
             metrics["optim/nr_epochs"] = epoch + 1
             metrics["lr/learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
-            metrics["v_value/explained_variance"] = 1 - jnp.var(storage.returns - storage.values) / (jnp.var(storage.returns) + 1e-8)
+            metrics["v_value/explained_variance"] = 1 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
             metrics["policy/std_dev"] = jnp.mean(jnp.exp(policy_state.params["params"]["policy_logstd"]))
             
             return policy_state, critic_state, epoch, metrics, key
 
 
         @jax.jit
-        def update_epoch(policy_state: TrainState, critic_state: TrainState, storage: Storage, key: jax.random.PRNGKey):
+        def update_epoch(policy_state: TrainState, critic_state: TrainState,
+                         states: np.ndarray, actions: np.ndarray, advantages: np.ndarray, returns: np.ndarray, log_probs: np.ndarray,
+                         key: jax.random.PRNGKey):
             def loss_fn(policy_params, critic_params, state_b, action_b, log_prob_b, return_b, advantage_b):
                 # Policy loss
                 action_mean, action_logstd = self.policy.apply(policy_params, state_b)
@@ -200,11 +195,11 @@ class ESPO:
                 return loss, (metrics, ratio_delta)
             
 
-            batch_states = storage.states.reshape((-1,) + self.os_shape)
-            batch_actions = storage.actions.reshape((-1,) + self.as_shape)
-            batch_advantages = storage.advantages.reshape(-1)
-            batch_returns = storage.returns.reshape(-1)
-            batch_log_probs = storage.log_probs.reshape(-1)
+            batch_states = states.reshape((-1,) + self.os_shape)
+            batch_actions = actions.reshape((-1,) + self.as_shape)
+            batch_advantages = advantages.reshape(-1)
+            batch_returns = returns.reshape(-1)
+            batch_log_probs = log_probs.reshape(-1)
 
             vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
@@ -238,17 +233,17 @@ class ESPO:
 
         self.set_train_mode()
 
-        storage = Storage(
-            states=jnp.zeros((self.nr_steps, self.nr_envs) + self.os_shape),
-            actions=jnp.zeros((self.nr_steps, self.nr_envs) + self.as_shape),
-            log_probs=jnp.zeros((self.nr_steps, self.nr_envs)),
-            values=jnp.zeros((self.nr_steps, self.nr_envs)),
-            advantages=jnp.zeros((self.nr_steps, self.nr_envs)),
-            returns=jnp.zeros((self.nr_steps, self.nr_envs)),
+        batch = Batch(
+            states=np.zeros((self.nr_steps, self.nr_envs) + self.os_shape),
+            next_states=np.zeros((self.nr_steps, self.nr_envs) + self.os_shape),
+            actions=np.zeros((self.nr_steps, self.nr_envs) + self.as_shape),
+            rewards=np.zeros((self.nr_steps, self.nr_envs)),
+            values=np.zeros((self.nr_steps, self.nr_envs)),
+            terminations=np.zeros((self.nr_steps, self.nr_envs)),
+            log_probs=np.zeros((self.nr_steps, self.nr_envs)),
+            advantages=np.zeros((self.nr_steps, self.nr_envs)),
+            returns=np.zeros((self.nr_steps, self.nr_envs)),
         )
-        rewards = np.zeros((self.nr_steps, self.nr_envs))
-        terminations = np.zeros((self.nr_steps, self.nr_envs))
-        next_states = np.zeros((self.nr_steps, self.nr_envs) + self.os_shape)
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
         episode_info_buffer = deque(maxlen=100 * self.nr_envs)
@@ -268,7 +263,7 @@ class ESPO:
             # Acting
             episode_info_buffer = deque(maxlen=100)
             for step in range(self.nr_steps):
-                processed_action, storage, self.key = get_action_and_value(self.policy_state, self.critic_state, state, storage, step, self.key)
+                processed_action, action, value, log_prob, self.key = get_action_and_value(self.policy_state, self.critic_state, state, self.key)
                 next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
                 done = terminated | truncated
                 actual_next_state = next_state.copy()
@@ -279,9 +274,13 @@ class ESPO:
                             actual_next_state[i] = maybe_final_observation
                         nr_episodes += 1
 
-                next_states[step] = actual_next_state
-                rewards[step] = reward
-                terminations[step] = terminated
+                batch.states[step] = state
+                batch.next_states[step] = actual_next_state
+                batch.actions[step] = action
+                batch.rewards[step] = reward
+                batch.values[step] = value
+                batch.terminations[step] = terminated
+                batch.log_probs[step] = log_prob
                 state = next_state
                 global_step += self.nr_envs
 
@@ -294,14 +293,18 @@ class ESPO:
 
 
             # Calculating advantages and returns
-            storage = calculate_gae_advantages(self.critic_state, next_states, rewards, terminations, storage)
+            batch.advantages, batch.returns = calculate_gae_advantages(self.critic_state, batch.next_states, batch.rewards, batch.terminations, batch.values)
             
             calc_adv_return_end_time = time.time()
             time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
 
 
             # Optimizing
-            self.policy_state, self.critic_state, epoch, metrics, self.key = update(self.policy_state, self.critic_state, storage, self.key)
+            self.policy_state, self.critic_state, epoch, metrics, self.key = update(
+                self.policy_state, self.critic_state,
+                batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs,
+                self.key
+            )
             optimization_metrics_buffer.append(metrics)
             nr_updates += epoch + 1
 

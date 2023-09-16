@@ -79,7 +79,9 @@ class PPO:
             rewards = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             values = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             terminations = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
-            log_probs = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device)
+            log_probs = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
+            advantages = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
+            returns = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
         )
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
@@ -135,7 +137,7 @@ class PPO:
             # Calculating advantages and returns
             with torch.no_grad():
                 next_values = self.critic.get_value(batch.next_states).squeeze(-1)
-            advantages, returns = calculate_gae_advantages_and_returns(batch.rewards, batch.terminations, batch.values, next_values, self.gamma, self.gae_lambda)
+            batch.advantages, batch.returns = calculate_gae_advantages_and_returns(batch.rewards, batch.terminations, batch.values, next_values, self.gamma, self.gae_lambda)
             
             calc_adv_return_end_time = time.time()
             time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
@@ -153,8 +155,8 @@ class PPO:
             
             batch_states = batch.states.reshape((-1,) + self.os_shape)
             batch_actions = batch.actions.reshape((-1,) + self.as_shape)
-            batch_advantages = advantages.reshape(-1)
-            batch_returns = returns.reshape(-1)
+            batch_advantages = batch.advantages.reshape(-1)
+            batch_returns = batch.returns.reshape(-1)
             batch_values = batch.values.reshape(-1)
             batch_log_probs = batch.log_probs.reshape(-1)
 
