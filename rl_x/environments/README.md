@@ -19,6 +19,7 @@
 - Provides a wrapper to vectorize environments
 - Copied from Stable Baselines3
 - Not needed when using EnvPool
+- SubprocVecEnv allows for parallel environments, DummyVecEnv does not but is faster for single environments
 
 **\<environment name\>**
 - Contains either subdirectories or directly the implementation of a concrete environment

@@ -5,9 +5,11 @@ from rl_x.environments.gym.classic.cart_pole_v1.wrappers import RLXInfo
 
 
 def create_env(config):
+    if config.environment.render and config.environment.vec_env_type == "subproc":
+        raise ValueError("Cannot render with vec_env_type='subproc'. Use vec_env_type='dummy' instead.")
     def make_env(seed):
         def thunk():
-            env = gym.make("CartPole-v1")
+            env = gym.make("CartPole-v1", render_mode="human" if config.environment.render else None)
             env = gym.wrappers.RecordEpisodeStatistics(env)
             env.action_space.seed(seed)
             env.observation_space.seed(seed)

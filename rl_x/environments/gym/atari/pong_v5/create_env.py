@@ -5,9 +5,11 @@ from rl_x.environments.gym.atari.pong_v5.wrappers import RLXInfo, NoopResetEnv, 
 
 
 def create_env(config):
+    if config.environment.render and config.environment.vec_env_type == "subproc":
+        raise ValueError("Cannot render with vec_env_type='subproc'. Use vec_env_type='dummy' instead.")
     def make_env(seed):
         def thunk():
-            env = gym.make("ALE/Pong-v5")
+            env = gym.make("ALE/Pong-v5", render_mode="human" if config.environment.render else None)
             env = gym.wrappers.RecordEpisodeStatistics(env)
             env = NoopResetEnv(env, noop_max=30)
             env = MaxAndSkipEnv(env, skip=4)
