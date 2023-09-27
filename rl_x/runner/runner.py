@@ -23,6 +23,8 @@ def import_cudnn_based_libraries(algorithm_name):
         try:
             import jax
             jax.random.PRNGKey(0)
+            import flax
+            flax.config.update('flax_use_orbax_checkpointing', False)
         except:
             pass
 
