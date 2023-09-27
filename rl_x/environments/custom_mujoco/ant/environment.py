@@ -2,14 +2,14 @@ from pathlib import Path
 import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation
+import gymnasium as gym
 
 from rl_x.environments.custom_mujoco.ant.viewer import MujocoViewer
 
 
-class Ant:
+class Ant(gym.Env):
     def __init__(self, horizon=1000, render=False):
         self.horizon = horizon
-        self.render = render
 
         xml_path = (Path(__file__).resolve().parent / "data" / "ant.xml").as_posix()
         self.model = mujoco.MjModel.from_xml_path(xml_path)
@@ -19,14 +19,19 @@ class Ant:
         self.nr_intermediate_steps = 1
         self.dt = self.model.opt.timestep * self.nr_substeps * self.nr_intermediate_steps
 
-        if self.render:
-            self.viewer = MujocoViewer(self.model, self.dt)
+        self.viewer = None if not render else MujocoViewer(self.model, self.dt)
+
+        action_bounds = self.model.actuator_ctrlrange.copy().astype(np.float32)
+        action_low, action_high = action_bounds.T
+        self.action_space = gym.spaces.Box(low=action_low, high=action_high, dtype=np.float32)
+
+        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(22,), dtype=np.float32)
 
         self.target_local_x_velocity = 1.0
         self.target_local_y_velocity = 0.0
 
 
-    def reset(self):
+    def reset(self, seed=None):
         self.episode_step = 0
         
         qpos = np.zeros(self.model.nq)
@@ -41,7 +46,7 @@ class Ant:
         self.data.qvel[:] = qvel
         mujoco.mj_forward(self.model, self.data)
 
-        if self.render:
+        if self.viewer:
             self.viewer.render(self.data)
 
         return self.get_observation(), {}
@@ -52,7 +57,7 @@ class Ant:
             self.data.ctrl = action
             mujoco.mj_step(self.model, self.data, self.nr_substeps)
 
-        if self.render:
+        if self.viewer:
             self.viewer.render(self.data)
         
         self.episode_step += 1
@@ -95,13 +100,6 @@ class Ant:
         return reward, info
 
 
-if __name__ == "__main__":
-    env = Ant(render=True)
-    for episode in range(100):
-        state, info = env.reset()
-        done = False
-        while not done:
-            action = np.random.randn(env.model.nu)
-            next_state, reward, terminated, truncated, info = env.step(action)
-            done = terminated | truncated
-        print('Episode', episode)
+    def close(self):
+        if self.viewer:
+            self.viewer.close()

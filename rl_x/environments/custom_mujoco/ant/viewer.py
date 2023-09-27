@@ -135,6 +135,9 @@ class MujocoViewer:
     def stop(self):
         glfw.destroy_window(self.window)
 
+    def close(self):
+        glfw.set_window_should_close(self.window, True)
+
     def create_overlay(self):
         topleft = mujoco.mjtGridPos.mjGRID_TOPLEFT
         bottomright = mujoco.mjtGridPos.mjGRID_BOTTOMRIGHT
