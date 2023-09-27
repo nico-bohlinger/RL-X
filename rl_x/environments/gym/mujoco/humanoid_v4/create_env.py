@@ -12,11 +12,6 @@ def create_env(config):
         def thunk():
             env = gym.make("Humanoid-v4", render_mode="human" if config.environment.render else None)
             env = gym.wrappers.RecordEpisodeStatistics(env)
-            env = gym.wrappers.ClipAction(env)
-            env = gym.wrappers.NormalizeObservation(env)
-            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-            env = gym.wrappers.NormalizeReward(env)
-            env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
             env.action_space.seed(seed)
             env.observation_space.seed(seed)
             return env
