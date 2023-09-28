@@ -35,10 +35,10 @@ A framework for Reinforcement Learning research.
     - Atari
     - Classic control
     - DeepMind Control Suite
-- [Custom Interface](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_interface)
-    - Prototype of a custom environment interface with socket communication
 - [Custom MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco)
     - Example of a custom MuJoCo environment
+- [Custom Interface](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_interface)
+    - Prototype of a custom environment interface with socket communication
 
 All listed environments are directly embedded in RL-X and can be used out-of-the-box.
 
