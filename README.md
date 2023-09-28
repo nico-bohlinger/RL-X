@@ -11,7 +11,8 @@ A framework for Reinforcement Learning research.
 - ⚒️ **Known DL libraries**: Implementations in PyTorch, TorchScript or JAX (Flax)
 - ⚡ **Maximum speed**: JAX versions utilize JIT compilation -> A lot faster than PyTorch
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
-- 📈 **Experiment tracking**: Console logging, Saving models, Tensorboard, Weights and Biases
+- ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo or pure socket communication
+- 📈 **Experiment tracking**: Console logging, Model saving & loading, Tensorboard, Weights and Biases
 
 
 ## Implemented Algorithms
