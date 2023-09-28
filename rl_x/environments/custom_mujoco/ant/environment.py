@@ -25,9 +25,9 @@ class Ant(gym.Env):
         action_low, action_high = action_bounds.T
         self.action_space = gym.spaces.Box(low=action_low, high=action_high, dtype=np.float32)
 
-        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(33,), dtype=np.float32)
+        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(34,), dtype=np.float32)
 
-        self.target_local_x_velocity = 1.0
+        self.target_local_x_velocity = 2.0
         self.target_local_y_velocity = 0.0
 
 
@@ -75,6 +75,7 @@ class Ant(gym.Env):
 
 
     def get_observation(self):
+        global_height = [self.data.qpos[2]]
         joint_positions = self.data.qpos[7:]
         joint_velocities = self.data.qvel[6:]
         global_linear_velocities = self.data.qvel[:3]
@@ -82,6 +83,7 @@ class Ant(gym.Env):
         local_angular_velocities = self.data.qvel[3:6]
         projected_gravity_vector = np.matmul(self.data.body("torso").xmat.reshape(3, 3).T, np.array([0.0, 0.0, -1.0]))
         observation = np.concatenate([
+            global_height,
             joint_positions, joint_velocities,
             local_linear_velocities, local_angular_velocities,
             projected_gravity_vector,
@@ -103,8 +105,8 @@ class Ant(gym.Env):
         reward = tracking_xy_velocity_command_reward
 
         info = {
-            "reward/track_xy_vel_cmd": tracking_xy_velocity_command_reward,
-            "env_info/xy_vel_diff_norm": xy_velocity_difference_norm,
+            "reward_xy_vel_cmd": tracking_xy_velocity_command_reward,
+            "xy_vel_diff_norm": xy_velocity_difference_norm,
         }
 
         return reward, info
