@@ -67,7 +67,9 @@ Fast testing of a new environment with an already provided framework (Gymnasium 
 
 To add a completely new environment or permanently a new one from an already provided framework, create a new directory with the same structure as outlined above.
 
-For concrete implementations see the provided environments, e.g. ```rl_x/environments/gym/mujoco``` or ```rl_x/environments/envpool/atari```.
+For concrete implementations of provided frameworks, look into the ```rl_x/environments/gym``` and ```rl_x/environments/envpool``` directories.
+
+An example for a custom mujoco environment can be found in ```rl_x/environments/custom_mujoco```.
 
 A prototype for a custom environment interface with simple socket communication can be found in ```rl_x/environments/custom_interface```.
 
