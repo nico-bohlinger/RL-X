@@ -1,20 +1,20 @@
 #!/bin/bash
 {
 python experiment.py \
-    --config.algorithm.name="ppo.pytorch" \
-    --config.algorithm.total_timesteps=10000 \
-    --config.environment.name="gym.mujoco.humanoid_v4" \
-    --config.environment.nr_envs=1 \
-    --config.environment.seed=0 \
-    --config.runner.mode="train" \
-    --config.runner.track_console=False \
-    --config.runner.track_tb=True \
-    --config.runner.track_wandb=True \
-    --config.runner.save_model=True \
-    --config.runner.wandb_entity="placeholder" \
-    --config.runner.project_name="placeholder" \
-    --config.runner.exp_name="placeholder" \
-    --config.runner.notes="placeholder" \
+    --algorithm.name="ppo.pytorch" \
+    --algorithm.total_timesteps=10000 \
+    --environment.name="gym.mujoco.humanoid_v4" \
+    --environment.nr_envs=1 \
+    --environment.seed=0 \
+    --runner.mode="train" \
+    --runner.track_console=False \
+    --runner.track_tb=True \
+    --runner.track_wandb=True \
+    --runner.save_model=True \
+    --runner.wandb_entity="placeholder" \
+    --runner.project_name="placeholder" \
+    --runner.exp_name="placeholder" \
+    --runner.notes="placeholder" \
     >log/out_and_err.txt 2>&1 &
 pid=$!
 

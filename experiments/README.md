@@ -24,12 +24,12 @@ python experiment.py
 
 **Overwrite configs by setting the command line arguments**
 ```
-python experiment.py --config.algorithm.gamma=0.9
+python experiment.py --algorithm.gamma=0.9
 ```
 
 **Change algorithm and environment**
 ```
-python experiment.py --config.algorithm.name="sac.flax" --config.environment.name="envpool.mujoco.humanoid_v4"
+python experiment.py --algorithm.name="sac.flax" --environment.name="envpool.mujoco.humanoid_v4"
 ```
 
 **Structure and run experiments with a bash script**
@@ -38,21 +38,21 @@ bash start_experiment.sh
 ```
 
 ## Experiment tracking
-- Set ```--config.runner.track_console=True``` to get detailed console output of the training run
-- Set ```--config.runner.track_tb=True``` to track the training run with Tensorboard
+- Set ```--runner.track_console=True``` to get detailed console output of the training run
+- Set ```--runner.track_tb=True``` to track the training run with Tensorboard
 
 **Weights and Biases**
-- Set ```--config.runner.track_tb=True --config.runner.track_wandb=True```
-- Set ```--config.runner.wandb_entity=<your_wandb_entity>``` to your Weights and Biases account name
-- Uses ```--config.runner.project_name=<your_project_name>``` as the Weights and Biases project name
-- Uses ```--config.runner.exp_name=<your_exp_name>``` as the Weights and Biases group name in the given project
-- Uses ```--config.runner.notes=<your_exp_notes>``` as the notes for the training run
+- Set ```--runner.track_tb=True --runner.track_wandb=True```
+- Set ```--runner.wandb_entity=<your_wandb_entity>``` to your Weights and Biases account name
+- Uses ```--runner.project_name=<your_project_name>``` as the Weights and Biases project name
+- Uses ```--runner.exp_name=<your_exp_name>``` as the Weights and Biases group name in the given project
+- Uses ```--runner.notes=<your_exp_notes>``` as the notes for the training run
 
 ## Saving & Loading models
-- Set ```--config.runner.save_model=True``` to save a trained model
-- Set ```--config.runner.load_model=<path_to_model>``` to load a saved model
+- Set ```--runner.save_model=True``` to save a trained model
+- Set ```--runner.load_model=<path_to_model>``` to load a saved model
 - Saved models are stored in ```runs/<project_name>/<exp_name>/<run_name>/models```
     - The ```runs``` directory is created in the directory where the training script is executed
-    - The ```<project_name>``` is set with ```--config.runner.project_name=<your_project_name>```
-    - The ```<exp_name>``` is set with ```--config.runner.exp_name=<your_exp_name>```
-    - The ```<run_name>``` is a timestamp of the training run or can be set manually with ```--config.runner.run_name=<your_run_name>```
+    - The ```<project_name>``` is set with ```--runner.project_name=<your_project_name>```
+    - The ```<exp_name>``` is set with ```--runner.exp_name=<your_exp_name>```
+    - The ```<run_name>``` is a timestamp of the training run or can be set manually with ```--runner.run_name=<your_run_name>```

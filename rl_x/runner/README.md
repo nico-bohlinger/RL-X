@@ -7,16 +7,16 @@
 - Defines the get_config() function for the runner
 - Those configs can be later overwritten via the command line
 - They are available under the config.runner namespace
-    - Example: ```--config.runner.track_console=True```
+    - Example: ```--runner.track_console=True```
     - See: ```experiments/start_experiment.sh```
 
 **runner_mode.py**
 - Contains all possible runner modes
     - TRAIN: Runs the training loop
-    - TEST: Runs the testing loop, with ```--config.runner.nr_test_episodes``` many episodes
+    - TEST: Runs the testing loop, with ```--runner.nr_test_episodes``` many episodes
     - SHOW_CONFIG: Prints out all available configs of the given algorithm, environment and runner combination
 - Can be set via the command line
-    - Example: ```--config.runner.mode="train"```
+    - Example: ```--runner.mode="train"```
     - See: ```experiments/start_experiment.sh```
 
 **runner.py**
