@@ -78,10 +78,13 @@ class Ant(gym.Env):
         global_height = [self.data.qpos[2]]
         joint_positions = self.data.qpos[7:]
         joint_velocities = self.data.qvel[6:]
-        global_linear_velocities = self.data.qvel[:3]
-        local_linear_velocities = np.matmul(self.data.body("torso").xmat.reshape(3, 3).T, global_linear_velocities)
         local_angular_velocities = self.data.qvel[3:6]
-        projected_gravity_vector = np.matmul(self.data.body("torso").xmat.reshape(3, 3).T, np.array([0.0, 0.0, -1.0]))
+
+        inverted_rotation = Rotation.from_quat(self.data.qpos[3:7]).inv()
+        global_linear_velocities = self.data.qvel[:3]
+        local_linear_velocities = inverted_rotation.apply(global_linear_velocities)
+        projected_gravity_vector = inverted_rotation.apply(np.array([0.0, 0.0, -1.0]))
+
         observation = np.concatenate([
             global_height,
             joint_positions, joint_velocities,
@@ -89,6 +92,7 @@ class Ant(gym.Env):
             projected_gravity_vector,
             self.previous_action
         ])
+        
         return observation
 
 
