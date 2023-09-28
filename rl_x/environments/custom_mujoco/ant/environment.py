@@ -25,7 +25,7 @@ class Ant(gym.Env):
         action_low, action_high = action_bounds.T
         self.action_space = gym.spaces.Box(low=action_low, high=action_high, dtype=np.float32)
 
-        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(22,), dtype=np.float32)
+        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(33,), dtype=np.float32)
 
         self.target_local_x_velocity = 1.0
         self.target_local_y_velocity = 0.0
@@ -33,6 +33,7 @@ class Ant(gym.Env):
 
     def reset(self, seed=None):
         self.episode_step = 0
+        self.previous_action = np.zeros(self.model.nu)
         
         qpos = np.zeros(self.model.nq)
         qpos[2] = 0.75  # z position
@@ -64,9 +65,11 @@ class Ant(gym.Env):
 
         next_state = self.get_observation()
         reward, r_info = self.get_reward()
-        terminated = False
+        terminated = self.data.qpos[2] < 0.35
         truncated = self.episode_step >= self.horizon
         info = {**r_info}
+
+        self.previous_action = action.copy()
 
         return next_state, reward, terminated, truncated, info
 
@@ -74,9 +77,16 @@ class Ant(gym.Env):
     def get_observation(self):
         joint_positions = self.data.qpos[7:]
         joint_velocities = self.data.qvel[6:]
+        global_linear_velocities = self.data.qvel[:3]
+        local_linear_velocities = np.matmul(self.data.body("torso").xmat.reshape(3, 3).T, global_linear_velocities)
         local_angular_velocities = self.data.qvel[3:6]
         projected_gravity_vector = np.matmul(self.data.body("torso").xmat.reshape(3, 3).T, np.array([0.0, 0.0, -1.0]))
-        observation = np.concatenate([joint_positions, joint_velocities, local_angular_velocities, projected_gravity_vector])
+        observation = np.concatenate([
+            joint_positions, joint_velocities,
+            local_linear_velocities, local_angular_velocities,
+            projected_gravity_vector,
+            self.previous_action
+        ])
         return observation
 
 
