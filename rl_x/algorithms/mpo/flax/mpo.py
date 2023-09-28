@@ -391,6 +391,7 @@ class MPO():
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
         episode_info_buffer = deque(maxlen=self.logging_freq)
+        step_info_buffer = deque(maxlen=self.logging_freq)
         time_metrics_buffer = deque(maxlen=self.logging_freq)
         optimization_metrics_buffer = deque(maxlen=self.logging_freq)
 
@@ -438,7 +439,9 @@ class MPO():
             state = next_state
 
             episode_infos = self.env.get_episode_infos(info)
+            step_infos = self.env.get_step_infos(info)
             episode_info_buffer.extend(episode_infos)
+            step_info_buffer.extend(step_infos)
             saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos if "r" in ep_info])
 
             acting_end_time = time.time()
@@ -491,16 +494,23 @@ class MPO():
                 steps_metrics["steps/nr_updates"] = nr_updates
                 steps_metrics["steps/nr_episodes"] = nr_episodes
 
+                rollout_info_metrics = {}
+                env_info_metrics = {}
                 if len(episode_info_buffer) > 0:
-                    self.log("rollout/episode_reward", np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
-                    self.log("rollout/episode_length", np.mean([ep_info["l"] for ep_info in episode_info_buffer if "r" in ep_info]), global_step)
+                    rollout_info_metrics["rollout/episode_reward"] = np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info])
+                    rollout_info_metrics["rollout/episode_length"] = np.mean([ep_info["l"] for ep_info in episode_info_buffer if "l" in ep_info])
                     names = list(episode_info_buffer[0].keys())
                     for name in names:
                         if name != "r" and name != "l" and name != "t":
-                            self.log(f"env_info/{name}", np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info]), global_step)
+                            env_info_metrics[f"env_info/{name}"] = np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info])
+                if len(step_info_buffer) > 0:
+                    names = list(step_info_buffer[0].keys())
+                    for name in names:
+                        env_info_metrics[f"env_info/{name}"] = np.mean([info[name] for info in step_info_buffer if name in info])
+                
                 mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in time_metrics_buffer[0].keys()}
                 mean_optimization_metrics = {} if not should_learning_start else {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in optimization_metrics_buffer[0].keys()}
-                combined_metrics = {**steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
+                combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
                 for key, value in combined_metrics.items():
                     self.log(f"{key}", value, global_step)
 
