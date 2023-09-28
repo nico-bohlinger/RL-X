@@ -58,11 +58,9 @@ class Runner:
         runner_default_config = get_runner_config(self._mode)
         algorithm_default_config = get_algorithm_config(algorithm_name)
         environment_default_config = get_environment_config(environment_name)
-        combined_default_config = config_dict.ConfigDict()
-        combined_default_config.runner = runner_default_config
-        combined_default_config.algorithm = algorithm_default_config
-        combined_default_config.environment = environment_default_config
-        self._config_flag = config_flags.DEFINE_config_dict("config", combined_default_config)
+        self._runner_config_flag = config_flags.DEFINE_config_dict("runner", runner_default_config)
+        self._algorithm_config_flag = config_flags.DEFINE_config_dict("algorithm", algorithm_default_config)
+        self._environment_config_flag = config_flags.DEFINE_config_dict("environment", environment_default_config)
 
         # Logging
         rlx_logger = logging.getLogger("rl_x")
@@ -88,27 +86,27 @@ class Runner:
 
 
     def parse_arguments(self):
-        algorithm_name = [arg for arg in sys.argv if arg.startswith("--config.algorithm.name=")]
-        environment_name = [arg for arg in sys.argv if arg.startswith("--config.environment.name=")]
-        runner_mode = [arg for arg in sys.argv if arg.startswith("--config.runner.mode=")]
+        algorithm_name = [arg for arg in sys.argv if arg.startswith("--algorithm.name=")]
+        environment_name = [arg for arg in sys.argv if arg.startswith("--environment.name=")]
+        runner_mode = [arg for arg in sys.argv if arg.startswith("--runner.mode=")]
 
         if algorithm_name:
             algorithm_name = algorithm_name[0].split("=")[1]
-            del sys.argv[sys.argv.index("--config.algorithm.name=" + algorithm_name)]
+            del sys.argv[sys.argv.index("--algorithm.name=" + algorithm_name)]
         else:
             algorithm_name = DEFAULT_ALGORITHM
         importlib.import_module(f"rl_x.algorithms.{algorithm_name}")
         
         if environment_name:
             environment_name = environment_name[0].split("=")[1]
-            del sys.argv[sys.argv.index("--config.environment.name=" + environment_name)]
+            del sys.argv[sys.argv.index("--environment.name=" + environment_name)]
         else:
             environment_name = DEFAULT_ENVIRONMENT
         importlib.import_module(f"rl_x.environments.{environment_name}")
 
         if runner_mode:
             runner_mode = runner_mode[0].split("=")[1]
-            del sys.argv[sys.argv.index("--config.runner.mode=" + runner_mode)]
+            del sys.argv[sys.argv.index("--runner.mode=" + runner_mode)]
         else:
             runner_mode = DEFAULT_RUNNER_MODE
 
@@ -130,14 +128,21 @@ class Runner:
         except KeyboardInterrupt:
             rlx_logger.warning("KeyboardInterrupt")
 
+    
+    def init_config(self):
+        self._config = config_dict.ConfigDict()
+        self._config.runner = self._runner_config_flag.value
+        self._config.algorithm = self._algorithm_config_flag.value
+        self._config.environment = self._environment_config_flag.value
+
 
     def _show_config(self, _):
-        self._config = self._config_flag.value
+        self.init_config()
         rlx_logger.info("\n" + str(self._config))
 
 
     def _train(self, _):
-        self._config = self._config_flag.value
+        self.init_config()
 
         if self._config.runner.track_wandb:
             wandb.init(
@@ -181,7 +186,7 @@ class Runner:
 
 
     def _test(self, _):
-        self._config = self._config_flag.value
+        self.init_config()
         
         if self._config.runner.track_wandb:
             raise ValueError("Wandb is not supported in test mode")

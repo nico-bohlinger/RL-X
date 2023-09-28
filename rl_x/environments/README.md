@@ -41,7 +41,7 @@ gym
 - Registers the environment with the environment manager
 - Needs to import create_env() and get_config() functions for the registration
 - Creates a constant for the environment name which can be imported for running an experiment. The name is extracted from the environment's directory structure.
-    - Example: ```--config.environment.name="gym.mujoco.humanoid_v4"```
+    - Example: ```--environment.name="gym.mujoco.humanoid_v4"```
     - See: ```experiments/start_experiment.py```
 
 **create_env.py**
@@ -52,7 +52,7 @@ gym
 - Defines the get_config() function for the registration
 - Those configs can be later overwritten via the command line
 - They are available under the config.environment namespace
-    - Example: ```--config.environment.nr_envs=10```
+    - Example: ```--environment.nr_envs=10```
     - See: ```experiments/start_experiment.sh```
 
 **wrappers.py**

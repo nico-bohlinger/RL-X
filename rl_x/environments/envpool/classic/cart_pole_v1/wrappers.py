@@ -60,7 +60,20 @@ class RLXInfo(gym.Wrapper):
             if maybe_episode_info is not None:
                 episode_infos.append(maybe_episode_info)
         return episode_infos
-    
+
+
+    def get_step_infos(self, info):
+        step_infos = []
+        keys_to_remove = ["episode", "final_observation", "env_id", "players", "elapsed_step"]
+        info_keys = [info_key for info_key in list(info.keys()) if info_key not in keys_to_remove]
+        if len(info_keys) > 0:
+            for i in range(info[info_keys[0]].shape[0]):
+                step_info = {}
+                for key in info_keys:
+                    step_info[key] = info[key][i]
+                step_infos.append(step_info)
+        return step_infos    
+
 
     def get_final_observation(self, info, id):
         return info["final_observation"][id]
