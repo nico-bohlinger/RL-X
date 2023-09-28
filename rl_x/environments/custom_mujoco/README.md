@@ -1,8 +1,9 @@
 # Custom MuJoCo Environments
 
-Contains an example for an custom MuJoCo environment.
+Contains an example for a custom MuJoCo environment.
 
-The example uses the Ant robot and the task is to track a given local velocity command.
+This example can be used as a template for other custom MuJoCo environments. It contains:
+- All necessary handling of the MuJoCo physics engine directly via its Python bindings to form a stand-alone environment class
+- Implementation of a GLFW viewer for rendering
 
-
-This example can be used as a template for other custom MuJoCo environments, as it contains all necessary handling of the MuJoCo physics engine via its Python bindings and an implementation of a GLFW viewer.
+More specifically, the example uses the Ant robot and defines as the task to track a given velocity command.
