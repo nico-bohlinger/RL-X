@@ -17,6 +17,7 @@ import tensorflow_probability
 tfp = tensorflow_probability.substrates.jax
 tfd = tensorflow_probability.substrates.jax.distributions
 
+from rl_x.algorithms.mpo.flax.default_config import get_config
 from rl_x.algorithms.mpo.flax.policy import get_policy
 from rl_x.algorithms.mpo.flax.critic import get_critic
 from rl_x.algorithms.mpo.flax.replay_buffer import ReplayBuffer
@@ -569,7 +570,11 @@ class MPO():
 
         config_file_name = "_".join(splitted_checkpoint_name[:-2]) + "_config_" + splitted_checkpoint_name[-1]
         with open(f"{checkpoint_dir}/{config_file_name}", "rb") as file:
-            config.algorithm = pickle.load(file)["config_algorithm"]
+            loaded_algorithm_config = pickle.load(file)["config_algorithm"]
+        default_algorithm_config = get_config(config.algorithm.name)
+        for key, value in loaded_algorithm_config.items():
+            if config.algorithm[key] == default_algorithm_config[key]:
+                config.algorithm[key] = value
         model = MPO(config, env, run_path, writer)
 
         jax_file_name = "_".join(splitted_checkpoint_name[:-1]) + "_"

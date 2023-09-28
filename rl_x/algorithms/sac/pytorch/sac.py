@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import wandb
 
+from rl_x.algorithms.sac.pytorch.default_config import get_config
 from rl_x.algorithms.sac.pytorch.policy import get_policy
 from rl_x.algorithms.sac.pytorch.critic import get_critic
 from rl_x.algorithms.sac.pytorch.replay_buffer import ReplayBuffer
@@ -315,7 +316,11 @@ class SAC():
 
     def load(config, env, run_path, writer):
         checkpoint = torch.load(config.runner.load_model)
-        config.algorithm = checkpoint["config_algorithm"]
+        loaded_algorithm_config = checkpoint["config_algorithm"]
+        default_algorithm_config = get_config(config.algorithm.name)
+        for key, value in loaded_algorithm_config.items():
+            if config.algorithm[key] == default_algorithm_config[key]:
+                config.algorithm[key] = value
         model = SAC(config, env, run_path, writer)
         model.policy.load_state_dict(checkpoint["policy_state_dict"])
         model.q1.load_state_dict(checkpoint["q1_state_dict"])

@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 import wandb
 
+from rl_x.algorithms.espo.pytorch.default_config import get_config
 from rl_x.algorithms.espo.pytorch.policy import get_policy
 from rl_x.algorithms.espo.pytorch.critic import get_critic
 from rl_x.algorithms.espo.pytorch.batch import Batch
@@ -340,7 +341,11 @@ class ESPO:
 
     def load(config, env, run_path, writer):
         checkpoint = torch.load(config.runner.load_model)
-        config.algorithm = checkpoint["config_algorithm"]
+        loaded_algorithm_config = checkpoint["config_algorithm"]
+        default_algorithm_config = get_config(config.algorithm.name)
+        for key, value in loaded_algorithm_config.items():
+            if config.algorithm[key] == default_algorithm_config[key]:
+                config.algorithm[key] = value
         model = ESPO(config, env, run_path, writer)
         model.policy.load_state_dict(checkpoint["policy_state_dict"])
         model.critic.load_state_dict(checkpoint["critic_state_dict"])
