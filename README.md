@@ -82,3 +82,17 @@ cd experiments
 python experiment.py
 ```
 Detailed instructions can be found in the README file in the experiments directory.
+
+
+## Citation
+If you use RL-X in your research, please cite the following [preprint](https://arxiv.org/abs/2310.13396):
+```bibtex
+@misc{bohlinger2023rlx,
+      title={RL-X: A Deep Reinforcement Learning Library (not only) for RoboCup}, 
+      author={Nico Bohlinger and Klaus Dorer},
+      year={2023},
+      eprint={2310.13396},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO}
+}
+```
