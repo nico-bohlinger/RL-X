@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "RL-X: A framework for Reinforcement Learning research"
 authors = [{name = "Nico Bohlinger", email = "nico.bohlinger@gmail.com"}]
 license = {text = "MIT License"}
-dynamic = ["readme"]
+readme = "README.md"
 dependencies = [
     "absl-py>=1.4.0",
     "ml-collections>=0.1.1",

@@ -1,5 +1,8 @@
 *.egg-info
 __pycache__/
+dist/
 .vscode
+.DS_Store
+
 runs/
 wandb/
