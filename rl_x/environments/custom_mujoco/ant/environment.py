@@ -33,7 +33,7 @@ class Ant(gym.Env):
 
     def reset(self, seed=None):
         self.episode_step = 0
-        self.previous_action = np.zeros(self.model.nu)
+        self.current_action = np.zeros(self.model.nu)
         
         qpos = np.zeros(self.model.nq)
         qpos[2] = 0.75  # z position
@@ -62,14 +62,13 @@ class Ant(gym.Env):
             self.viewer.render(self.data)
         
         self.episode_step += 1
+        self.current_action = action.copy()
 
         next_state = self.get_observation()
         reward, r_info = self.get_reward()
         terminated = self.data.qpos[2] < 0.35
         truncated = self.episode_step >= self.horizon
         info = {**r_info}
-
-        self.previous_action = action.copy()
 
         return next_state, reward, terminated, truncated, info
 
@@ -90,7 +89,7 @@ class Ant(gym.Env):
             joint_positions, joint_velocities,
             local_linear_velocities, local_angular_velocities,
             projected_gravity_vector,
-            self.previous_action
+            self.current_action
         ])
         
         return observation
