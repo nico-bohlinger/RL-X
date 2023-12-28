@@ -1,5 +1,4 @@
 import os
-import random
 import logging
 import time
 from collections import deque
@@ -48,33 +47,80 @@ class PPO:
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
         self.nr_minibatches = self.batch_size // self.minibatch_size
 
-        self.device = torch.device("cuda" if config.algorithm.device == "gpu" and torch.cuda.is_available() else "cpu")
+        if config.algorithm.device == "gpu" and torch.cuda.is_available():
+            device_name = "cuda"
+        elif config.algorithm.device == "mps" and torch.backends.mps.is_available() and torch.backends.mps.is_built():
+            device_name = "mps"
+        else:
+            device_name = "cpu"
+        self.device = torch.device(device_name)
         rlx_logger.info(f"Using device: {self.device}")
 
-        random.seed(self.seed)
-        np.random.seed(self.seed)
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
 
-        self.os_shape = env.observation_space.shape
-        self.as_shape = env.action_space.shape
+        self.os_shape = env.get_single_observation_space_shape()
+        self.as_shape = env.get_single_action_space_shape()
 
-        self.policy = get_policy(config, env, self.device).to(self.device)
+        self.policy = torch.compile(get_policy(config, env, self.device).to(self.device), mode="default")
+        self.critic = torch.compile(get_critic(config, env).to(self.device), mode="default")
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
-
-        self.critic = get_critic(config, env).to(self.device)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate)
 
         if self.save_model:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
 
-
+    
     def train(self):
+        @torch.jit.script
+        def calculate_gae_advantages_and_returns(rewards, terminations, values, next_values, gamma: float, gae_lambda: float):
+            delta = rewards + gamma * next_values * (1 - terminations) - values
+            advantages = torch.zeros_like(rewards)
+            lastgaelam = torch.zeros_like(rewards[0])
+            for t in range(values.shape[0] - 2, -1, -1):
+                lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
+            returns = advantages + values
+            return advantages, returns
+
+
+        @torch.compile(mode="default")
+        def policy_loss_fn(policy, states, actions, log_probs, advantages):
+            new_log_prob, entropy = policy.get_logprob_entropy(states, actions)
+            logratio = new_log_prob - log_probs
+            ratio = logratio.exp()
+
+            with torch.no_grad():
+                log_ratio = new_log_prob - log_probs
+                approx_kl_div = torch.mean((torch.exp(log_ratio) - 1) - log_ratio)
+                clip_fraction = torch.mean((torch.abs(ratio - 1) > self.clip_range).float())
+
+            minibatch_advantages = advantages
+            minibatch_advantages = (minibatch_advantages - minibatch_advantages.mean()) / (minibatch_advantages.std() + 1e-8)
+
+            pg_loss1 = -minibatch_advantages * ratio
+            pg_loss2 = -minibatch_advantages * torch.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
+            pg_loss = torch.maximum(pg_loss1, pg_loss2).mean()
+
+            entropy_loss = entropy.mean()
+            loss = pg_loss - self.entropy_coef * entropy_loss
+
+            return loss, pg_loss, entropy_loss, approx_kl_div, clip_fraction
+
+
+        @torch.compile(mode="default")
+        def critic_loss_fn(critic, states, returns):
+            new_value = critic.get_value(states).reshape(-1)
+            critic_loss = (0.5 * (new_value - returns) ** 2).mean()
+
+            return self.critic_coef * critic_loss, critic_loss
+
+
         self.set_train_mode()
 
         batch = Batch(
             states = torch.zeros((self.nr_steps, self.nr_envs) + self.os_shape, dtype=torch.float32).to(self.device),
+            next_states = torch.zeros((self.nr_steps, self.nr_envs) + self.os_shape, dtype=torch.float32).to(self.device),
             actions = torch.zeros((self.nr_steps, self.nr_envs) + self.as_shape, dtype=torch.float32).to(self.device),
             rewards = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
             values = torch.zeros((self.nr_steps, self.nr_envs), dtype=torch.float32).to(self.device),
@@ -85,12 +131,9 @@ class PPO:
         )
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
-        episode_info_buffer = deque(maxlen=100 * self.nr_envs)
-        step_info_buffer = deque(maxlen=self.nr_steps * self.nr_envs)
-        time_metrics_buffer = deque(maxlen=1)
-        optimization_metrics_buffer = deque(maxlen=1)
         
-        state = torch.tensor(self.env.reset(), dtype=torch.float32).to(self.device)
+        state, _ = self.env.reset()
+        state = torch.tensor(state, dtype=torch.float32).to(self.device)
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -101,7 +144,8 @@ class PPO:
         
 
             # Acting
-            episode_info_buffer = deque(maxlen=100)
+            dones_this_rollout = 0
+            step_info_collection = {}
             for step in range(self.nr_steps):
                 with torch.no_grad():
                     action, processed_action, log_prob = self.policy.get_action_logprob(state)
@@ -112,12 +156,14 @@ class PPO:
                 actual_next_state = next_state.clone()
                 for i, single_done in enumerate(done):
                     if single_done:
-                        maybe_final_observation = self.env.get_final_observation(info, i)
-                        if maybe_final_observation is not None:
-                            actual_next_state[i] = torch.tensor(np.array(maybe_final_observation), dtype=torch.float32).to(self.device)
-                        nr_episodes += 1
+                        actual_next_state[i] = torch.tensor(np.array(info["final_observation"][i], dtype=np.float32), dtype=torch.float32).to(self.device)
+                        saving_return_buffer.append(info["final_info"][i]["episode_return"])
+                        dones_this_rollout += 1
+                for key, info_value in self.env.get_logging_info_dict(info).items():
+                    step_info_collection.setdefault(key, []).extend(info_value)
 
                 batch.states[step] = state
+                batch.next_states[step] = actual_next_state
                 batch.actions[step] = action
                 batch.rewards[step] = torch.tensor(reward, dtype=torch.float32).to(self.device)
                 batch.values[step] = value.reshape(-1)
@@ -125,12 +171,7 @@ class PPO:
                 batch.log_probs[step] = log_prob     
                 state = next_state
                 global_step += self.nr_envs
-
-                episode_infos = self.env.get_episode_infos(info)
-                step_infos = self.env.get_step_infos(info)
-                episode_info_buffer.extend(episode_infos)
-                step_info_buffer.extend(step_infos)
-            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info])
+            nr_episodes += dones_this_rollout
             
             acting_end_time = time.time()
             time_metrics["time/acting_time"] = acting_end_time - start_time
@@ -138,18 +179,9 @@ class PPO:
 
             # Calculating advantages and returns
             with torch.no_grad():
-                next_value = self.critic.get_value(actual_next_state).reshape(1, -1)
-            lastgaelam = 0
-            for t in reversed(range(self.nr_steps)):
-                if t == self.nr_steps - 1:
-                    nextvalues = next_value
-                else:
-                    nextvalues = batch.values[t + 1]
-                not_terminated = 1.0 - batch.terminations[t]
-                delta = batch.rewards[t] + self.gamma * nextvalues * not_terminated - batch.values[t]
-                batch.advantages[t] = lastgaelam = delta + self.gamma * self.gae_lambda * not_terminated * lastgaelam
-            batch.returns = batch.advantages + batch.values
-            
+                next_values = self.critic.get_value(batch.next_states).squeeze(-1)
+            batch.advantages, batch.returns = calculate_gae_advantages_and_returns(batch.rewards, batch.terminations, batch.values, next_values, self.gamma, self.gae_lambda)
+
             calc_adv_return_end_time = time.time()
             time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
 
@@ -159,7 +191,9 @@ class PPO:
             if self.anneal_learning_rate:
                 fraction = 1 - (global_step / self.total_timesteps)
                 learning_rate = fraction * self.learning_rate
-                for param_group in self.policy_optimizer.param_groups + self.critic_optimizer.param_groups:
+                for param_group in self.policy_optimizer.param_groups:
+                    param_group["lr"] = learning_rate
+                for param_group in self.critic_optimizer.param_groups:
                     param_group["lr"] = learning_rate
             
             batch_states = batch.states.reshape((-1,) + self.os_shape)
@@ -169,7 +203,7 @@ class PPO:
             batch_values = batch.values.reshape(-1)
             batch_log_probs = batch.log_probs.reshape(-1)
 
-            metrics_list = []
+            optimization_metrics_list = []
             batch_indices = np.arange(self.batch_size)
             for epoch in range(self.nr_epochs):
                 approx_kl_divs = []
@@ -178,38 +212,17 @@ class PPO:
                     end = start + self.minibatch_size
                     minibatch_indices = batch_indices[start:end]
 
-                    # Policy loss
-                    new_log_prob, entropy = self.policy.get_logprob_entropy(batch_states[minibatch_indices], batch_actions[minibatch_indices])
-                    new_value = self.critic.get_value(batch_states[minibatch_indices])
-                    logratio = new_log_prob - batch_log_probs[minibatch_indices]
-                    ratio = logratio.exp()
-
-                    with torch.no_grad():
-                        log_ratio = new_log_prob - batch_log_probs[minibatch_indices]
-                        approx_kl_div = torch.mean((torch.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
-                        approx_kl_divs.append(approx_kl_div.item())
-                    clip_fraction = torch.mean((torch.abs(ratio - 1) > self.clip_range).float())
-
-                    minibatch_advantages = batch_advantages[minibatch_indices]
-                    minibatch_advantages = (minibatch_advantages - minibatch_advantages.mean()) / (minibatch_advantages.std() + 1e-8)
-
-                    pg_loss1 = -minibatch_advantages * ratio
-                    pg_loss2 = -minibatch_advantages * torch.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
-                    pg_loss = torch.maximum(pg_loss1, pg_loss2).mean()
-
-                    entropy_loss = entropy.mean()
-
-                    # Critic loss
-                    new_value = new_value.reshape(-1)
-                    critic_loss = torch.mean(0.5 * (new_value - batch_returns[minibatch_indices]) ** 2)
-
-                    # Combine losses
-                    loss = pg_loss - self.entropy_coef * entropy_loss + self.critic_coef * critic_loss 
+                    # Losses
+                    loss1, pg_loss, entropy_loss, approx_kl_div, clip_fraction = \
+                        policy_loss_fn(self.policy, batch_states[minibatch_indices], batch_actions[minibatch_indices], batch_log_probs[minibatch_indices], batch_advantages[minibatch_indices])
+                    loss2, critic_loss = critic_loss_fn(self.critic, batch_states[minibatch_indices], batch_returns[minibatch_indices])
+                    approx_kl_divs.append(approx_kl_div.item())
 
                     # Backprop
                     self.policy_optimizer.zero_grad()
                     self.critic_optimizer.zero_grad()
-                    loss.backward()
+                    loss1.backward()
+                    loss2.backward()
 
                     policy_grad_norm = 0.0
                     critic_grad_norm = 0.0
@@ -226,7 +239,7 @@ class PPO:
                     self.critic_optimizer.step()
 
                     # Create metrics
-                    metrics = {
+                    optimization_metrics = {
                         "loss/policy_gradient_loss": pg_loss.item(),
                         "loss/critic_loss": critic_loss.item(),
                         "loss/entropy_loss": entropy_loss.item(),
@@ -234,18 +247,17 @@ class PPO:
                         "gradients/policy_grad_norm": policy_grad_norm,
                         "gradients/critic_grad_norm": critic_grad_norm,
                     }
-                    metrics_list.append(metrics)
-
+                    optimization_metrics_list.append(optimization_metrics)
+            
             y_pred, y_true = batch_values.cpu().numpy(), batch_returns.cpu().numpy()
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-            metrics = {key: np.mean([metrics[key] for metrics in metrics_list]) for key in metrics_list[0].keys()}
-            metrics["lr/learning_rate"] = learning_rate
-            metrics["v_value/explained_variance"] = explained_var
-            metrics["policy_ratio/approx_kl"] = np.mean(approx_kl_divs)
-            metrics["policy/std_dev"] = 0 if self.env.get_action_space_type() == ActionSpaceType.DISCRETE else np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy()))
-            optimization_metrics_buffer.append(metrics)
+            optimization_metrics = {key: np.mean([optimization_metrics[key] for optimization_metrics in optimization_metrics_list]) for key in optimization_metrics_list[0].keys()}
+            optimization_metrics["lr/learning_rate"] = learning_rate
+            optimization_metrics["v_value/explained_variance"] = explained_var
+            optimization_metrics["policy_ratio/approx_kl"] = np.mean(approx_kl_divs)
+            optimization_metrics["policy/std_dev"] = 0 if self.env.get_action_space_type() == ActionSpaceType.DISCRETE else np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy()))
 
             nr_updates += self.nr_epochs * self.nr_minibatches
 
@@ -254,9 +266,8 @@ class PPO:
 
 
             # Saving
-            # Only save when the total return buffer (over multiple updates) isn't empty
-            # Also only save when the episode info buffer isn't empty -> there were finished episodes this update
-            if self.save_model and saving_return_buffer and episode_info_buffer:
+            # Also only save when there were finished episodes this update
+            if self.save_model and dones_this_rollout > 0:
                 mean_return = np.mean(saving_return_buffer)
                 if mean_return > self.best_mean_return:
                     self.best_mean_return = mean_return
@@ -266,8 +277,6 @@ class PPO:
             time_metrics["time/saving_time"] = saving_end_time - optimizing_end_time
 
             time_metrics["time/fps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
-
-            time_metrics_buffer.append(time_metrics)
 
 
             # Logging
@@ -279,27 +288,16 @@ class PPO:
 
             rollout_info_metrics = {}
             env_info_metrics = {}
-            if len(episode_info_buffer) > 0:
-                rollout_info_metrics["rollout/episode_reward"] = np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info])
-                rollout_info_metrics["rollout/episode_length"] = np.mean([ep_info["l"] for ep_info in episode_info_buffer if "l" in ep_info])
-                names = list(episode_info_buffer[0].keys())
-                for name in names:
-                    if name != "r" and name != "l" and name != "t":
-                        env_info_metrics[f"env_info/{name}"] = np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info])
-            if len(step_info_buffer) > 0:
-                names = list(step_info_buffer[0].keys())
-                for name in names:
-                    env_info_metrics[f"env_info/{name}"] = np.mean([info[name] for info in step_info_buffer if name in info])
+            if step_info_collection:
+                info_names = list(step_info_collection.keys())
+                for info_name in info_names:
+                    metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
+                    metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
+                    metric_dict[f"{metric_group}/{info_name}"] = np.mean(step_info_collection[info_name])
             
-            mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in time_metrics_buffer[0].keys()}
-            mean_optimization_metrics = {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in optimization_metrics_buffer[0].keys()}
-            combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
+            combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
             for key, value in combined_metrics.items():
                 self.log(f"{key}", value, global_step)
-
-            episode_info_buffer.clear()
-            time_metrics_buffer.clear()
-            optimization_metrics_buffer.clear()
 
             self.end_logging()
 
@@ -361,13 +359,14 @@ class PPO:
         self.set_eval_mode()
         for i in range(episodes):
             done = False
-            state = self.env.reset()
+            episode_return = 0
+            state, _ = self.env.reset()
             while not done:
                 processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
                 done = terminated | truncated
-            return_val = self.env.get_episode_infos(info)[0]["r"]
-            rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
+                episode_return += reward
+            rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
 
 
     def set_train_mode(self):
@@ -378,4 +377,3 @@ class PPO:
     def set_eval_mode(self):
         self.policy.eval()
         self.critic.eval()
-

@@ -1,4 +1,3 @@
-from collections import OrderedDict
 import numpy as np
 import torch
 import torch.nn as nn
@@ -32,9 +31,9 @@ class ContinuousFlatValuesPolicy(nn.Module):
         self.policy_as_high = 1
         self.env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(device)
         self.env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(device)
-        single_os_shape = env.observation_space.shape
+        single_os_shape = env.get_single_observation_space_shape()
         single_as_shape = env.get_single_action_space_shape()
-        
+
         self.policy_mean = nn.Sequential(
             self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
             nn.Tanh(),
@@ -43,7 +42,7 @@ class ContinuousFlatValuesPolicy(nn.Module):
             self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape, dtype=int).item()), std=0.01),
         )
         self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape, dtype=int).item()), np.log(std_dev).item()))
-    
+
 
     def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
         nn.init.orthogonal_(layer.weight, std)
@@ -51,6 +50,7 @@ class ContinuousFlatValuesPolicy(nn.Module):
         return layer
     
 
+    @torch.compile(mode="default")
     def get_action_logprob(self, x):
         action_mean = self.policy_mean(x)
         action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
@@ -62,14 +62,16 @@ class ContinuousFlatValuesPolicy(nn.Module):
         return action, clipped_and_scaled_action, probs.log_prob(action).sum(1)
     
 
+    @torch.compile(mode="default")
     def get_logprob_entropy(self, x, action):
         action_mean = self.policy_mean(x)
         action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         return probs.log_prob(action).sum(1), probs.entropy().sum(1)
+    
 
-
+    @torch.compile(mode="default")
     def get_deterministic_action(self, x):
         with torch.no_grad():
             action = self.policy_mean(x)
@@ -81,15 +83,15 @@ class ContinuousFlatValuesPolicy(nn.Module):
 class DiscreteFlatValuesPolicy(nn.Module):
     def __init__(self, env, nr_hidden_units):
         super().__init__()
-        single_os_shape = env.observation_space.shape
-        single_as_shape = env.get_single_action_space_shape()
+        single_os_shape = env.get_single_observation_space_shape()
+        logit_size = env.action_space.nvec[0]
         
         self.policy_mean = nn.Sequential(
             self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
             nn.Tanh(),
             self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),
-            self.layer_init(nn.Linear(nr_hidden_units, np.prod(single_as_shape, dtype=int).item()), std=0.01),
+            self.layer_init(nn.Linear(nr_hidden_units, logit_size), std=0.01),
         )
     
 
@@ -99,6 +101,7 @@ class DiscreteFlatValuesPolicy(nn.Module):
         return layer
 
 
+    @torch.compile(mode="default")
     def get_action_logprob(self, x):
         action_mean = self.policy_mean(x)
         probs = Categorical(logits=action_mean)
@@ -106,12 +109,14 @@ class DiscreteFlatValuesPolicy(nn.Module):
         return action, action, probs.log_prob(action)
     
 
-    def get_logprob_entropy(self, x, action=None):
+    @torch.compile(mode="default")
+    def get_logprob_entropy(self, x, action):
         action_mean = self.policy_mean(x)
         probs = Categorical(logits=action_mean)
         return probs.log_prob(action), probs.entropy()
     
 
+    @torch.compile(mode="default")
     def get_deterministic_action(self, x):
         with torch.no_grad():
             return self.policy_mean(x).argmax(1)
@@ -124,10 +129,11 @@ class ContinuousImagesPolicy(nn.Module):
         self.policy_as_high = 1
         self.env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(device)
         self.env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(device)
+        single_os_shape = env.get_single_observation_space_shape()
         single_as_shape = env.get_single_action_space_shape()
 
         self.policy_mean = nn.Sequential(
-            self.layer_init(nn.Conv2d(env.observation_space.shape[0], 32, 8, stride=4)),
+            self.layer_init(nn.Conv2d(single_os_shape[0], 32, 8, stride=4)),
             nn.ReLU(),
             self.layer_init(nn.Conv2d(32, 64, 4, stride=2)),
             nn.ReLU(),
@@ -138,7 +144,7 @@ class ContinuousImagesPolicy(nn.Module):
             nn.ReLU(),
             self.layer_init(nn.Linear(512, np.prod(single_as_shape, dtype=int).item()), std=0.01)
         )
-        self.policy_mean(torch.zeros(1, *env.observation_space.shape))  # Init the lazy linear layer
+        self.policy_mean(torch.zeros(1, *single_os_shape))  # Init the lazy linear layer
         self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape, dtype=int).item()), np.log(std_dev)))
     
 
@@ -148,6 +154,7 @@ class ContinuousImagesPolicy(nn.Module):
         return layer
     
 
+    @torch.compile(mode="default")
     def get_action_logprob(self, x):
         action_mean = self.policy_mean(x / 255.0)
         action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
@@ -159,6 +166,7 @@ class ContinuousImagesPolicy(nn.Module):
         return action, clipped_and_scaled_action, probs.log_prob(action).sum(1)
     
 
+    @torch.compile(mode="default")
     def get_logprob_entropy(self, x, action):
         action_mean = self.policy_mean(x / 255.0)
         action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
@@ -167,6 +175,7 @@ class ContinuousImagesPolicy(nn.Module):
         return probs.log_prob(action).sum(1), probs.entropy().sum(1)
     
 
+    @torch.compile(mode="default")
     def get_deterministic_action(self, x):
         with torch.no_grad():
             action = self.policy_mean(x / 255.0)
@@ -178,10 +187,11 @@ class ContinuousImagesPolicy(nn.Module):
 class DiscreteImagesPolicy(nn.Module):
     def __init__(self, env):
         super().__init__()
-        single_as_shape = env.get_single_action_space_shape()
+        single_os_shape = env.get_single_observation_space_shape()
+        logit_size = env.action_space.nvec[0]
 
         self.policy_mean = nn.Sequential(
-            self.layer_init(nn.Conv2d(env.observation_space.shape[0], 32, 8, stride=4)),
+            self.layer_init(nn.Conv2d(single_os_shape[0], 32, 8, stride=4)),
             nn.ReLU(),
             self.layer_init(nn.Conv2d(32, 64, 4, stride=2)),
             nn.ReLU(),
@@ -190,9 +200,9 @@ class DiscreteImagesPolicy(nn.Module):
             nn.Flatten(),
             nn.LazyLinear(512),
             nn.ReLU(),
-            self.layer_init(nn.Linear(512, np.prod(single_as_shape, dtype=int).item()), std=0.01)
+            self.layer_init(nn.Linear(512, logit_size), std=0.01)
         )
-        self.policy_mean(torch.zeros(1, *env.observation_space.shape))  # Init the lazy linear layer
+        self.policy_mean(torch.zeros(1, *single_os_shape))  # Init the lazy linear layer
     
 
     def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
@@ -201,6 +211,7 @@ class DiscreteImagesPolicy(nn.Module):
         return layer
     
 
+    @torch.compile(mode="default")
     def get_action_logprob(self, x):
         action_mean = self.policy_mean(x / 255.0)
         probs = Categorical(logits=action_mean)
@@ -208,12 +219,14 @@ class DiscreteImagesPolicy(nn.Module):
         return action, action, probs.log_prob(action)
     
 
-    def get_logprob_entropy(self, x, action=None):
+    @torch.compile(mode="default")
+    def get_logprob_entropy(self, x, action):
         action_mean = self.policy_mean(x / 255.0)
         probs = Categorical(logits=action_mean)
         return probs.log_prob(action), probs.entropy()
     
 
+    @torch.compile(mode="default")
     def get_deterministic_action(self, x):
         with torch.no_grad():
             return self.policy_mean(x / 255.0).argmax(1)

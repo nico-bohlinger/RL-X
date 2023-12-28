@@ -8,17 +8,17 @@ A framework for Reinforcement Learning research.
 - 💡 **Perfect to understand and prototype algorithms**:
     - One algorithm = One directory -> No backtracking through  parent classes
     - Algorithms can be easily copied out of RL-X
-- ⚒️ **Known DL libraries**: Implementations in PyTorch, TorchScript or JAX (Flax)
-- ⚡ **Maximum speed**: JAX versions utilize JIT compilation -> A lot faster than PyTorch
+- ⚒️ **Known DL libraries**: Implementations in PyTorch or JAX (Flax)
+- ⚡ **Maximum speed**: JAX versions utilize JIT compilation -> A lot faster than PyTorch's JIT
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
 - ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo or pure socket communication
 - 📈 **Experiment tracking**: Console logging, Model saving & loading, Tensorboard, Weights and Biases
 
 
 ## Implemented Algorithms
-- [Proximal Policy Optimization (PPO)](https://arxiv.org/abs/1707.06347) in PyTorch, TorchScript, Flax
-- [Early Stopping Policy Optimization (ESPO)](https://arxiv.org/abs/2202.00079) in PyTorch, TorchScript, Flax
-- [Soft Actor Critic (SAC)](https://arxiv.org/abs/1801.01290) in PyTorch, TorchScript, Flax
+- [Proximal Policy Optimization (PPO)](https://arxiv.org/abs/1707.06347) in PyTorch, Flax
+- [Early Stopping Policy Optimization (ESPO)](https://arxiv.org/abs/2202.00079) in PyTorch, Flax
+- [Soft Actor Critic (SAC)](https://arxiv.org/abs/1801.01290) in PyTorch, Flax
 - [Randomized Ensembled Double Q-Learning (REDQ)](https://arxiv.org/abs/2101.05982) in Flax
 - [Dropout Q-Functions (DroQ)](https://arxiv.org/abs/2110.02034) in Flax
 - [Truncated Quantile Critics (TQC)](https://arxiv.org/abs/2005.04269) in Flax

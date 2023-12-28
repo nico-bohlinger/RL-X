@@ -13,7 +13,7 @@ dependencies = [
     "absl-py>=1.4.0",
     "ml-collections>=0.1.1",
     "wandb>=0.15.10",
-    "torch>=2.0.1",
+    "torch>=2.1.2",
     "gymnasium[mujoco,classic-control,atari,accept-rom-license,other]>=0.29.1",
     "numpy>=1.24.3",
     "tensorflow>=2.13.0",
@@ -22,21 +22,21 @@ dependencies = [
 
 [project.optional-dependencies]
 jax-addons = [
-    "flax>=0.7.2",
+    "flax>=0.7.5",
     "optax<=0.1.7",
     "chex<=0.1.7",
     "tensorflow_probability>=0.21.0"
 ]
 jax = [
-    "jax[cuda12_pip]>=0.4.14",
+    "jax[cuda12_pip]>=0.4.23",
     "rl_x[jax_addons]"
 ]
 jax_cpu = [
-    "jax[cpu]>=0.4.14",
+    "jax[cpu]>=0.4.23",
     "rl_x[jax_addons]"
 ]
 envpool = [
-    "envpool>=0.8.3"
+    "envpool>=0.8.4"
 ]
 all = [
     "rl_x[jax,envpool]"

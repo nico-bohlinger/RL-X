@@ -12,13 +12,12 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 - Flax version doesn't accurately linearly anneal the learning rate
 
 **Supported frameworks**
-- PyTorch, TorchScript, JAX (Flax)
+- PyTorch, JAX (Flax)
 
 **Supported action and observation space types**
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions |
 | ----------- | ----------- | ----------- | ----------- | ----------- |
 | PyTorch | ✅ | ❌ | ✅ | ❌ |
-| TorchScript | ✅ | ❌ | ✅ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ |
 
 

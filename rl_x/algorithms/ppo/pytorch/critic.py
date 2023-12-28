@@ -20,7 +20,7 @@ def get_critic(config, env):
 class FlatValuesCritic(nn.Module):
     def __init__(self, env, nr_hidden_units):
         super().__init__()
-        single_os_shape = env.observation_space.shape
+        single_os_shape = env.get_single_observation_space_shape()
 
         self.critic = nn.Sequential(
             self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
@@ -30,13 +30,14 @@ class FlatValuesCritic(nn.Module):
             self.layer_init(nn.Linear(nr_hidden_units, 1), std=1.0),
         )
 
-    
+
     def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
         nn.init.orthogonal_(layer.weight, std)
         nn.init.constant_(layer.bias, bias_const)
         return layer
 
 
+    @torch.compile(mode="default")
     def get_value(self, x):
         return self.critic(x)
 
@@ -44,9 +45,10 @@ class FlatValuesCritic(nn.Module):
 class ImagesCritic(nn.Module):
     def __init__(self, env):
         super().__init__()
+        single_os_shape = env.get_single_observation_space_shape()
 
         self.critic = nn.Sequential(
-            self.layer_init(nn.Conv2d(env.observation_space.shape[0], 32, 8, stride=4)),
+            self.layer_init(nn.Conv2d(single_os_shape[0], 32, 8, stride=4)),
             nn.ReLU(),
             self.layer_init(nn.Conv2d(32, 64, 4, stride=2)),
             nn.ReLU(),
@@ -55,9 +57,9 @@ class ImagesCritic(nn.Module):
             nn.Flatten(),
             nn.LazyLinear(512),
             nn.ReLU(),
-            self.layer_init(nn.Linear(512, 1), std=0.01)
+            self.layer_init(nn.Linear(512, 1), std=1.0)
         )
-        self.critic(torch.zeros(1, *env.observation_space.shape))  # Init the lazy linear layer
+        self.critic(torch.zeros(1, *single_os_shape))  # Init the lazy linear layer
 
     
     def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
@@ -66,5 +68,9 @@ class ImagesCritic(nn.Module):
         return layer
 
 
+    @torch.compile(mode="default")
     def get_value(self, x):
+        if x.ndim == 5:
+            x_shaped = x.reshape(-1, *x.shape[2:])
+            return self.critic(x_shaped / 255.0).reshape(x.shape[0], x.shape[1], 1)
         return self.critic(x / 255.0)

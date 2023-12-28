@@ -15,12 +15,6 @@
 **observation_space_type.py**
 - Defines all possible observation space types
 
-**vec_env.py**
-- Provides a wrapper to vectorize environments
-- Copied from Stable Baselines3
-- Not needed when using EnvPool
-- SubprocVecEnv allows for parallel environments, DummyVecEnv does not but is faster for single environments
-
 **\<environment name\>**
 - Contains either subdirectories or directly the implementation of a concrete environment
 - See below for more details
@@ -41,7 +35,7 @@ gym
 - Registers the environment with the environment manager
 - Needs to import create_env() and get_config() functions for the registration
 - Creates a constant for the environment name which can be imported for running an experiment. The name is extracted from the environment's directory structure.
-    - Example: ```--environment.name="gym.mujoco.humanoid_v4"```
+    - Example: ```--environment.name=gym.mujoco.humanoid_v4```
     - See: ```experiments/start_experiment.py```
 
 **create_env.py**

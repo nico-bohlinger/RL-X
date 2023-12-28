@@ -11,13 +11,12 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 - Based on the PPO-Clip version: Clipping the ratio of the new and old policy
 
 **Supported frameworks**
-- PyTorch, TorchScript, JAX (Flax)
+- PyTorch, JAX (Flax)
 
 **Supported action and observation space types**
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions |
 | ----------- | ----------- | ----------- | ----------- | ----------- |
 | PyTorch | ✅ | ✅ | ✅ | ✅ |
-| TorchScript | ✅ | ❌ | ✅ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ |
 
 

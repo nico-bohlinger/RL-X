@@ -1,91 +1,66 @@
 import gymnasium as gym
-import numpy as np
 
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
 
-
-class RecordEpisodeStatistics(gym.Wrapper):
-    def __init__(self, env):
-        super(RecordEpisodeStatistics, self).__init__(env)
-        self.num_envs = getattr(env, "num_envs", 1)
-        self.episode_count = 0
-        self.episode_returns = None
-        self.episode_lengths = None
-
-    def reset(self):
-        observations = self.env.reset()
-        self.episode_returns = np.zeros(self.num_envs, dtype=np.float32)
-        self.episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
-        return observations
-
-    def step(self, action):
-        observations, rewards, terminations, truncations, infos = super(RecordEpisodeStatistics, self).step(
-            action
-        )
-        dones = terminations | truncations
-        self.episode_returns += rewards
-        self.episode_lengths += 1
-        for i in range(len(dones)):
-            if dones[i]:
-                episode_return = self.episode_returns[i]
-                episode_length = self.episode_lengths[i]
-                episode_info = {
-                    "r": episode_return,
-                    "l": episode_length
-                }
-                infos[i]["episode"] = episode_info
-                self.episode_count += 1
-                self.episode_returns[i] = 0
-                self.episode_lengths[i] = 0
-                infos[i]["final_observation"] = np.array(observations[i])
-            else:
-                infos[i]["episode"] = None
-                infos[i]["final_observation"] = None
-        return (observations, rewards, terminations, truncations, infos)
-    
 
 class RLXInfo(gym.Wrapper):
     def __init__(self, env):
         super(RLXInfo, self).__init__(env)
     
 
-    def reset(self):
-        return self.env.reset()
+    def get_logging_info_dict(self, info):
+        all_keys = list(info.keys())
+        keys_to_remove = ["final_observation", "final_info"]
 
+        logging_info = {
+            key: info[key][info["_" + key]].tolist()
+                for key in all_keys if key not in keys_to_remove and not key.startswith("_") and len(info[key][info["_" + key]]) > 0
+        }
+        if "final_info" in info:
+            for is_final_info, final_info in zip(info["_final_info"], info["final_info"]):
+                if is_final_info:   
+                    for key, info_value in final_info.items():
+                        logging_info.setdefault(key, []).append(info_value)
 
-    def get_episode_infos(self, info):
-        episode_infos = []
-        for single_info in info:
-            maybe_episode_info = single_info.get("episode")
-            if maybe_episode_info is not None:
-                episode_infos.append(maybe_episode_info)
-        return episode_infos
-
-
-    def get_step_infos(self, info):
-        step_infos = []
-        keys_to_remove = ["episode", "final_observation", "TimeLimit.truncated"]
-        info_keys = [info_key for info_key in list(info[0].keys()) if info_key not in keys_to_remove]
-        for single_info in info:
-            step_info = {}
-            for key in info_keys:
-                step_info[key] = single_info[key]
-            step_infos.append(step_info)
-        return step_infos
-
-
-    def get_final_observation(self, info, id):
-        return info[id]["final_observation"]
+        return logging_info 
 
     
     def get_action_space_type(self):
         return ActionSpaceType.CONTINUOUS
 
 
-    def get_single_action_space_shape(self):
-        return self.action_space.shape
-
-
     def get_observation_space_type(self):
         return ObservationSpaceType.FLAT_VALUES
+
+
+    def get_single_action_space_shape(self):
+        return (self.action_space.shape[1],)
+
+
+    def get_single_observation_space_shape(self):
+        return (self.observation_space.shape[1],)
+
+
+class RecordEpisodeStatistics(gym.Wrapper):
+    def __init__(self, env):
+        super(RecordEpisodeStatistics, self).__init__(env)
+        self.episode_returns = None
+        self.episode_lengths = None
+
+
+    def reset(self, **kwargs):
+        self.episode_return = 0.0
+        self.episode_length = 0.0
+        return self.env.reset(**kwargs)
+
+
+    def step(self, action):
+        observation, reward, termination, truncation, info = super(RecordEpisodeStatistics, self).step(action)
+        done = termination | truncation
+        self.episode_return += reward
+        self.episode_length += 1
+        if done:
+            info["episode_return"] = self.episode_return
+            info["episode_length"] = self.episode_length
+        return (observation, reward, termination, truncation, info)
