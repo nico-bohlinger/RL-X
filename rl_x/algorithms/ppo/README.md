@@ -15,7 +15,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 
 **Supported observation space, action space and data interface types**
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
-| ----------- | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- |
+| :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
 | PyTorch | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
