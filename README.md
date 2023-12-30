@@ -47,33 +47,17 @@ For further information on the environments and algorithms and how to add your o
 
 
 ## Install
-
+Default installation for a Linux system with a NVIDIA GPU:
 ```
+conda create -n rlx python=3.11.4
+conda activate rlx
 git clone git@github.com:nico-bohlinger/RL-X.git
 cd RL-X
 pip install -e .[all]
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+pip install -U "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
-
-Tested with Python 3.9.7 and 3.11.4.
-
-### Version Overview
-The following RL-X versions can be installed:
-- ```pip install -e .```: Installs only the core dependencies
-- ```pip install -e .[all]```: Core and all optional dependencies (see below)
-- ```pip install -e .[jax]```: Needed to run Flax-based algorithms also on NVIDIA GPUs
-- ```pip install -e .[jax_cpu]```: Needed to run Flax-based algorithms on CPU only
-- ```pip install -e .[envpool]```: Needed to run EnvPool environments
-
-> Remember that multiple versions can be combined, e.g. ```pip install -e .[jax,envpool]```.
-
-### OS Restrictions
-- EnvPool is not supported on MacOS and Windows yet
-- JAX with GPU support is not supported on MacOS and Windows out-of-the-box but can be done with some extra effort (see [here](https://github.com/google/jax) for more information)
-
-To install the out-of-the-box most feature-rich version, use the following commands:
-- Linux: ```pip install -e .[all]```
-- MacOS: ```pip install -e .[jax_cpu]```
-- Windows: ```pip install -e .[jax_cpu]```
+For other configurations, see the detailed installation guide in ```INSTALL.md```.
 
 
 ## Example
@@ -81,7 +65,7 @@ To install the out-of-the-box most feature-rich version, use the following comma
 cd experiments
 python experiment.py
 ```
-Detailed instructions can be found in the README file in the experiments directory.
+Detailed instructions for running experiments can be found in the README file in the experiments directory.
 
 
 ## Citation

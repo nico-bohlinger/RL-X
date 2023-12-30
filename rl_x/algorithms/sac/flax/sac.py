@@ -1,7 +1,6 @@
 import os
 import logging
 import pickle
-import random
 import time
 from collections import deque
 import tree
@@ -15,6 +14,7 @@ from flax.training import checkpoints
 import optax
 import wandb
 
+from rl_x.algorithms.sac.flax.general_properties import GeneralProperties
 from rl_x.algorithms.sac.flax.default_config import get_config
 from rl_x.algorithms.sac.flax.policy import get_policy
 from rl_x.algorithms.sac.flax.critic import get_critic
@@ -54,19 +54,18 @@ class SAC:
             jax.config.update("jax_platform_name", "cpu")
         rlx_logger.info(f"Using device: {jax.default_backend()}")
         
-        random.seed(self.seed)
-        np.random.seed(self.seed)
+        self.rng = np.random.default_rng(self.seed)
         self.key = jax.random.PRNGKey(self.seed)
         self.key, policy_key, critic_key, entropy_coefficient_key = jax.random.split(self.key, 4)
 
-        self.env_as_low = env.action_space.low
-        self.env_as_high = env.action_space.high
+        self.env_as_low = env.single_action_space.low
+        self.env_as_high = env.single_action_space.high
 
         self.policy, self.get_processed_action = get_policy(config, env)
         self.critic = get_critic(config, env)
         
         if self.target_entropy == "auto":
-            self.target_entropy = -np.prod(env.get_single_action_space_shape()).item()
+            self.target_entropy = -np.prod(env.single_action_space.shape).item()
         else:
             self.target_entropy = float(self.target_entropy)
         self.entropy_coefficient = EntropyCoefficient(1.0)
@@ -84,8 +83,8 @@ class SAC:
         self.policy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
         self.entropy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
-        state = jnp.array([self.env.observation_space.sample()])
-        action = jnp.array([self.env.action_space.sample()])
+        state = jnp.array([self.env.single_observation_space.sample()])
+        action = jnp.array([self.env.single_action_space.sample()])
 
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
@@ -205,28 +204,28 @@ class SAC:
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.observation_space.shape, self.env.action_space.shape)
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.single_observation_space.shape, self.env.single_action_space.shape, self.rng)
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
-        episode_info_buffer = deque(maxlen=self.logging_freq)
-        step_info_buffer = deque(maxlen=self.logging_freq)
-        time_metrics_buffer = deque(maxlen=self.logging_freq)
-        optimization_metrics_buffer = deque(maxlen=self.logging_freq)
 
-        state = self.env.reset()
-
+        state, _ = self.env.reset()
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
+        time_metrics_collection = {
+            "time/acting_time": [], "time/optimize_time": [], "time/saving_time": [], "time/fps": []
+        }
+        step_info_collection = {}
+        optimization_metrics_collection = {}
         steps_metrics = {}
         while global_step < self.total_timesteps:
             start_time = time.time()
-            time_metrics = {}
 
 
             # Acting
+            dones_this_rollout = 0
             if global_step < self.learning_starts:
-                processed_action = np.array([self.env.action_space.sample() for _ in range(self.nr_envs)])
+                processed_action = np.array([self.env.single_action_space.sample() for _ in range(self.nr_envs)])
                 action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
             else:
                 action, self.key = get_action(self.policy_state, state, self.key)
@@ -237,30 +236,26 @@ class SAC:
             actual_next_state = next_state.copy()
             for i, single_done in enumerate(done):
                 if single_done:
-                    maybe_final_observation = self.env.get_final_observation(info, i)
-                    if maybe_final_observation is not None:
-                        actual_next_state[i] = maybe_final_observation
-                    nr_episodes += 1
+                    actual_next_state[i] = info["final_observation"][i]
+                    saving_return_buffer.append(info["final_info"][i]["episode_return"])
+                    dones_this_rollout += 1
+            for key, info_value in self.env.get_logging_info_dict(info).items():
+                step_info_collection.setdefault(key, []).extend(info_value)
             
             replay_buffer.add(state, actual_next_state, action, reward, terminated)
 
             state = next_state
             global_step += self.nr_envs
-
-            episode_infos = self.env.get_episode_infos(info)
-            step_infos = self.env.get_step_infos(info)
-            episode_info_buffer.extend(episode_infos)
-            step_info_buffer.extend(step_infos)
-            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos if "r" in ep_info])
+            nr_episodes += dones_this_rollout
 
             acting_end_time = time.time()
-            time_metrics["time/acting_time"] = acting_end_time - start_time
+            time_metrics_collection["time/acting_time"].append(acting_end_time - start_time)
 
 
             # What to do in this step after acting
             should_learning_start = global_step > self.learning_starts
             should_optimize = should_learning_start
-            should_try_to_save = should_learning_start and self.save_model and episode_infos
+            should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
             should_log = global_step % self.logging_freq == 0
 
 
@@ -272,11 +267,12 @@ class SAC:
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
                 self.policy_state, self.critic_state, self.entropy_coefficient_state, optimization_metrics, self.key = update(self.policy_state, self.critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations, self.key)
-                optimization_metrics_buffer.append(optimization_metrics)
+                for key, value in optimization_metrics.items():
+                    optimization_metrics_collection.setdefault(key, []).append(value)
                 nr_updates += 1
             
             optimize_end_time = time.time()
-            time_metrics["time/optimize_time"] = optimize_end_time - acting_end_time
+            time_metrics_collection["time/optimize_time"].append(optimize_end_time - acting_end_time)
 
 
             # Saving
@@ -287,11 +283,9 @@ class SAC:
                     self.save()
             
             saving_end_time = time.time()
-            time_metrics["time/saving_time"] = saving_end_time - optimize_end_time
+            time_metrics_collection["time/saving_time"].append(saving_end_time - optimize_end_time)
 
-            time_metrics["time/fps"] = self.nr_envs / (saving_end_time - start_time)
-
-            time_metrics_buffer.append(time_metrics)
+            time_metrics_collection["time/fps"].append(self.nr_envs / (saving_end_time - start_time))
 
 
             # Logging
@@ -304,27 +298,24 @@ class SAC:
 
                 rollout_info_metrics = {}
                 env_info_metrics = {}
-                if len(episode_info_buffer) > 0:
-                    rollout_info_metrics["rollout/episode_reward"] = np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info])
-                    rollout_info_metrics["rollout/episode_length"] = np.mean([ep_info["l"] for ep_info in episode_info_buffer if "l" in ep_info])
-                    names = list(episode_info_buffer[0].keys())
-                    for name in names:
-                        if name != "r" and name != "l" and name != "t":
-                            env_info_metrics[f"env_info/{name}"] = np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info])
-                if len(step_info_buffer) > 0:
-                    names = list(step_info_buffer[0].keys())
-                    for name in names:
-                        env_info_metrics[f"env_info/{name}"] = np.mean([info[name] for info in step_info_buffer if name in info])
+                if step_info_collection:
+                    info_names = list(step_info_collection.keys())
+                    for info_name in info_names:
+                        metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
+                        metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
+                        metric_dict[f"{metric_group}/{info_name}"] = np.mean(step_info_collection[info_name])
                 
-                mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in time_metrics_buffer[0].keys()}
-                mean_optimization_metrics = {} if not should_learning_start else {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in optimization_metrics_buffer[0].keys()}
-                combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
+                time_metrics = {key: np.mean(value) for key, value in time_metrics_collection.items()}
+                optimization_metrics = {key: np.mean(value) for key, value in optimization_metrics_collection.items()}
+                combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
                 for key, value in combined_metrics.items():
                     self.log(f"{key}", value, global_step)
 
-                episode_info_buffer.clear()
-                time_metrics_buffer.clear()
-                optimization_metrics_buffer.clear()
+                time_metrics_collection = {
+                    "time/acting_time": [], "time/optimize_time": [], "time/saving_time": [], "time/fps": []
+                }       
+                step_info_collection = {}
+                optimization_metrics_collection = {}
 
                 self.end_logging()
 
@@ -413,13 +404,14 @@ class SAC:
         self.set_eval_mode()
         for i in range(episodes):
             done = False
+            episode_return = 0
             state = self.env.reset()
             while not done:
                 processed_action = get_action(self.policy_state, state)
                 state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
                 done = terminated | truncated
-            return_val = self.env.get_episode_infos(info)[0]["r"]
-            rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
+                episode_return += reward
+            rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
     
 
     def set_train_mode(self):
@@ -428,3 +420,7 @@ class SAC:
 
     def set_eval_mode(self):
         ...
+
+
+    def general_properties():
+        return GeneralProperties

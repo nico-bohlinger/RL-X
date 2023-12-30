@@ -1,6 +1,5 @@
 import os
 import logging
-import random
 import time
 from collections import deque
 import numpy as np
@@ -9,15 +8,17 @@ import torch.nn.functional as F
 import torch.optim as optim
 import wandb
 
+from rl_x.algorithms.sac.pytorch.general_properties import GeneralProperties
 from rl_x.algorithms.sac.pytorch.default_config import get_config
 from rl_x.algorithms.sac.pytorch.policy import get_policy
 from rl_x.algorithms.sac.pytorch.critic import get_critic
+from rl_x.algorithms.sac.pytorch.entropy_coefficient import EntropyCoefficient
 from rl_x.algorithms.sac.pytorch.replay_buffer import ReplayBuffer
 
 rlx_logger = logging.getLogger("rl_x")
 
 
-class SAC():
+class SAC:
     def __init__(self, config, env, run_path, writer) -> None:
         self.config = config
         self.env = env
@@ -42,32 +43,31 @@ class SAC():
         self.logging_freq = config.algorithm.logging_freq
         self.nr_hidden_units = config.algorithm.nr_hidden_units
 
-        self.device = torch.device("cuda" if config.algorithm.device == "gpu" and torch.cuda.is_available() else "cpu")
+        if config.algorithm.device == "gpu" and torch.cuda.is_available():
+            device_name = "cuda"
+        elif config.algorithm.device == "mps" and torch.backends.mps.is_available() and torch.backends.mps.is_built():
+            device_name = "mps"
+        else:
+            device_name = "cpu"
+        self.device = torch.device(device_name)
         rlx_logger.info(f"Using device: {self.device}")
 
-        random.seed(self.seed)
-        np.random.seed(self.seed)
+        self.rng = np.random.default_rng(self.seed)
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
 
-        self.policy = get_policy(config, env, self.device).to(self.device)
-        self.q1 = get_critic(config, env).to(self.device)
-        self.q2 = get_critic(config, env).to(self.device)
-        self.q1_target = get_critic(config, env).to(self.device)
-        self.q2_target = get_critic(config, env).to(self.device)
-        self.q1_target.load_state_dict(self.q1.state_dict())
-        self.q2_target.load_state_dict(self.q2.state_dict())
+        self.env_as_low = env.single_action_space.low
+        self.env_as_high = env.single_action_space.high
+
+        self.policy = torch.compile(get_policy(config, env, self.device).to(self.device), mode="default")
+        self.critic = torch.compile(get_critic(config, env, self.device).to(self.device), mode="default")
 
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
-        self.q_optimizer = optim.Adam(list(self.q1.parameters()) + list(self.q2.parameters()), lr=self.learning_rate)
+        self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate)
 
-        if self.target_entropy == "auto":
-            self.target_entropy = -torch.prod(torch.tensor(np.prod(env.get_single_action_space_shape()), dtype=torch.float32).to(self.device)).item()
-        else:
-            self.target_entropy = float(self.target_entropy)
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-        self.alpha = self.log_alpha.exp()
-        self.entropy_optimizer = optim.Adam([self.log_alpha], lr=self.learning_rate)
+        self.entropy_coefficient = torch.compile(EntropyCoefficient(config, env, self.device).to(self.device), mode="default")
+        self.alpha = self.entropy_coefficient()
+        self.entropy_optimizer = optim.Adam([self.entropy_coefficient.log_alpha], lr=self.learning_rate)
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -75,30 +75,56 @@ class SAC():
 
     
     def train(self):
+        @torch.compile(mode="default")
+        def policy_loss_fn(current_log_probs, q1, q2, alpha):
+            min_q = torch.minimum(q1, q2)
+            policy_loss = (alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+
+            return policy_loss, min_q
+        
+
+        @torch.compile(mode="default")
+        def critic_loss_fn(critic, states, next_states, actions, next_actions, next_log_probs, rewards, dones, alpha):
+            with torch.no_grad():
+                next_q1_target = critic.q1_target(next_states, next_actions)
+                next_q2_target = critic.q2_target(next_states, next_actions)
+                min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
+                y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (min_next_q_target - alpha.detach() * next_log_probs)
+
+            q1 = critic.q1(states, actions)
+            q2 = critic.q2(states, actions)
+            q1_loss = F.mse_loss(q1, y)
+            q2_loss = F.mse_loss(q2, y)
+            q_loss = (q1_loss + q2_loss) / 2
+
+            return q_loss
+
+
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.observation_space.shape, self.env.action_space.shape, self.device)
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.single_observation_space.shape, self.env.single_action_space.shape, self.rng, self.device)
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
-        episode_info_buffer = deque(maxlen=self.logging_freq)
-        step_info_buffer = deque(maxlen=self.logging_freq)
-        time_metrics_buffer = deque(maxlen=self.logging_freq)
-        optimization_metrics_buffer = deque(maxlen=self.logging_freq)
 
-        state = self.env.reset()
-
+        state, _ = self.env.reset()
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
+        time_metrics_collection = {
+            "time/acting_time": [], "time/optimize_time": [], "time/saving_time": [], "time/fps": []
+        }
+        step_info_collection = {}
+        optimization_metrics_collection = {}
         steps_metrics = {}
         while global_step < self.total_timesteps:
             start_time = time.time()
-            time_metrics = {}
 
 
             # Acting
+            dones_this_rollout = 0
             if global_step < self.learning_starts:
-                action, processed_action = self.policy.get_random_actions(self.env, self.nr_envs)
+                processed_action = np.array([self.env.single_action_space.sample() for _ in range(self.nr_envs)])
+                action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
             else:
                 action, processed_action, _ = self.policy.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 action = action.detach().cpu().numpy()
@@ -109,30 +135,26 @@ class SAC():
             actual_next_state = next_state.copy()
             for i, single_done in enumerate(done):
                 if single_done:
-                    maybe_final_observation = self.env.get_final_observation(info, i)
-                    if maybe_final_observation is not None:
-                        actual_next_state[i] = maybe_final_observation
-                    nr_episodes += 1
+                    actual_next_state[i] = info["final_observation"][i]
+                    saving_return_buffer.append(info["final_info"][i]["episode_return"])
+                    dones_this_rollout += 1
+            for key, info_value in self.env.get_logging_info_dict(info).items():
+                step_info_collection.setdefault(key, []).extend(info_value)
             
             replay_buffer.add(state, actual_next_state, action, reward, terminated)
 
             state = next_state
             global_step += self.nr_envs
-
-            episode_infos = self.env.get_episode_infos(info)
-            step_infos = self.env.get_step_infos(info)
-            episode_info_buffer.extend(episode_infos)
-            step_info_buffer.extend(step_infos)
-            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_infos if "r" in ep_info])
+            nr_episodes += dones_this_rollout
 
             acting_end_time = time.time()
-            time_metrics["time/acting_time"] = acting_end_time - start_time
+            time_metrics_collection["time/acting_time"].append(acting_end_time - start_time)
 
 
             # What to do in this step after acting
             should_learning_start = global_step > self.learning_starts
             should_optimize = should_learning_start
-            should_try_to_save = should_learning_start and self.save_model and episode_infos
+            should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
             should_log = global_step % self.logging_freq == 0
 
 
@@ -156,40 +178,31 @@ class SAC():
                 # Critic loss
                 with torch.no_grad():
                     next_actions, _, next_log_probs = self.policy.get_action(batch_next_states)
-                    next_q1_target = self.q1_target(batch_next_states, next_actions)
-                    next_q2_target = self.q2_target(batch_next_states, next_actions)
-                    min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
-                    y = batch_rewards.reshape(-1, 1) + self.gamma * (1 - batch_terminations.reshape(-1, 1)) * (min_next_q_target - self.alpha.detach() * next_log_probs)
-
-                q1 = self.q1(batch_states, batch_actions)
-                q2 = self.q2(batch_states, batch_actions)
-                q1_loss = F.mse_loss(q1, y)
-                q2_loss = F.mse_loss(q2, y)
-                q_loss = (q1_loss + q2_loss) / 2
+                
+                q_loss = critic_loss_fn(self.critic, batch_states, batch_next_states, batch_actions, next_actions, next_log_probs, batch_rewards, batch_terminations, self.alpha)
 
                 self.q_optimizer.zero_grad()
                 q_loss.backward()
                 q1_grad_norm = 0.0
                 q2_grad_norm = 0.0
-                for param in self.q1.parameters():
+                for param in self.critic.q1.parameters():
                     q1_grad_norm += param.grad.detach().data.norm(2).item() ** 2
-                for param in self.q2.parameters():
+                for param in self.critic.q2.parameters():
                     q2_grad_norm += param.grad.detach().data.norm(2).item() ** 2
                 critic_grad_norm = q1_grad_norm ** 0.5 + q2_grad_norm ** 0.5
                 self.q_optimizer.step()
 
                 # Update critic targets
-                for param, target_param in zip(self.q1.parameters(), self.q1_target.parameters()):
+                for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
                     target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-                for param, target_param in zip(self.q2.parameters(), self.q2_target.parameters()):
+                for param, target_param in zip(self.critic.q2.parameters(), self.critic.q2_target.parameters()):
                     target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
                 # Policy loss
                 current_actions, _, current_log_probs = self.policy.get_action(batch_states)
-                q1 = self.q1(batch_states, current_actions)
-                q2 = self.q2(batch_states, current_actions)
-                min_q = torch.minimum(q1, q2)
-                policy_loss = (self.alpha.detach() * current_log_probs - min_q).mean()
+                q1 = self.critic.q1(batch_states, current_actions)
+                q2 = self.critic.q2(batch_states, current_actions)
+                policy_loss, min_q = policy_loss_fn(current_log_probs, q1, q2, self.alpha)
 
                 self.policy_optimizer.zero_grad()
                 policy_loss.backward()
@@ -201,14 +214,14 @@ class SAC():
 
                 # Entropy loss
                 entropy = -current_log_probs.detach().mean()
-                entropy_loss = self.alpha * (entropy - self.target_entropy)
+                entropy_loss = self.entropy_coefficient.loss(entropy)
 
                 self.entropy_optimizer.zero_grad()
                 entropy_loss.backward()
-                entropy_grad_norm = self.log_alpha.grad.detach().data.norm(2).item() ** 2
+                entropy_grad_norm = self.entropy_coefficient.log_alpha.grad.detach().data.norm(2).item() ** 2
                 self.entropy_optimizer.step()
 
-                self.alpha = self.log_alpha.exp()
+                self.alpha = self.entropy_coefficient()
 
                 # Create metrics
                 optimization_metrics = {
@@ -224,11 +237,12 @@ class SAC():
                     "q_value/q_value": min_q.mean().item(),
                 }
 
-                optimization_metrics_buffer.append(optimization_metrics)
+                for key, value in optimization_metrics.items():
+                    optimization_metrics_collection.setdefault(key, []).append(value)
                 nr_updates += 1
             
             optimize_end_time = time.time()
-            time_metrics["time/optimize_time"] = optimize_end_time - acting_end_time
+            time_metrics_collection["time/optimize_time"].append(optimize_end_time - acting_end_time)
 
 
             # Saving
@@ -239,11 +253,9 @@ class SAC():
                     self.save()
             
             saving_end_time = time.time()
-            time_metrics["time/saving_time"] = saving_end_time - optimize_end_time
+            time_metrics_collection["time/saving_time"].append(saving_end_time - optimize_end_time)
 
-            time_metrics["time/fps"] = self.nr_envs / (saving_end_time - start_time)
-
-            time_metrics_buffer.append(time_metrics)
+            time_metrics_collection["time/fps"].append(self.nr_envs / (saving_end_time - start_time))
 
 
             # Logging
@@ -256,27 +268,24 @@ class SAC():
 
                 rollout_info_metrics = {}
                 env_info_metrics = {}
-                if len(episode_info_buffer) > 0:
-                    rollout_info_metrics["rollout/episode_reward"] = np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info])
-                    rollout_info_metrics["rollout/episode_length"] = np.mean([ep_info["l"] for ep_info in episode_info_buffer if "l" in ep_info])
-                    names = list(episode_info_buffer[0].keys())
-                    for name in names:
-                        if name != "r" and name != "l" and name != "t":
-                            env_info_metrics[f"env_info/{name}"] = np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info])
-                if len(step_info_buffer) > 0:
-                    names = list(step_info_buffer[0].keys())
-                    for name in names:
-                        env_info_metrics[f"env_info/{name}"] = np.mean([info[name] for info in step_info_buffer if name in info])
+                if step_info_collection:
+                    info_names = list(step_info_collection.keys())
+                    for info_name in info_names:
+                        metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
+                        metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
+                        metric_dict[f"{metric_group}/{info_name}"] = np.mean(step_info_collection[info_name])
                 
-                mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in time_metrics_buffer[0].keys()}
-                mean_optimization_metrics = {} if not should_learning_start else {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in optimization_metrics_buffer[0].keys()}
-                combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
+                time_metrics = {key: np.mean(value) for key, value in time_metrics_collection.items()}
+                optimization_metrics = {key: np.mean(value) for key, value in optimization_metrics_collection.items()}
+                combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
                 for key, value in combined_metrics.items():
                     self.log(f"{key}", value, global_step)
 
-                episode_info_buffer.clear()
-                time_metrics_buffer.clear()
-                optimization_metrics_buffer.clear()
+                time_metrics_collection = {
+                    "time/acting_time": [], "time/optimize_time": [], "time/saving_time": [], "time/fps": []
+                }       
+                step_info_collection = {}
+                optimization_metrics_collection = {}
 
                 self.end_logging()
 
@@ -310,11 +319,11 @@ class SAC():
         save_dict = {
             "config_algorithm": self.config.algorithm,
             "policy_state_dict": self.policy.state_dict(),
-            "q1_state_dict": self.q1.state_dict(),
-            "q2_state_dict": self.q2.state_dict(),
-            "q1_target_state_dict": self.q1_target.state_dict(),
-            "q2_target_state_dict": self.q2_target.state_dict(),
-            "log_alpha": self.log_alpha,
+            "q1_state_dict": self.critic.q1.state_dict(),
+            "q2_state_dict": self.critic.q2.state_dict(),
+            "q1_target_state_dict": self.critic.q1_target.state_dict(),
+            "q2_target_state_dict": self.critic.q2_target.state_dict(),
+            "log_alpha": self.entropy_coefficient.log_alpha,
             "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
             "q_optimizer_state_dict": self.q_optimizer.state_dict(),
             "entropy_optimizer_state_dict": self.entropy_optimizer.state_dict(),
@@ -333,15 +342,14 @@ class SAC():
                 config.algorithm[key] = value
         model = SAC(config, env, run_path, writer)
         model.policy.load_state_dict(checkpoint["policy_state_dict"])
-        model.q1.load_state_dict(checkpoint["q1_state_dict"])
-        model.q2.load_state_dict(checkpoint["q2_state_dict"])
-        model.q1_target.load_state_dict(checkpoint["q1_target_state_dict"])
-        model.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
-        model.log_alpha = checkpoint["log_alpha"]
+        model.critic.q1.load_state_dict(checkpoint["q1_state_dict"])
+        model.critic.q2.load_state_dict(checkpoint["q2_state_dict"])
+        model.critic.q1_target.load_state_dict(checkpoint["q1_target_state_dict"])
+        model.critic.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
+        model.entropy_coefficient.log_alpha = checkpoint["log_alpha"]
         model.policy_optimizer.load_state_dict(checkpoint["policy_optimizer_state_dict"])
         model.q_optimizer.load_state_dict(checkpoint["q_optimizer_state_dict"])
         model.entropy_optimizer.load_state_dict(checkpoint["entropy_optimizer_state_dict"])
-
         return model
 
     
@@ -349,26 +357,31 @@ class SAC():
         self.set_eval_mode()
         for i in range(episodes):
             done = False
+            episode_return = 0
             state = self.env.reset()
             while not done:
                 processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
                 done = terminated | truncated
-            return_val = self.env.get_episode_infos(info)[0]["r"]
-            rlx_logger.info(f"Episode {i + 1} - Return: {return_val}")
+                episode_return += reward
+            rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
 
 
     def set_train_mode(self):
         self.policy.train()
-        self.q1.train()
-        self.q2.train()
-        self.q1_target.train()
-        self.q2_target.train()
+        self.critic.q1.train()
+        self.critic.q2.train()
+        self.critic.q1_target.train()
+        self.critic.q2_target.train()
 
 
     def set_eval_mode(self):
         self.policy.eval()
-        self.q1.eval()
-        self.q2.eval()
-        self.q1_target.eval()
-        self.q2_target.eval()
+        self.critic.q1.eval()
+        self.critic.q2.eval()
+        self.critic.q1_target.eval()
+        self.critic.q2_target.eval()
+
+    
+    def general_properties():
+        return GeneralProperties

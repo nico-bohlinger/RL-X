@@ -8,7 +8,7 @@ class EntropyCoefficient(nn.Module):
         super().__init__()
         self.target_entropy = config.algorithm.target_entropy
         if self.target_entropy == "auto":
-            self.target_entropy = -torch.prod(torch.tensor(np.prod(env.get_single_action_space_shape()), dtype=torch.float32).to(device)).item()
+            self.target_entropy = -torch.prod(torch.tensor(np.prod(env.single_action_space.shape), dtype=torch.float32).to(device)).item()
         else:
             self.target_entropy = float(self.target_entropy)
         self.log_alpha = torch.zeros(1, requires_grad=True, device=device)

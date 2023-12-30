@@ -7,3 +7,7 @@ This example can be used as a template for other custom MuJoCo environments. It 
 - Implementation of a GLFW viewer for rendering
 
 More specifically, the example uses the Ant robot and defines as the task to track a given velocity command.
+
+| Version | Observation space | Action space | Data interface |
+| ----------- | ----------- | ----------- | ----------- |
+| Ant | Flat value | Continuous | Numpy |

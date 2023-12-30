@@ -10,7 +10,5 @@ def get_config(environment_name):
     config.nr_envs = 1
     config.ip = "localhost"
     config.port = 5555
-    config.synchronized = True
-    config.async_threshold = 0.8  # Only relevant if config.synchronized is false
 
     return config

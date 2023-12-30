@@ -1,5 +1,4 @@
 import os
-import random
 import logging
 import pickle
 import time
@@ -8,12 +7,12 @@ import tree
 import numpy as np
 import jax
 import jax.numpy as jnp
-import flax
 from flax.training.train_state import TrainState
 from flax.training import checkpoints
 import optax
 import wandb
 
+from rl_x.algorithms.espo.flax.general_properties import GeneralProperties
 from rl_x.algorithms.espo.flax.default_config import get_config
 from rl_x.algorithms.espo.flax.policy import get_policy
 from rl_x.algorithms.espo.flax.critic import get_critic
@@ -63,13 +62,11 @@ class ESPO:
             jax.config.update("jax_platform_name", "cpu")
         rlx_logger.info(f"Using device: {jax.default_backend()}")
         
-        random.seed(self.seed)
-        np.random.seed(self.seed)
         self.key = jax.random.PRNGKey(self.seed)
         self.key, policy_key, critic_key = jax.random.split(self.key, 3)
 
-        self.os_shape = env.observation_space.shape
-        self.as_shape = env.action_space.shape
+        self.os_shape = env.single_observation_space.shape
+        self.as_shape = env.single_action_space.shape
         
         self.policy, self.get_processed_action = get_policy(config, env)
         self.critic = get_critic(config, env)
@@ -84,7 +81,7 @@ class ESPO:
 
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
-        state = jnp.array([env.observation_space.sample()])
+        state = jnp.array([env.single_observation_space.sample()])
 
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
@@ -247,12 +244,8 @@ class ESPO:
         )
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
-        episode_info_buffer = deque(maxlen=100 * self.nr_envs)
-        step_info_buffer = deque(maxlen=self.nr_steps * self.nr_envs)
-        time_metrics_buffer = deque(maxlen=1)
-        optimization_metrics_buffer = deque(maxlen=1)
 
-        state = self.env.reset()
+        state, _ = self.env.reset()
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -263,7 +256,8 @@ class ESPO:
 
 
             # Acting
-            episode_info_buffer = deque(maxlen=100)
+            dones_this_rollout = 0
+            step_info_collection = {}
             for step in range(self.nr_steps):
                 processed_action, action, value, log_prob, self.key = get_action_and_value(self.policy_state, self.critic_state, state, self.key)
                 next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
@@ -271,10 +265,11 @@ class ESPO:
                 actual_next_state = next_state.copy()
                 for i, single_done in enumerate(done):
                     if single_done:
-                        maybe_final_observation = self.env.get_final_observation(info, i)
-                        if maybe_final_observation is not None:
-                            actual_next_state[i] = maybe_final_observation
-                        nr_episodes += 1
+                        actual_next_state[i] = info["final_observation"][i]
+                        saving_return_buffer.append(info["final_info"][i]["episode_return"])
+                        dones_this_rollout += 1
+                for key, info_value in self.env.get_logging_info_dict(info).items():
+                    step_info_collection.setdefault(key, []).extend(info_value)
 
                 batch.states[step] = state
                 batch.next_states[step] = actual_next_state
@@ -285,13 +280,8 @@ class ESPO:
                 batch.log_probs[step] = log_prob
                 state = next_state
                 global_step += self.nr_envs
+            nr_episodes += dones_this_rollout
 
-                episode_infos = self.env.get_episode_infos(info)
-                step_infos = self.env.get_step_infos(info)
-                episode_info_buffer.extend(episode_infos)
-                step_info_buffer.extend(step_infos)
-            saving_return_buffer.extend([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info])
-            
             acting_end_time = time.time()
             time_metrics["time/acting_time"] = acting_end_time - start_time
 
@@ -304,12 +294,11 @@ class ESPO:
 
 
             # Optimizing
-            self.policy_state, self.critic_state, epoch, metrics, self.key = update(
+            self.policy_state, self.critic_state, epoch, optimization_metrics, self.key = update(
                 self.policy_state, self.critic_state,
                 batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs,
                 self.key
             )
-            optimization_metrics_buffer.append(metrics)
             nr_updates += epoch + 1
 
             optimizing_end_time = time.time()
@@ -317,9 +306,8 @@ class ESPO:
             
 
             # Saving
-            # Only save when the total return buffer (over multiple updates) isn't empty
-            # Also only save when the episode info buffer isn't empty -> there were finished episodes this update
-            if self.save_model and saving_return_buffer and episode_info_buffer:
+            # Also only save when there were finished episodes this update
+            if self.save_model and dones_this_rollout > 0:
                 mean_return = np.mean(saving_return_buffer)
                 if mean_return > self.best_mean_return:
                     self.best_mean_return = mean_return
@@ -329,8 +317,6 @@ class ESPO:
             time_metrics["time/saving_time"] = saving_end_time - optimizing_end_time
 
             time_metrics["time/fps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
-
-            time_metrics_buffer.append(time_metrics)
 
 
             # Logging
@@ -342,27 +328,16 @@ class ESPO:
 
             rollout_info_metrics = {}
             env_info_metrics = {}
-            if len(episode_info_buffer) > 0:
-                rollout_info_metrics["rollout/episode_reward"] = np.mean([ep_info["r"] for ep_info in episode_info_buffer if "r" in ep_info])
-                rollout_info_metrics["rollout/episode_length"] = np.mean([ep_info["l"] for ep_info in episode_info_buffer if "l" in ep_info])
-                names = list(episode_info_buffer[0].keys())
-                for name in names:
-                    if name != "r" and name != "l" and name != "t":
-                        env_info_metrics[f"env_info/{name}"] = np.mean([ep_info[name] for ep_info in episode_info_buffer if name in ep_info])
-            if len(step_info_buffer) > 0:
-                names = list(step_info_buffer[0].keys())
-                for name in names:
-                    env_info_metrics[f"env_info/{name}"] = np.mean([info[name] for info in step_info_buffer if name in info])
+            if step_info_collection:
+                info_names = list(step_info_collection.keys())
+                for info_name in info_names:
+                    metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
+                    metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
+                    metric_dict[f"{metric_group}/{info_name}"] = np.mean(step_info_collection[info_name])
             
-            mean_time_metrics = {key: np.mean([metrics[key] for metrics in time_metrics_buffer]) for key in time_metrics_buffer[0].keys()}
-            mean_optimization_metrics = {key: np.mean([metrics[key] for metrics in optimization_metrics_buffer]) for key in optimization_metrics_buffer[0].keys()}
-            combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **mean_time_metrics, **mean_optimization_metrics}
+            combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
             for key, value in combined_metrics.items():
                 self.log(f"{key}", value, global_step)
-
-            episode_info_buffer.clear()
-            time_metrics_buffer.clear()
-            optimization_metrics_buffer.clear()
 
             self.end_logging()
 
@@ -464,3 +439,7 @@ class ESPO:
 
     def set_eval_mode(self):
         ...
+
+
+    def general_properties():
+        return GeneralProperties

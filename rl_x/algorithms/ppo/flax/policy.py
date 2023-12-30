@@ -10,14 +10,12 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
 def get_policy(config, env):
-    action_space_type = env.get_action_space_type()
-    observation_space_type = env.get_observation_space_type()
+    action_space_type = env.general_properties.action_space_type
+    observation_space_type = env.general_properties.observation_space_type
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return (Policy(env.get_single_action_space_shape(), config.algorithm.std_dev, config.algorithm.nr_hidden_units),
-                get_processed_action_function(jnp.array(env.action_space.low), jnp.array(env.action_space.high)))
-    else:
-        raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
+        return (Policy(env.single_action_space.shape, config.algorithm.std_dev, config.algorithm.nr_hidden_units),
+                get_processed_action_function(jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high)))
 
 
 class Policy(nn.Module):

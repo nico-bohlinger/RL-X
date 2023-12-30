@@ -1,33 +1,25 @@
-import numpy as np
 import torch
 import torch.nn as nn
 
 from rl_x.environments.observation_space_type import ObservationSpaceType
+from rl_x.algorithms.sac.pytorch.q_network import get_q_network
 
 
-def get_critic(config, env):
-    observation_space_type = env.get_observation_space_type()
+def get_critic(config, env, device):
+    observation_space_type = env.general_properties.observation_space_type
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return QNetwork(env, config.algorithm.nr_hidden_units)
-    else:
-        raise ValueError(f"Unsupported observation_space_type: {observation_space_type}")
+        return Critic(config, env, device)
 
 
-class QNetwork(nn.Module):
-    def __init__(self, env, nr_hidden_units):
+class Critic(nn.Module):
+    def __init__(self, config, env, device):
         super().__init__()
-        single_os_shape = env.observation_space.shape
-        single_as_shape = env.get_single_action_space_shape()
+        self.gamma = config.algorithm.gamma
 
-        self.critic = nn.Sequential(
-            nn.Linear((np.prod(single_os_shape, dtype=int) + np.prod(single_as_shape, dtype=int)).item(), nr_hidden_units),
-            nn.ReLU(),
-            nn.Linear(nr_hidden_units, nr_hidden_units),
-            nn.ReLU(),
-            nn.Linear(nr_hidden_units, 1),
-        )
-
-
-    def forward(self, x, a):
-        return self.critic(torch.cat([x, a], dim=1))
+        self.q1 = torch.compile(get_q_network(config, env).to(device), mode="default")
+        self.q2 = torch.compile(get_q_network(config, env).to(device), mode="default")
+        self.q1_target = torch.compile(get_q_network(config, env).to(device), mode="default")
+        self.q2_target = torch.compile(get_q_network(config, env).to(device), mode="default")
+        self.q1_target.load_state_dict(self.q1.state_dict())
+        self.q2_target.load_state_dict(self.q2.state_dict())

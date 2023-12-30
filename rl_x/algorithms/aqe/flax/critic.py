@@ -6,12 +6,10 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
 def get_critic(config, env):
-    observation_space_type = env.get_observation_space_type()
+    observation_space_type = env.general_properties.observation_space_type
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
         return VectorCritic(config.algorithm.nr_hidden_units, config.algorithm.nr_heads_per_net, config.algorithm.ensemble_size)
-    else:
-        raise ValueError(f"Unsupported observation_space_type: {observation_space_type}")
 
 
 class Critic(nn.Module):

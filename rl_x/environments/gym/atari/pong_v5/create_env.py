@@ -1,6 +1,7 @@
 import gymnasium as gym
 
 from rl_x.environments.gym.atari.pong_v5.wrappers import RLXInfo, RecordEpisodeStatistics, NoopResetEnv, MaxAndSkipEnv, EpisodicLifeEnv, FireResetEnv, ClipRewardEnv
+from rl_x.environments.gym.atari.pong_v5.general_properties import GeneralProperties
 
 
 def create_env(config):
@@ -25,6 +26,7 @@ def create_env(config):
     vector_environment_class = gym.vector.SyncVectorEnv if config.environment.nr_envs == 1 else gym.vector.AsyncVectorEnv
     env = vector_environment_class([make_env(config.environment.seed + i) for i in range(config.environment.nr_envs)])
     env = RLXInfo(env)
+    env.general_properties = GeneralProperties
 
     env.reset(seed=config.environment.seed)
     

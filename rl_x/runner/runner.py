@@ -2,7 +2,7 @@ import os
 
 # Silence tensorflow warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-# Guarantee enough memory for CUBLAS to initialize when using jax
+
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
 
 import sys
@@ -16,22 +16,12 @@ from ml_collections import config_dict, config_flags
 import wandb
 import gymnasium as gym
 
-def import_cudnn_based_libraries(algorithm_name):
-    if "torch" in algorithm_name:
-        import torch
-    elif "jax" in algorithm_name or "flax" in algorithm_name:
-        try:
-            import jax
-            jax.random.PRNGKey(0)
-            import flax
-            flax.config.update('flax_use_orbax_checkpointing', False)
-        except:
-            pass
-
 from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.default_config import get_config as get_runner_config
-from rl_x.algorithms.algorithm_manager import get_algorithm_config, get_algorithm_model_class
-from rl_x.environments.environment_manager import get_environment_config, get_environment_create_env
+from rl_x.algorithms.algorithm_manager import get_algorithm_config, get_algorithm_model_class, get_algorithm_general_properties
+from rl_x.environments.environment_manager import get_environment_config, get_environment_create_env, get_environment_general_properties
+from rl_x.environments.data_interface_type import DataInterfaceType
+from rl_x.algorithms.deep_learning_framework_type import DeepLearningFrameworkType
 
 DEFAULT_ALGORITHM = "ppo.pytorch"
 DEFAULT_ENVIRONMENT = "gym.mujoco.humanoid_v4"
@@ -50,7 +40,35 @@ class Runner:
     def __init__(self):
         algorithm_name, environment_name, self._mode = self.parse_arguments()
 
-        import_cudnn_based_libraries(algorithm_name)
+        # Compatibility check
+        algorithm_general_properties = get_algorithm_general_properties(algorithm_name)
+        environment_general_properties = get_environment_general_properties(environment_name)
+        if environment_general_properties.action_space_type not in algorithm_general_properties.action_space_types:
+            raise ValueError("Incompatible action space type")
+        if environment_general_properties.observation_space_type not in algorithm_general_properties.observation_space_types:
+            raise ValueError("Incompatible observation space type")
+        if environment_general_properties.data_interface_type not in algorithm_general_properties.data_interface_types:
+            raise ValueError("Incompatible data interface type")
+
+        # General Deep Learning framework settings
+        algorithm_uses_torch = DeepLearningFrameworkType.TORCH == algorithm_general_properties.deep_learning_framework_type
+        algorithm_uses_jax = DeepLearningFrameworkType.JAX == algorithm_general_properties.deep_learning_framework_type
+        environment_uses_torch = DataInterfaceType.TORCH == environment_general_properties.data_interface_type
+        environment_uses_jax = DataInterfaceType.JAX == environment_general_properties.data_interface_type
+
+        if algorithm_uses_torch or environment_uses_torch:  
+            # Avoids warning when TensorFloat32 is available
+            import torch
+            torch.set_float32_matmul_precision("high")
+            # Silence UserWarning https://github.com/pytorch/pytorch/issues/109842
+            import warnings
+            warnings.filterwarnings("ignore", category=UserWarning, message=".*is deprecated, please use.*")
+        elif algorithm_uses_jax or environment_uses_jax:
+            # Guarantee enough memory for CUBLAS to initialize when using jax
+            os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
+            # Use old flax checkpointing
+            import flax
+            flax.config.update('flax_use_orbax_checkpointing', False)
 
         self._model_class = get_algorithm_model_class(algorithm_name)
         self._create_env = get_environment_create_env(environment_name)

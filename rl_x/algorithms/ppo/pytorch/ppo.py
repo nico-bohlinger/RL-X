@@ -9,6 +9,7 @@ import torch.optim as optim
 import wandb
 
 from rl_x.environments.action_space_type import ActionSpaceType
+from rl_x.algorithms.ppo.pytorch.general_properties import GeneralProperties
 from rl_x.algorithms.ppo.pytorch.default_config import get_config
 from rl_x.algorithms.ppo.pytorch.policy import get_policy
 from rl_x.algorithms.ppo.pytorch.critic import get_critic
@@ -56,11 +57,12 @@ class PPO:
         self.device = torch.device(device_name)
         rlx_logger.info(f"Using device: {self.device}")
 
+        self.rng = np.random.default_rng(self.seed)
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
 
-        self.os_shape = env.get_single_observation_space_shape()
-        self.as_shape = env.get_single_action_space_shape()
+        self.os_shape = env.single_observation_space.shape
+        self.as_shape = env.single_action_space.shape
 
         self.policy = torch.compile(get_policy(config, env, self.device).to(self.device), mode="default")
         self.critic = torch.compile(get_critic(config, env).to(self.device), mode="default")
@@ -207,7 +209,7 @@ class PPO:
             batch_indices = np.arange(self.batch_size)
             for epoch in range(self.nr_epochs):
                 approx_kl_divs = []
-                np.random.shuffle(batch_indices)
+                self.rng.shuffle(batch_indices)
                 for start in range(0, self.batch_size, self.minibatch_size):
                     end = start + self.minibatch_size
                     minibatch_indices = batch_indices[start:end]
@@ -257,7 +259,7 @@ class PPO:
             optimization_metrics["lr/learning_rate"] = learning_rate
             optimization_metrics["v_value/explained_variance"] = explained_var
             optimization_metrics["policy_ratio/approx_kl"] = np.mean(approx_kl_divs)
-            optimization_metrics["policy/std_dev"] = 0 if self.env.get_action_space_type() == ActionSpaceType.DISCRETE else np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy()))
+            optimization_metrics["policy/std_dev"] = 0 if self.env.general_properties.action_space_type == ActionSpaceType.DISCRETE else np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy()))
 
             nr_updates += self.nr_epochs * self.nr_minibatches
 
@@ -377,3 +379,7 @@ class PPO:
     def set_eval_mode(self):
         self.policy.eval()
         self.critic.eval()
+
+
+    def general_properties():
+        return GeneralProperties

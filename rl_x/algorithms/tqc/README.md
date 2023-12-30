@@ -13,10 +13,10 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 **Supported frameworks**
 - JAX (Flax)
 
-**Supported action and observation space types**
-| Version | Flat value obs | Image obs | Contiuous actions | Discrete actions |
-| ----------- | ----------- | ----------- | ----------- | ----------- |
-| JAX (Flax) | ✅ | ❌ | ✅ | ❌ |
+**Supported action space, observation space and data interface types**
+| Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
+| ----------- | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- |
+| JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 
 ## Resources

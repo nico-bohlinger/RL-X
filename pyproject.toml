@@ -13,33 +13,23 @@ dependencies = [
     "absl-py>=1.4.0",
     "ml-collections>=0.1.1",
     "wandb>=0.15.10",
-    "torch>=2.1.2",
     "gymnasium[mujoco,classic-control,atari,accept-rom-license,other]>=0.29.1",
-    "numpy>=1.24.3",
+    "numpy<=1.24.3",
     "tensorflow>=2.13.0",
-    "tensorboard>=2.13.0"
-]
-
-[project.optional-dependencies]
-jax-addons = [
+    "tensorboard>=2.13.0",
+    "jax[cpu]>=0.4.23",
     "flax>=0.7.5",
     "optax<=0.1.7",
     "chex<=0.1.7",
     "tensorflow_probability>=0.21.0"
 ]
-jax = [
-    "jax[cuda12_pip]>=0.4.23",
-    "rl_x[jax_addons]"
-]
-jax_cpu = [
-    "jax[cpu]>=0.4.23",
-    "rl_x[jax_addons]"
-]
+
+[project.optional-dependencies]
 envpool = [
     "envpool>=0.8.4"
 ]
 all = [
-    "rl_x[jax,envpool]"
+    "rl_x[envpool]"
 ]
 
 [project.urls]

@@ -1,8 +1,5 @@
 import gymnasium as gym
 
-from rl_x.environments.action_space_type import ActionSpaceType
-from rl_x.environments.observation_space_type import ObservationSpaceType
-
 
 class RLXInfo(gym.Wrapper):
     def __init__(self, env):
@@ -18,28 +15,13 @@ class RLXInfo(gym.Wrapper):
                 for key in all_keys if key not in keys_to_remove and not key.startswith("_") and len(info[key][info["_" + key]]) > 0
         }
         if "final_info" in info:
-            for is_final_info, final_info in zip(info["_final_info"], info["final_info"]):
-                if is_final_info:   
+            for done, final_info in zip(info["_final_info"], info["final_info"]):
+                if done:   
                     for key, info_value in final_info.items():
-                        logging_info.setdefault(key, []).append(info_value)
+                        if key not in keys_to_remove:
+                            logging_info.setdefault(key, []).append(info_value)
 
         return logging_info 
-
-    
-    def get_action_space_type(self):
-        return ActionSpaceType.CONTINUOUS
-
-
-    def get_observation_space_type(self):
-        return ObservationSpaceType.FLAT_VALUES
-
-
-    def get_single_action_space_shape(self):
-        return (self.action_space.shape[1],)
-
-
-    def get_single_observation_space_shape(self):
-        return (self.observation_space.shape[1],)
 
 
 class RecordEpisodeStatistics(gym.Wrapper):

@@ -12,6 +12,7 @@ from flax.training import checkpoints
 import optax
 import wandb
 
+from rl_x.algorithms.ppo.flax.general_properties import GeneralProperties
 from rl_x.algorithms.ppo.flax.default_config import get_config
 from rl_x.algorithms.ppo.flax.policy import get_policy
 from rl_x.algorithms.ppo.flax.critic import get_critic
@@ -58,8 +59,8 @@ class PPO:
         self.key = jax.random.PRNGKey(self.seed)
         self.key, policy_key, critic_key = jax.random.split(self.key, 3)
 
-        self.os_shape = env.get_single_observation_space_shape()
-        self.as_shape = env.get_single_action_space_shape()
+        self.os_shape = env.single_observation_space.shape
+        self.as_shape = env.single_action_space.shape
         
         self.policy, self.get_processed_action = get_policy(config, env)
         self.critic = get_critic(config, env)
@@ -73,7 +74,7 @@ class PPO:
 
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
-        state = jnp.array([env.observation_space.sample()])
+        state = jnp.array([env.single_observation_space.sample()])
 
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
@@ -100,7 +101,7 @@ class PPO:
     
     def train(self):
         @jax.jit
-        def get_action_and_value(policy_state: TrainState, critic_state: TrainState, state: np.ndarray , key: jax.random.PRNGKey):
+        def get_action_and_value(policy_state: TrainState, critic_state: TrainState, state: np.ndarray, key: jax.random.PRNGKey):
             action_mean, action_logstd = self.policy.apply(policy_state.params, state)
             action_std = jnp.exp(action_logstd)
             key, subkey = jax.random.split(key)
@@ -435,3 +436,7 @@ class PPO:
 
     def set_eval_mode(self):
         ...
+
+
+    def general_properties():
+        return GeneralProperties

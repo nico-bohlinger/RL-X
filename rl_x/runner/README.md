@@ -16,7 +16,7 @@
     - TEST: Runs the testing loop, with ```--runner.nr_test_episodes``` many episodes
     - SHOW_CONFIG: Prints out all available configs of the given algorithm, environment and runner combination
 - Can be set via the command line
-    - Example: ```--runner.mode="train"```
+    - Example: ```--runner.mode=train```
     - See: ```experiments/start_experiment.sh```
 
 **runner.py**

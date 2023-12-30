@@ -2,6 +2,10 @@
 
 Contains a prototype for a custom environment interface with simple socket communication.
 
+| Version | Observation space | Action space | Data interface |
+| ----------- | ----------- | ----------- | ----------- |
+| Prototype | Flat value | Continuous | Numpy |
+
 ## Communication
 The underlying environment has to send an initial encoded message after the connection is established in the following JSON format:
 
@@ -33,7 +37,3 @@ The environment has to respond in the following JSON format:
 }
 ```
 The `extraValueNames` and `extraValues` fields are optional and can be used to provide additional information that will be logged.
-
-## Asynchronous environments
-With the ```--environment.synchronized=False``` flag, the environment does not have to wait for every environment to step.  
-Instead it will only wait for ```--environment.async_threshold=0.8``` percent of the environments to step and fills the remaining slots with dummy (observation, reward, terminated, truncated, info) tuples.

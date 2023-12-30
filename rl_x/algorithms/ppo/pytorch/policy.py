@@ -9,8 +9,8 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
 def get_policy(config, env, device):
-    action_space_type = env.get_action_space_type()
-    observation_space_type = env.get_observation_space_type()
+    action_space_type = env.general_properties.action_space_type
+    observation_space_type = env.general_properties.observation_space_type
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
         return ContinuousFlatValuesPolicy(env, config.algorithm.std_dev, config.algorithm.nr_hidden_units, device)
@@ -20,8 +20,6 @@ def get_policy(config, env, device):
         return ContinuousImagesPolicy(env, config.algorithm.std_dev, device)
     elif action_space_type == ActionSpaceType.DISCRETE and observation_space_type == ObservationSpaceType.IMAGES:
         return DiscreteImagesPolicy(env)
-    else:
-        raise ValueError(f"Unsupported action_space_type: {action_space_type} and observation_space_type: {observation_space_type} combination")
 
 
 class ContinuousFlatValuesPolicy(nn.Module):
@@ -29,10 +27,10 @@ class ContinuousFlatValuesPolicy(nn.Module):
         super().__init__()
         self.policy_as_low = -1
         self.policy_as_high = 1
-        self.env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(device)
-        self.env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(device)
-        single_os_shape = env.get_single_observation_space_shape()
-        single_as_shape = env.get_single_action_space_shape()
+        self.env_as_low = torch.tensor(env.single_action_space.low, dtype=torch.float32).to(device)
+        self.env_as_high = torch.tensor(env.single_action_space.high, dtype=torch.float32).to(device)
+        single_os_shape = env.single_observation_space.shape
+        single_as_shape = env.single_action_space.shape
 
         self.policy_mean = nn.Sequential(
             self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
@@ -83,8 +81,8 @@ class ContinuousFlatValuesPolicy(nn.Module):
 class DiscreteFlatValuesPolicy(nn.Module):
     def __init__(self, env, nr_hidden_units):
         super().__init__()
-        single_os_shape = env.get_single_observation_space_shape()
-        logit_size = env.action_space.nvec[0]
+        single_os_shape = env.single_observation_space.shape
+        logit_size = env.get_single_action_logit_size()
         
         self.policy_mean = nn.Sequential(
             self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
@@ -127,10 +125,10 @@ class ContinuousImagesPolicy(nn.Module):
         super().__init__()
         self.policy_as_low = -1
         self.policy_as_high = 1
-        self.env_as_low = torch.tensor(env.action_space.low, dtype=torch.float32).to(device)
-        self.env_as_high = torch.tensor(env.action_space.high, dtype=torch.float32).to(device)
-        single_os_shape = env.get_single_observation_space_shape()
-        single_as_shape = env.get_single_action_space_shape()
+        self.env_as_low = torch.tensor(env.single_action_space.low, dtype=torch.float32).to(device)
+        self.env_as_high = torch.tensor(env.single_action_space.high, dtype=torch.float32).to(device)
+        single_os_shape = env.single_observation_space.shape
+        single_as_shape = env.single_action_space.shape
 
         self.policy_mean = nn.Sequential(
             self.layer_init(nn.Conv2d(single_os_shape[0], 32, 8, stride=4)),
@@ -187,8 +185,8 @@ class ContinuousImagesPolicy(nn.Module):
 class DiscreteImagesPolicy(nn.Module):
     def __init__(self, env):
         super().__init__()
-        single_os_shape = env.get_single_observation_space_shape()
-        logit_size = env.action_space.nvec[0]
+        single_os_shape = env.single_observation_space.shape
+        logit_size = env.get_single_action_logit_size()
 
         self.policy_mean = nn.Sequential(
             self.layer_init(nn.Conv2d(single_os_shape[0], 32, 8, stride=4)),
