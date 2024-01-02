@@ -21,5 +21,7 @@ def get_config(algorithm_name):
     config.max_grad_norm = 0.5
     config.std_dev = 1.0
     config.nr_hidden_units = 256
+    config.evaluation_frequency = 204800  # -1 to disable
+    config.evaluation_episodes = 10
 
     return config

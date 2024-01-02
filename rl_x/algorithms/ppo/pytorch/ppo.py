@@ -45,8 +45,13 @@ class PPO:
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
         self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.evaluation_frequency = config.algorithm.evaluation_frequency
+        self.evaluation_episodes = config.algorithm.evaluation_episodes
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
         self.nr_minibatches = self.batch_size // self.minibatch_size
+
+        if self.evaluation_frequency % self.nr_steps * self.nr_envs != 0 and self.evaluation_frequency != -1:
+            raise ValueError("Evaluation frequency must be a multiple of the number of steps and environments.")
 
         if config.algorithm.device == "gpu" and torch.cuda.is_available():
             device_name = "cuda"
@@ -267,6 +272,36 @@ class PPO:
             time_metrics["time/optimizing_time"] = optimizing_end_time - calc_adv_return_end_time
 
 
+            # Evaluating
+            evaluation_metrics = {}
+            if global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1:
+                self.set_eval_mode()
+                state, _ = self.env.reset()
+                eval_nr_episodes = 0
+                evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
+                while True:
+                    with torch.no_grad():
+                        processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                    state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
+                    done = terminated | truncated
+                    for i, single_done in enumerate(done):
+                        if single_done:
+                            eval_nr_episodes += 1
+                            evaluation_metrics["eval/episode_return"].append(info["final_info"][i]["episode_return"])
+                            evaluation_metrics["eval/episode_length"].append(info["final_info"][i]["episode_length"])
+                            if eval_nr_episodes == self.evaluation_episodes:
+                                break
+                    if eval_nr_episodes == self.evaluation_episodes:
+                        break
+                evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
+                state, _ = self.env.reset()
+                state = torch.tensor(state, dtype=torch.float32).to(self.device)
+                self.set_train_mode()
+            
+            evaluating_end_time = time.time()
+            time_metrics["time/evaluating_time"] = evaluating_end_time - optimizing_end_time
+
+
             # Saving
             # Also only save when there were finished episodes this update
             if self.save_model and dones_this_rollout > 0:
@@ -276,7 +311,7 @@ class PPO:
                     self.save()
             
             saving_end_time = time.time()
-            time_metrics["time/saving_time"] = saving_end_time - optimizing_end_time
+            time_metrics["time/saving_time"] = saving_end_time - evaluating_end_time
 
             time_metrics["time/fps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
 
@@ -297,7 +332,7 @@ class PPO:
                     metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
                     metric_dict[f"{metric_group}/{info_name}"] = np.mean(step_info_collection[info_name])
             
-            combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
+            combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
             for key, value in combined_metrics.items():
                 self.log(f"{key}", value, global_step)
 
@@ -364,7 +399,8 @@ class PPO:
             episode_return = 0
             state, _ = self.env.reset()
             while not done:
-                processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                with torch.no_grad():
+                    processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
                 done = terminated | truncated
                 episode_return += reward

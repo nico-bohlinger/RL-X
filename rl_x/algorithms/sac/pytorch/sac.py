@@ -40,8 +40,10 @@ class SAC:
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
         self.target_entropy = config.algorithm.target_entropy
-        self.logging_freq = config.algorithm.logging_freq
+        self.logging_frequency = config.algorithm.logging_frequency
         self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.evaluation_frequency = config.algorithm.evaluation_frequency
+        self.evaluation_episodes = config.algorithm.evaluation_episodes
 
         if config.algorithm.device == "gpu" and torch.cuda.is_available():
             device_name = "cuda"
@@ -110,11 +112,10 @@ class SAC:
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
-        time_metrics_collection = {
-            "time/acting_time": [], "time/optimize_time": [], "time/saving_time": [], "time/fps": []
-        }
+        time_metrics_collection = {}
         step_info_collection = {}
         optimization_metrics_collection = {}
+        evaluation_metrics_collection = {}
         steps_metrics = {}
         while global_step < self.total_timesteps:
             start_time = time.time()
@@ -148,14 +149,15 @@ class SAC:
             nr_episodes += dones_this_rollout
 
             acting_end_time = time.time()
-            time_metrics_collection["time/acting_time"].append(acting_end_time - start_time)
+            time_metrics_collection.setdefault("time/acting_time", []).append(acting_end_time - start_time)
 
 
             # What to do in this step after acting
             should_learning_start = global_step > self.learning_starts
             should_optimize = should_learning_start
+            should_evaluate = global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1
             should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
-            should_log = global_step % self.logging_freq == 0
+            should_log = global_step % self.logging_frequency == 0
 
 
             # Optimizing - Anneal learning rate
@@ -241,8 +243,34 @@ class SAC:
                     optimization_metrics_collection.setdefault(key, []).append(value)
                 nr_updates += 1
             
-            optimize_end_time = time.time()
-            time_metrics_collection["time/optimize_time"].append(optimize_end_time - acting_end_time)
+            optimizing_end_time = time.time()
+            time_metrics_collection.setdefault("time/optimizing_time", []).append(optimizing_end_time - acting_end_time)
+
+
+            # Evaluating
+            if should_evaluate:
+                self.set_eval_mode()
+                state, _ = self.env.reset()
+                eval_nr_episodes = 0
+                while True:
+                    with torch.no_grad():
+                        processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                    state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
+                    done = terminated | truncated
+                    for i, single_done in enumerate(done):
+                        if single_done:
+                            eval_nr_episodes += 1
+                            evaluation_metrics_collection.setdefault("eval/episode_return", []).append(info["final_info"][i]["episode_return"])
+                            evaluation_metrics_collection.setdefault("eval/episode_length", []).append(info["final_info"][i]["episode_length"])
+                            if eval_nr_episodes == self.evaluation_episodes:
+                                break
+                    if eval_nr_episodes == self.evaluation_episodes:
+                        break
+                state, _ = self.env.reset()
+                self.set_train_mode()
+            
+            evaluating_end_time = time.time()
+            time_metrics_collection.setdefault("time/evaluating_time", []).append(evaluating_end_time - optimizing_end_time)
 
 
             # Saving
@@ -253,9 +281,9 @@ class SAC:
                     self.save()
             
             saving_end_time = time.time()
-            time_metrics_collection["time/saving_time"].append(saving_end_time - optimize_end_time)
+            time_metrics_collection.setdefault("time/saving_time", []).append(saving_end_time - evaluating_end_time)
 
-            time_metrics_collection["time/fps"].append(self.nr_envs / (saving_end_time - start_time))
+            time_metrics_collection.setdefault("time/fps", []).append(self.nr_envs / (saving_end_time - start_time))
 
 
             # Logging
@@ -277,15 +305,15 @@ class SAC:
                 
                 time_metrics = {key: np.mean(value) for key, value in time_metrics_collection.items()}
                 optimization_metrics = {key: np.mean(value) for key, value in optimization_metrics_collection.items()}
-                combined_metrics = {**rollout_info_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
+                evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics_collection.items()}
+                combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
                 for key, value in combined_metrics.items():
                     self.log(f"{key}", value, global_step)
 
-                time_metrics_collection = {
-                    "time/acting_time": [], "time/optimize_time": [], "time/saving_time": [], "time/fps": []
-                }       
+                time_metrics_collection = {}
                 step_info_collection = {}
                 optimization_metrics_collection = {}
+                evaluation_metrics_collection = {}
 
                 self.end_logging()
 
@@ -360,7 +388,8 @@ class SAC:
             episode_return = 0
             state = self.env.reset()
             while not done:
-                processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                with torch.no_grad():
+                    processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
                 done = terminated | truncated
                 episode_return += reward

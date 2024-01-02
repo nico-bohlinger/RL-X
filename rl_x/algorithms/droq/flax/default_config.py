@@ -23,6 +23,8 @@ def get_config(algorithm_name):
     config.log_std_min = -20
     config.log_std_max = 2
     config.nr_hidden_units = 256
-    config.logging_freq = 100
+    config.logging_frequency = 100
+    config.evaluation_frequency = 200000  # -1 to disable
+    config.evaluation_episodes = 10
 
     return config

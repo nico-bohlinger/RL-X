@@ -39,6 +39,8 @@ def get_config(algorithm_name):
     config.stability_epsilon = 1e-8
     config.nr_hidden_units = 256
     config.logging_all_metrics = False  # Some metrics seem to cost performance when logged, so they get only logged if True
-    config.logging_freq = 3000
+    config.logging_frequency = 3000
+    config.evaluation_frequency = 200000  # -1 to disable
+    config.evaluation_episodes = 10
 
     return config
