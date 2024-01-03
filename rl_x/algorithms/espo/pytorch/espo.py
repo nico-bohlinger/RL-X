@@ -48,7 +48,7 @@ class ESPO:
         self.evaluation_episodes = config.algorithm.evaluation_episodes
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
 
-        if self.evaluation_frequency % self.nr_steps * self.nr_envs != 0 and self.evaluation_frequency != -1:
+        if self.evaluation_frequency % (self.nr_steps * self.nr_envs) != 0 and self.evaluation_frequency != -1:
             raise ValueError("Evaluation frequency must be a multiple of the number of steps and environments.")
 
         if config.algorithm.delta_calc_operator == "mean":
@@ -164,8 +164,8 @@ class ESPO:
                 actual_next_state = next_state.clone()
                 for i, single_done in enumerate(done):
                     if single_done:
-                        actual_next_state[i] = torch.tensor(np.array(info["final_observation"][i], dtype=np.float32), dtype=torch.float32).to(self.device)
-                        saving_return_buffer.append(info["final_info"][i]["episode_return"])
+                        actual_next_state[i] = torch.tensor(np.array(self.env.get_final_observation_at_index(info, i), dtype=np.float32), dtype=torch.float32).to(self.device)
+                        saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
                         dones_this_rollout += 1
                 for key, info_value in self.env.get_logging_info_dict(info).items():
                     step_info_collection.setdefault(key, []).extend(info_value)
@@ -287,8 +287,8 @@ class ESPO:
                     for i, single_done in enumerate(done):
                         if single_done:
                             eval_nr_episodes += 1
-                            evaluation_metrics["eval/episode_return"].append(info["final_info"][i]["episode_return"])
-                            evaluation_metrics["eval/episode_length"].append(info["final_info"][i]["episode_length"])
+                            evaluation_metrics["eval/episode_return"].append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                            evaluation_metrics["eval/episode_length"].append(self.env.get_final_info_value_at_index(info, "episode_length", i))
                             if eval_nr_episodes == self.evaluation_episodes:
                                 break
                     if eval_nr_episodes == self.evaluation_episodes:
@@ -313,7 +313,7 @@ class ESPO:
             saving_end_time = time.time()
             time_metrics["time/saving_time"] = saving_end_time - evaluating_end_time
 
-            time_metrics["time/fps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
+            time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
 
 
             # Logging
@@ -330,7 +330,9 @@ class ESPO:
                 for info_name in info_names:
                     metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
                     metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
-                    metric_dict[f"{metric_group}/{info_name}"] = np.mean(step_info_collection[info_name])
+                    mean_value = np.mean(step_info_collection[info_name])
+                    if mean_value == mean_value:  # Check if mean_value is NaN
+                        metric_dict[f"{metric_group}/{info_name}"] = mean_value
             
             combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
             for key, value in combined_metrics.items():

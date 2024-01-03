@@ -21,7 +21,15 @@ class RLXInfo(gym.Wrapper):
                         if key not in keys_to_remove:
                             logging_info.setdefault(key, []).append(info_value)
 
-        return logging_info 
+        return logging_info
+    
+
+    def get_final_observation_at_index(self, info, index):
+        return info["final_observation"][index]
+    
+
+    def get_final_info_value_at_index(self, info, key, index):
+        return info["final_info"][index][key]
 
 
     def get_single_action_logit_size(self):

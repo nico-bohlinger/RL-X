@@ -21,6 +21,7 @@ from rl_x.runner.default_config import get_config as get_runner_config
 from rl_x.algorithms.algorithm_manager import get_algorithm_config, get_algorithm_model_class, get_algorithm_general_properties
 from rl_x.environments.environment_manager import get_environment_config, get_environment_create_env, get_environment_general_properties
 from rl_x.environments.data_interface_type import DataInterfaceType
+from rl_x.environments.simulation_type import SimulationType
 from rl_x.algorithms.deep_learning_framework_type import DeepLearningFrameworkType
 
 DEFAULT_ALGORITHM = "ppo.pytorch"
@@ -53,10 +54,9 @@ class Runner:
         # General Deep Learning framework settings
         algorithm_uses_torch = DeepLearningFrameworkType.TORCH == algorithm_general_properties.deep_learning_framework_type
         algorithm_uses_jax = DeepLearningFrameworkType.JAX == algorithm_general_properties.deep_learning_framework_type
-        environment_uses_torch = DataInterfaceType.TORCH == environment_general_properties.data_interface_type
-        environment_uses_jax = DataInterfaceType.JAX == environment_general_properties.data_interface_type
+        environment_uses_jax = SimulationType.JAX_BASED == environment_general_properties.simulation_type
 
-        if algorithm_uses_torch or environment_uses_torch:  
+        if algorithm_uses_torch:  
             # Avoids warning when TensorFloat32 is available
             import torch
             torch.set_float32_matmul_precision("high")

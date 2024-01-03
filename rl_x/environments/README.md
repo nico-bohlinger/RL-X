@@ -18,6 +18,9 @@
 **data_interface_type.py**
 - Defines all possible data interface types, i.e. the data types of actions and observations
 
+**simulation_type.py**
+- Defines all possible simulation types; currently only default and JAX-based
+
 **\<environment name\>**
 - Contains either subdirectories or directly the implementation of a concrete environment
 - See below for more details
@@ -55,8 +58,8 @@ gym
 
 **general_properties.py**
 - Defines the GeneralProperties class for the registration
-- Currently those properties are the action space type, observation space type and data interface type
-- Properties are used to check if environment and algorithm are compatible
+- Currently those properties are the action space type, observation space type and data interface type and the type of simulation framework used
+- Properties are used to check if environment and algorithm are compatible and to set default settings of the Deep Learning framework
 
 **wrappers.py**
 - Wrappers around the environment

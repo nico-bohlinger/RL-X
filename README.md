@@ -12,6 +12,7 @@ A framework for Reinforcement Learning research.
 - ⚡ **Maximum speed**: JAX versions utilize JIT compilation -> A lot faster than PyTorch's JIT
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
 - ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo or pure socket communication
+- 🚀​ **GPU environments**: MuJoCo XLA (MJX) supports running 4000 parallel environments on a GPU
 - 📈 **Experiment tracking**: Console logging, Model saving & loading, Tensorboard, Weights and Biases
 
 
@@ -38,6 +39,7 @@ A framework for Reinforcement Learning research.
     - DeepMind Control Suite
 - [Custom MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco)
     - Example of a custom MuJoCo environment
+    - Example of a custom MuJoCo XLA (MJX) environment
 - [Custom Interface](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_interface)
     - Prototype of a custom environment interface with socket communication
 
