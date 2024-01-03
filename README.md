@@ -13,7 +13,7 @@ A framework for Reinforcement Learning research.
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
 - ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo or pure socket communication
 - 🚀​ **GPU environments**: MuJoCo XLA (MJX) supports running 4000 parallel environments on a GPU
-- 📈 **Experiment tracking**: Console logging, Model saving & loading, Tensorboard, Weights and Biases
+- 📈 **Experiment tracking**: Checkpoints, Evaluation, Console logging, Tensorboard, Weights and Biases
 
 
 ## Implemented Algorithms
