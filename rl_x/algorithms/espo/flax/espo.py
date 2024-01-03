@@ -310,6 +310,7 @@ class ESPO:
                 batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs,
                 self.key
             )
+            optimization_metrics = {key: value.item() for key, value in optimization_metrics.items()}
             nr_updates += epoch + 1
 
             optimizing_end_time = time.time()

@@ -69,6 +69,28 @@ class Runner:
             # Use old flax checkpointing
             import flax
             flax.config.update('flax_use_orbax_checkpointing', False)
+            # Set device
+            import jax
+            alg_device = None
+            if algorithm_uses_jax:
+                alg_device = [arg for arg in sys.argv if arg.startswith("--algorithm.device=")]
+                if alg_device:
+                    alg_device = alg_device[0].split("=")[1]
+                else:
+                    alg_device = getattr(get_algorithm_config(algorithm_name), "device", None)
+            env_device = None
+            if environment_uses_jax:
+                env_device = [arg for arg in sys.argv if arg.startswith("--environment.device=")]
+                if env_device:
+                    env_device = env_device[0].split("=")[1]
+                else:
+                    env_device = getattr(get_environment_config(environment_name), "device", None)
+            if alg_device and env_device and alg_device != env_device:
+                raise ValueError("Incompatible device types between algorithm and environment")
+            device = alg_device or env_device
+            if device == "cpu":
+                jax.config.update("jax_platform_name", "cpu")
+            jax.default_backend()
 
         self._model_class = get_algorithm_model_class(algorithm_name)
         self._create_env = get_environment_create_env(environment_name)

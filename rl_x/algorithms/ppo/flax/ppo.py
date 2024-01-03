@@ -306,6 +306,7 @@ class PPO:
                 batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs,
                 self.key
             )
+            optimization_metrics = {key: value.item() for key, value in optimization_metrics.items()}
             nr_updates += self.nr_epochs * self.nr_minibatches
 
             optimizing_end_time = time.time()
