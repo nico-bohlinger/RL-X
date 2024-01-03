@@ -56,8 +56,6 @@ class AQE():
         self.nr_total_q_values = self.ensemble_size * config.algorithm.nr_heads_per_net
         self.nr_target_q_values = self.nr_total_q_values - config.algorithm.nr_dropped_q_values
 
-        if config.algorithm.device == "cpu":
-            jax.config.update("jax_platform_name", "cpu")
         rlx_logger.info(f"Using device: {jax.default_backend()}")
         
         self.rng = np.random.default_rng(self.seed)

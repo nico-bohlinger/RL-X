@@ -57,8 +57,6 @@ class PPO:
         if self.evaluation_frequency % self.nr_steps * self.nr_envs != 0 and self.evaluation_frequency != -1:
             raise ValueError("Evaluation frequency must be a multiple of the number of steps and environments.")
 
-        if config.algorithm.device == "cpu":
-            jax.config.update("jax_platform_name", "cpu")
         rlx_logger.info(f"Using device: {jax.default_backend()}")
         
         self.key = jax.random.PRNGKey(self.seed)

@@ -63,8 +63,6 @@ class ESPO:
         else:
             raise ValueError("Unknown delta_calc_operator")
 
-        if config.algorithm.device == "cpu":
-            jax.config.update("jax_platform_name", "cpu")
         rlx_logger.info(f"Using device: {jax.default_backend()}")
         
         self.key = jax.random.PRNGKey(self.seed)

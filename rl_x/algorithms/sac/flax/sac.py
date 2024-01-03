@@ -52,8 +52,6 @@ class SAC:
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.evaluation_episodes = config.algorithm.evaluation_episodes
 
-        if config.algorithm.device == "cpu":
-            jax.config.update("jax_platform_name", "cpu")
         rlx_logger.info(f"Using device: {jax.default_backend()}")
         
         self.rng = np.random.default_rng(self.seed)
