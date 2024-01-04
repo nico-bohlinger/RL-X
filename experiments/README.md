@@ -9,8 +9,13 @@
 **experiment.py**
 - Imports the runner and runs the experiment locally
 
+**slurm_experiment.sh**
+- Works as a template sbatch file to run experiments on a SLURM cluster
+- Saves the output to ```log/out_and_err.txt```
+- Can be used to run multiple experiments with different configs
+
 **start_experiment.sh**
-- Works as a template for how to setup an experiment with the command line
+- Works as a template for how to setup experiments with the command line
 - Runs the experiment in a background process and saves the output to ```log/out_and_err.txt```
 - Can be used to run or even schedule multiple experiments with different configs
 

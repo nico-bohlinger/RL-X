@@ -1,26 +1,29 @@
 #!/bin/bash
 
-#SBATCH --job-name=dummy_job
-#SBATCH --output=log/output_%j.txt
-#SBATCH --error=log/error_%j.txt
-#SBATCH --partition=amd2
+#SBATCH --job-name=rlx_experiment
+#SBATCH --output=log/out_and_err.txt
+#SBATCH --error=log/out_and_err.txt
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=4G
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=2G
 #SBATCH --time=00:30:00
 
 eval "$(/home/bohlinger/miniconda3/bin/conda shell.bash hook)"
-conda activate rlx3114
+conda activate rlx
 
 python experiment.py \
-    --algorithm.name="ppo.flax" \
-    --algorithm.total_timesteps=1000000 \
-    --algorithm.nr_steps=20000 \
-    --algorithm.minibatch_size=2000 \
-    --algorithm.nr_epochs=5 \
-    --algorithm.evaluation_frequency=-1 \
-    --algorithm.device="cpu" \
-    --environment.name="custom_mujoco.ant" \
-    --environment.nr_envs=4 \
-    --runner.track_console=True \
+    --algorithm.name="ppo.pytorch" \
+    --algorithm.total_timesteps=10000 \
+    --environment.name="gym.mujoco.humanoid_v4" \
+    --environment.nr_envs=1 \
+    --environment.seed=0 \
+    --runner.mode="train" \
+    --runner.track_console=False \
+    --runner.track_tb=True \
+    --runner.track_wandb=True \
+    --runner.save_model=True \
+    --runner.wandb_entity="placeholder" \
+    --runner.project_name="placeholder" \
+    --runner.exp_name="placeholder" \
+    --runner.notes="placeholder"
