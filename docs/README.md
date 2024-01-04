@@ -3,6 +3,10 @@
 Overview:
 - [READMEs](#readmes)
 - [Detailed Installation Guide](#detailed-installation-guide)
+- [Google Colab](#google-colab)
+- [Run custom MJX environment](#run-custom-mjx-environment)
+
+
 
 ## READMEs
 Most documentation is available in the ```README.md``` files in the respective directories:
@@ -23,6 +27,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/environments/envpool/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/gym/README.md): Details of the EnvPool environments
 - [```/rl_x/environments/gym/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/gym/README.md): Details of the Gymnasium environments
 - [```/rl_x/runner/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/runner/README.md): Information on the folder structure of the runner class and how to use it to run experiments
+
 
 
 ## Detailed Installation Guide
@@ -63,3 +68,15 @@ For Linux, JAX with GPU support can be installed with the following command:
 pip install -U "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
 For MacOS and Windows, JAX with GPU support is not supported out-of-the-box. However, it can be done with some extra effort (see [here](https://github.com/google/jax) for more information).
+
+
+
+## Google Colab
+To run experiments in Google Colab take a look ```experiments/colab_experiment.ipynb``` or directly open it here:  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb) 
+
+
+
+## Run custom MJX environment
+```
+python experiment.py --algorithm.name=ppo.flax --environment.name=custom_mujoco.ant_mjx --runner.track_console=True --environment.nr_envs=4000 --algorithm.nr_steps=10 --algorithm.minibatch_size=1000 --algorithm.nr_epochs=5 --algorithm.evaluation_frequency=-1
+```

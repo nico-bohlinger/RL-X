@@ -3,8 +3,11 @@
 
 ## Important files
 
+**colab_experiment.ipynb**
+- Can be used to run experiments in Google Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb)
+
 **experiment.py**
-- Imports the runner and runs the experiment
+- Imports the runner and runs the experiment locally
 
 **start_experiment.sh**
 - Works as a template for how to setup an experiment with the command line
