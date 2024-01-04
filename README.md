@@ -74,7 +74,7 @@ python experiment.py
 ```
 Detailed instructions for running experiments can be found in the README file in the experiments directory.
 
-Example for Google Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb)
+Example for Google Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb)
 
 
 ## Citation

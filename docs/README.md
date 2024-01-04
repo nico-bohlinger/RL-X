@@ -72,7 +72,7 @@ For MacOS and Windows, JAX with GPU support is not supported out-of-the-box. How
 
 
 ## Google Colab
-To run experiments in Google Colab take a look ```experiments/colab_experiment.ipynb``` or directly open it here:  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb) 
+To run experiments in Google Colab take a look ```experiments/colab_experiment.ipynb``` or directly open it here:  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb) 
 
 
 
