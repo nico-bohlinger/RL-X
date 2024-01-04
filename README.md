@@ -49,7 +49,7 @@ A framework for Reinforcement Learning research.
 
 All listed environments are directly embedded in RL-X and can be used out-of-the-box.
 
-For further information on the environments and algorithms and how to add your own, read the respective README files.
+For further information on the [environments](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/README.md) and [algorithms](https://github.com/nico-bohlinger/RL-X/blob/master/algorithms/README.md) and how to add your own, read the linked README files.
 
 
 ## Getting Started
@@ -72,7 +72,7 @@ For other configurations, see the [detailed installation guide](https://nico-boh
 cd experiments
 python experiment.py
 ```
-Detailed instructions for running experiments can be found in the README file in the experiments directory or in the [documentation](https://nico-bohlinger.github.io/RL-X).
+Detailed instructions for running experiments can be found in the [README file](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/README.md) in the experiments directory or in the [documentation](https://nico-bohlinger.github.io/RL-X).
 
 Example for Google Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb)
 
