@@ -3,7 +3,11 @@
 A framework for Reinforcement Learning research.
 
 
-## Highlights
+│[Overview](#overview) │ [Getting Started](#getting-started) │ [Documentation](https://nico-bohlinger.github.io/RL-X/) │ [Citation](#citation) │
+
+
+## Overview
+### Highlights
 
 - 💡 **Perfect to understand and prototype algorithms**:
     - One algorithm = One directory -> No backtracking through  parent classes
@@ -16,7 +20,7 @@ A framework for Reinforcement Learning research.
 - 📈 **Experiment tracking**: Checkpoints, Evaluation, Console logging, Tensorboard, Weights and Biases
 
 
-## Implemented Algorithms
+### Implemented Algorithms
 - [Proximal Policy Optimization (PPO)](https://arxiv.org/abs/1707.06347) in PyTorch, Flax
 - [Early Stopping Policy Optimization (ESPO)](https://arxiv.org/abs/2202.00079) in PyTorch, Flax
 - [Soft Actor Critic (SAC)](https://arxiv.org/abs/1801.01290) in PyTorch, Flax
@@ -27,7 +31,7 @@ A framework for Reinforcement Learning research.
 - [Maximum a Posteriori Policy Optimization (MPO)](https://arxiv.org/pdf/1806.06920) in Flax
 
 
-## Usable Environments
+### Usable Environments
 - [Gymnasium](https://github.com/Farama-Foundation/Gymnasium)
     - MuJoCo
     - Atari
@@ -48,7 +52,8 @@ All listed environments are directly embedded in RL-X and can be used out-of-the
 For further information on the environments and algorithms and how to add your own, read the respective README files.
 
 
-## Install
+## Getting Started
+### Install
 Default installation for a Linux system with a NVIDIA GPU:
 ```
 conda create -n rlx python=3.11.4
@@ -59,10 +64,10 @@ pip install -e .[all]
 pip install "torch>=2.1.2" --index-url https://download.pytorch.org/whl/cu118
 pip install -U "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
-For other configurations, see the detailed installation guide in ```INSTALL.md```.
+For other configurations, see the [detailed installation guide](https://nico-bohlinger.github.io/RL-X/#detailed-installation-guide) in the documentation.
 
 
-## Example
+### Example
 ```
 cd experiments
 python experiment.py
