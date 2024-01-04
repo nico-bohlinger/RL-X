@@ -62,6 +62,7 @@ git clone git@github.com:nico-bohlinger/RL-X.git
 cd RL-X
 pip install -e .[all]
 pip install "torch>=2.1.2" --index-url https://download.pytorch.org/whl/cu118 --upgrade
+pip uninstall $(pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
 pip install -U "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
 For other configurations, see the [detailed installation guide](https://nico-bohlinger.github.io/RL-X/#detailed-installation-guide) in the documentation.
