@@ -49,7 +49,7 @@ A framework for Reinforcement Learning research.
 
 All listed environments are directly embedded in RL-X and can be used out-of-the-box.
 
-For further information on the [environments](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/README.md) and [algorithms](https://github.com/nico-bohlinger/RL-X/blob/master/algorithms/README.md) and how to add your own, read the linked README files.
+For further information on the environments ([README](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/README.md)) and algorithms ([README](https://github.com/nico-bohlinger/RL-X/blob/master/algorithms/README.md)) and how to add your own, read the respective README files.
 
 
 ## Getting Started
