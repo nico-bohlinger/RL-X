@@ -72,7 +72,7 @@ For other configurations, see the [detailed installation guide](https://nico-boh
 cd experiments
 python experiment.py
 ```
-Detailed instructions for running experiments can be found in the README file in the experiments directory.
+Detailed instructions for running experiments can be found in the README file in the experiments directory or in the [documentation](https://nico-bohlinger.github.io/RL-X).
 
 Example for Google Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb)
 
