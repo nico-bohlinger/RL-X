@@ -61,7 +61,7 @@ pip install -e .
 ### 4. PyTorch
 For Linux, MacOS and Windows, PyTorch has to be installed separately to use the CUDA 11.8 version such that there are no conflicts with JAX.
 ```
-pip install "torch>=2.1.2" --index-url https://download.pytorch.org/whl/cu118
+pip install "torch>=2.1.2" --index-url https://download.pytorch.org/whl/cu118 --upgrade
 ```
 
 ### 5. JAX
