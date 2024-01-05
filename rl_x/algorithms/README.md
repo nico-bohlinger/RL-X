@@ -63,6 +63,8 @@ ppo
 ## Adding new algorithms
 To add a new algorithm, create a new directory with the algorithm name, a subdirectory for the framework and add the files described above.
 
+Algorithms can be added and registered outside of RL-X by keeping the same directory structure as RL-X, e.g. ```mypackage/algorithms/ppo/tensorflow``` and then adding ```mypackage``` to the ```implementation_package_names``` list when creating the Runner object in the experiment script, e.g. ```Runner(implementation_package_names=["rl_x", "mypackage"])```.
+
 For concrete implementations see the provided algorithms, e.g. ```rl_x/algorithm/ppo/pytorch``` or ```rl_x/algorithm/sac/flax```.
 
 

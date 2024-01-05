@@ -38,8 +38,8 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class Runner:
-    def __init__(self):
-        algorithm_name, environment_name, self._mode = self.parse_arguments()
+    def __init__(self, implementation_package_names=["rl_x"]):
+        algorithm_name, environment_name, self._mode = self.parse_arguments(implementation_package_names)
 
         # Compatibility check
         algorithm_general_properties = get_algorithm_general_properties(algorithm_name)
@@ -125,7 +125,7 @@ class Runner:
         sys.excepthook = handle_exception
 
 
-    def parse_arguments(self):
+    def parse_arguments(self, implementation_package_names):
         algorithm_name = [arg for arg in sys.argv if arg.startswith("--algorithm.name=")]
         environment_name = [arg for arg in sys.argv if arg.startswith("--environment.name=")]
         runner_mode = [arg for arg in sys.argv if arg.startswith("--runner.mode=")]
@@ -135,14 +135,24 @@ class Runner:
             del sys.argv[sys.argv.index("--algorithm.name=" + algorithm_name)]
         else:
             algorithm_name = DEFAULT_ALGORITHM
-        importlib.import_module(f"rl_x.algorithms.{algorithm_name}")
+        
+        for implementation_library_name in implementation_package_names:
+            import_path = f"{implementation_library_name}.algorithms.{algorithm_name}"
+            if importlib.util.find_spec(import_path):
+                importlib.import_module(import_path)
+                break
         
         if environment_name:
             environment_name = environment_name[0].split("=")[1]
             del sys.argv[sys.argv.index("--environment.name=" + environment_name)]
         else:
             environment_name = DEFAULT_ENVIRONMENT
-        importlib.import_module(f"rl_x.environments.{environment_name}")
+        
+        for implementation_library_name in implementation_package_names:
+            import_path = f"{implementation_library_name}.environments.{environment_name}"
+            if importlib.util.find_spec(import_path):
+                importlib.import_module(import_path)
+                break
 
         if runner_mode:
             runner_mode = runner_mode[0].split("=")[1]

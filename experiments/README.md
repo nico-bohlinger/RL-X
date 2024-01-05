@@ -8,19 +8,20 @@
 
 **experiment.py**
 - Imports the runner and runs the experiment locally
+- Can run algorithms and environments registered outside of RL-X (see README files in ```rl_x/algorithms``` and ```rl_x/environments```)
 
 **slurm_experiment.sh**
 - Works as a template sbatch file to run experiments on a SLURM cluster
-- Saves the output to ```log/out_and_err.txt```
+- Runs ```experiment.py``` and saves the output to ```log/out_and_err.txt```
 - Can be used to run multiple experiments with different configs
 
 **start_experiment.sh**
 - Works as a template for how to setup experiments with the command line
-- Runs the experiment in a background process and saves the output to ```log/out_and_err.txt```
+- Runs ```experiment.py``` in a background process and saves the output to ```log/out_and_err.txt```
 - Can be used to run or even schedule multiple experiments with different configs
 
 **stop_experiment.sh**
-- Stops all running experiments
+- Stops all running experiments started with ```start_experiment.sh```
 
 
 ## Examples

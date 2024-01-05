@@ -6,7 +6,7 @@ _algorithms = {}
 
 
 def extract_algorithm_name_from_file(file_name):
-    return file_name.split(f"rl_x{slash}algorithms{slash}")[1].split(f"{slash}__init__.py")[0].replace(slash, ".")
+    return file_name.split(f"algorithms{slash}")[1].split(f"{slash}__init__.py")[0].replace(slash, ".")
 
 
 def register_algorithm(name, get_default_config, get_model_class, general_properties):

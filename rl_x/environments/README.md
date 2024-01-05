@@ -72,6 +72,8 @@ Fast testing of a new environment with an already provided framework (Gymnasium 
 
 To add a completely new environment or permanently a new one from an already provided framework, create a new directory with the same structure as outlined above.
 
+Environments can be added and registered outside of RL-X by keeping the same directory structure as RL-X, e.g. ```mypackage/environments/unitree_a1``` and then adding ```mypackage``` to the ```implementation_package_names``` list when creating the Runner object in the experiment script, e.g. ```Runner(implementation_package_names=["rl_x", "mypackage"])```.
+
 For concrete implementations of provided frameworks, look into the ```rl_x/environments/gym``` and ```rl_x/environments/envpool``` directories.
 
 An example for a custom mujoco environment can be found in ```rl_x/environments/custom_mujoco```.
