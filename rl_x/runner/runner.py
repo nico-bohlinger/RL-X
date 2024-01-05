@@ -137,10 +137,11 @@ class Runner:
             algorithm_name = DEFAULT_ALGORITHM
         
         for implementation_library_name in implementation_package_names:
-            import_path = f"{implementation_library_name}.algorithms.{algorithm_name}"
-            if importlib.util.find_spec(import_path):
-                importlib.import_module(import_path)
+            try:
+                importlib.import_module(f"{implementation_library_name}.algorithms.{algorithm_name}")
                 break
+            except ModuleNotFoundError:
+                pass
         
         if environment_name:
             environment_name = environment_name[0].split("=")[1]
@@ -149,11 +150,12 @@ class Runner:
             environment_name = DEFAULT_ENVIRONMENT
         
         for implementation_library_name in implementation_package_names:
-            import_path = f"{implementation_library_name}.environments.{environment_name}"
-            if importlib.util.find_spec(import_path):
-                importlib.import_module(import_path)
+            try:
+                importlib.import_module(f"{implementation_library_name}.environments.{environment_name}")
                 break
-
+            except ModuleNotFoundError:
+                pass
+        
         if runner_mode:
             runner_mode = runner_mode[0].split("=")[1]
             del sys.argv[sys.argv.index("--runner.mode=" + runner_mode)]
