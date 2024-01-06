@@ -5,6 +5,9 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
 
+# Fix wandb connection issues on slow clusters - https://github.com/wandb/wandb/issues/3911#issuecomment-1409769887
+os.environ["WANDB__SERVICE_WAIT"] = "600"
+
 import sys
 import importlib
 from absl import app
