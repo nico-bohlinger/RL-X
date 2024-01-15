@@ -17,9 +17,8 @@ class CustomEnvironment(Env):
         reaction = self.connection.recv()
         info = {}
         if "extraValueNames" in reaction:
-            info["episode"] = {}
             for extra_value_name, extra_value in zip(reaction["extraValueNames"], reaction["extraValues"]):
-                info["episode"][extra_value_name] = extra_value
+                info[extra_value_name] = extra_value
         return reaction["observation"], reaction["reward"], reaction["terminated"], reaction["truncated"], info
 
     def reset(self, seed=None):
