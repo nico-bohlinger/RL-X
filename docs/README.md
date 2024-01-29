@@ -5,6 +5,7 @@
 - [Detailed Installation Guide](#detailed-installation-guide)
 - [Google Colab](#google-colab)
 - [Run custom MJX environment](#run-custom-mjx-environment)
+- [Asynchronous vectorized environments with skipping](#asynchronous-vectorized-environments-with-skipping)
 
 
 **Repository Link**: [RL-X](https://github.com/nico-bohlinger/RL-X)
@@ -85,4 +86,33 @@ To run experiments in Google Colab take a look ```experiments/colab_experiment.i
 ## Run custom MJX environment
 ```
 python experiment.py --algorithm.name=ppo.flax --environment.name=custom_mujoco.ant_mjx --runner.track_console=True --environment.nr_envs=4000 --algorithm.nr_steps=10 --algorithm.minibatch_size=1000 --algorithm.nr_epochs=5 --algorithm.evaluation_frequency=-1
+```
+
+
+
+## Asynchronous vectorized environments with skipping
+The gymnasium, custom MuJoCo and custom interface environments support parallel asynchronous vectorized environments with skipping.
+
+When using many parallel environments, it can happen that some environments are faster than others at a given time step.
+With the default implementation of the AsyncVectorEnv wrapper from gymnasium, a combined step is only completed once all environments have finished their step, which can lead to a lot of idle waiting time.  
+Therefore, the AsyncVectorEnvWithSkipping wrapper allows to skip up to the slowest x% of environments and sends dummy values for the skipped environments to the algorithm instead.
+Be careful, this can lead to a learning performance decrease, depending on how many environments are skipped and how well the dummy values align with the environment.  
+Even when no environment should be skipped, the AsyncVectorEnvWithSkipping wrapper can still lead to a runtime improvement compared to the default gymnasium wrapper, because the latter waits sequentially for each environment to finish its step, while the former keeps looping over all environments until they are all finished.
+Therefore, it can already collect the data from some environments while the others are still running their step.
+
+To set the maximum percentage of environments that can be skipped, set the corresponding command line argument:
+
+No environment is skipped:
+```
+--environment.async_skip_percentage=0.0
+```
+
+Up to 25% of the environments can be skipped:
+```
+--environment.async_skip_percentage=0.25
+```
+
+Up to 100% of the environments can be skipped:
+```
+--environment.async_skip_percentage=1.0
 ```
