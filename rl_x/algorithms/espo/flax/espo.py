@@ -125,14 +125,14 @@ class ESPO:
         @jax.jit
         def calculate_gae_advantages(critic_state: TrainState, next_states: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, values: np.ndarray):
             def compute_advantages(carry, t):
-                prev_advantage, delta, terminations = carry
+                prev_advantage = carry[0]
                 advantage = delta[t] + self.gamma * self.gae_lambda * (1 - terminations[t]) * prev_advantage
-                return (advantage, delta, terminations), advantage
+                return (advantage,), advantage
 
             next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
             delta = rewards + self.gamma * next_values * (1.0 - terminations) - values
             init_advantages = delta[-1]
-            _, advantages = jax.lax.scan(compute_advantages, (init_advantages, delta, terminations), jnp.arange(self.nr_steps - 2, -1, -1))
+            _, advantages = jax.lax.scan(compute_advantages, (init_advantages,), jnp.arange(self.nr_steps - 2, -1, -1))
             advantages = jnp.concatenate([advantages[::-1], jnp.array([init_advantages])])
             returns = advantages + values
             return advantages, returns
