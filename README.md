@@ -1,9 +1,12 @@
+<img src="docs/assets/images/logo.png" align="right" width="25%"/>
+
+
 # RL-X
 
 A framework for Reinforcement Learning research.
 
 
-│[Overview](#overview) │ [Getting Started](#getting-started) │ [Documentation](https://nico-bohlinger.github.io/RL-X/) │ [Citation](#citation) │
+│ [Overview](#overview) │ [Getting Started](#getting-started) │ [Documentation](https://nico-bohlinger.github.io/RL-X/) │ [Citation](#citation) │
 
 
 ## Overview
