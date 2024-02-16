@@ -20,13 +20,14 @@ class MujocoViewer:
         self.hide_menu = False
         self.overlay = {}
         self.font_scale = 100
-        self.width = 1920
-        self.height = 1080
 
         glfw.init()
-        glfw.window_hint(glfw.COCOA_RETINA_FRAMEBUFFER, 0)
+        glfw.window_hint(glfw.SCALE_TO_MONITOR, glfw.TRUE)
 
-        self.window = glfw.create_window(width=self.width, height=self.height, title="MuJoCo", monitor=None, share=None)
+        primary_monitor = glfw.get_primary_monitor()
+        video_mode = glfw.get_video_mode(primary_monitor)
+        window_width, window_height = video_mode.size
+        self.window = glfw.create_window(width=window_width, height=window_height, title="MuJoCo", monitor=None, share=None)
         glfw.make_context_current(self.window)
 
         glfw.set_mouse_button_callback(self.window, self.mouse_button)
@@ -45,7 +46,8 @@ class MujocoViewer:
         self.camera_mode_target = self.camera_mode
         self.set_camera()
 
-        self.viewport = mujoco.MjrRect(0, 0, self.width, self.height)
+        framebuffer_width, framebuffer_height = glfw.get_framebuffer_size(self.window)
+        self.viewport = mujoco.MjrRect(0, 0, framebuffer_width, framebuffer_height)
         self.context = mujoco.MjrContext(model, mujoco.mjtFontScale(self.font_scale))
 
     def mouse_button(self, window, button, act, mods):
@@ -102,7 +104,7 @@ class MujocoViewer:
             mujoco.mjv_updateScene(self.model, data, self.scene_option, None, self.camera,
                                    mujoco.mjtCatBit.mjCAT_ALL,
                                    self.scene)
-            self.viewport.width, self.viewport.height = glfw.get_window_size(self.window)
+            self.viewport.width, self.viewport.height = glfw.get_framebuffer_size(self.window)
             mujoco.mjr_render(self.viewport, self.scene, self.context)
 
             if not self.hide_menu:
