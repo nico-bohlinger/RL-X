@@ -68,8 +68,8 @@ class MPO():
         self.gamma = config.algorithm.gamma
         self.max_param_update = config.algorithm.max_param_update
         self.logging_all_metrics = config.algorithm.logging_all_metrics
-        self.logging_frequency = config.algorithm.logging_frequency
         self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.evaluation_episodes = config.algorithm.evaluation_episodes
         self.nr_total_atoms = self.nr_atoms_per_net * self.ensemble_size

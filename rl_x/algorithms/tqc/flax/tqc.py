@@ -51,8 +51,8 @@ class TQC:
         self.nr_dropped_atoms_per_net = config.algorithm.nr_dropped_atoms_per_net
         self.huber_kappa = config.algorithm.huber_kappa
         self.target_entropy = config.algorithm.target_entropy
-        self.logging_frequency = config.algorithm.logging_frequency
         self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.evaluation_episodes = config.algorithm.evaluation_episodes
         self.nr_total_atoms = self.nr_atoms_per_net * self.ensemble_size

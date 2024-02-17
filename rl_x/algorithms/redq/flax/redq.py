@@ -50,8 +50,8 @@ class REDQ():
         self.in_target_minimization_size = config.algorithm.in_target_minimization_size
         self.q_update_steps = config.algorithm.q_update_steps
         self.target_entropy = config.algorithm.target_entropy
-        self.logging_frequency = config.algorithm.logging_frequency
         self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.evaluation_episodes = config.algorithm.evaluation_episodes
 
