@@ -384,8 +384,8 @@ class AQE():
                         metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
                         metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
                         mean_value = np.mean(step_info_collection[info_name])
-                    if mean_value == mean_value:  # Check if mean_value is NaN
-                        metric_dict[f"{metric_group}/{info_name}"] = mean_value
+                        if mean_value == mean_value:  # Check if mean_value is NaN
+                            metric_dict[f"{metric_group}/{info_name}"] = mean_value
                 
                 time_metrics = {key: np.mean(value) for key, value in time_metrics_collection.items()}
                 optimization_metrics = {key: np.mean(value) for key, value in optimization_metrics_collection.items()}
