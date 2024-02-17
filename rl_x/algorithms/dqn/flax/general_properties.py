@@ -5,7 +5,7 @@ from rl_x.algorithms.deep_learning_framework_type import DeepLearningFrameworkTy
 
 
 class GeneralProperties:
-    observation_space_types = [ObservationSpaceType.FLAT_VALUES]
+    observation_space_types = [ObservationSpaceType.IMAGES]
     action_space_types = [ActionSpaceType.DISCRETE]
     data_interface_types = [DataInterfaceType.NUMPY]
 

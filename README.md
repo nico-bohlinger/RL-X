@@ -32,6 +32,7 @@ A framework for Reinforcement Learning research.
 - [Truncated Quantile Critics (TQC)](https://arxiv.org/abs/2005.04269) in Flax
 - [Aggressive Q-Learning with Ensembles (AQE)](https://arxiv.org/abs/2111.09159) in Flax
 - [Maximum a Posteriori Policy Optimization (MPO)](https://arxiv.org/pdf/1806.06920) in Flax
+- [Deep Q-Network (DQN)](https://www.nature.com/articles/nature14236.pdf) in Flax
 
 
 ### Usable Environments

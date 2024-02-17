@@ -10,16 +10,17 @@ def get_config(algorithm_name):
     config.total_timesteps = 1e9
     config.learning_rate = 3e-4
     config.anneal_learning_rate = False
-    config.buffer_size = 1e6
-    config.learning_starts = 5000
-    config.batch_size = 256
-    config.tau = 0.005
+    config.buffer_size = 1e5
+    config.learning_starts = 200
+    config.batch_size = 32
     config.gamma = 0.99
-    config.target_entropy = "auto"
-    config.log_std_min = -20
-    config.log_std_max = 2
-    config.nr_hidden_units = 256
-    config.logging_frequency = 3000
+    config.epsilon_start = 1.0
+    config.epsilon_end = 0.01
+    config.epsilon_decay_steps = 250000
+    config.update_frequency = 4
+    config.target_update_frequency = 8000
+    config.nr_hidden_units = 512
+    config.logging_frequency = 1000
     config.evaluation_frequency = 200000  # -1 to disable
     config.evaluation_episodes = 10
 

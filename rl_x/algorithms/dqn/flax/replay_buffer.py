@@ -10,7 +10,7 @@ class ReplayBuffer():
         self.rng = rng
         self.states = np.zeros((self.capacity, nr_envs) + os_shape, dtype=np.float32)
         self.next_states = np.zeros((self.capacity, nr_envs) + os_shape, dtype=np.float32)
-        self.actions = np.zeros((self.capacity, nr_envs) + as_shape, dtype=np.float32)
+        self.actions = np.zeros((self.capacity, nr_envs) + as_shape, dtype=np.int32)
         self.rewards = np.zeros((self.capacity, nr_envs), dtype=np.float32)
         self.terminations = np.zeros((self.capacity, nr_envs), dtype=np.float32)
         self.pos = 0
