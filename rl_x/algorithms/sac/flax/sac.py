@@ -140,7 +140,6 @@ class SAC:
                 min_next_q_target = jnp.min(next_q_target)
 
                 y = reward + self.gamma * (1 - terminated) * (min_next_q_target - alpha * next_log_prob)
-                y = jnp.expand_dims(y, axis=0)  # (1, nr_target_atoms)
 
                 q = self.critic.apply(critic_params, state, action)
                 q_loss = (q - y) ** 2
