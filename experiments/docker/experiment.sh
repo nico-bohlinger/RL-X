@@ -1,6 +1,6 @@
 #!/bin/bash
 
-python experiment.py \
+python3 ../experiment.py \
     --algorithm.name="ppo.pytorch" \
     --algorithm.total_timesteps=10000 \
     --environment.name="gym.mujoco.humanoid_v4" \

@@ -27,7 +27,7 @@ if [ ! -z "$diff_file_path" ]; then
   docker_run_command+=" -e DIFF_PATH='/RL-X_ws/diffs/$diff_file_name' -v '$diff_file_dir:/RL-X_ws/diffs'"
 fi
 
-docker_run_command+=" --name rlx_c"
+docker_run_command+=" --rm"
 docker_run_command+=" rlx_i"
 
 eval $docker_run_command

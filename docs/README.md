@@ -15,6 +15,7 @@
 Most documentation is available in the ```README.md``` files in the respective directories:
 - [```/```](https://github.com/nico-bohlinger/RL-X/blob/master/README.md): Overview, Getting Started and Citation sections
 - [```/experiments/```](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/README.md): Information on the different ways to run experiments, experiment tracking and saving/loading of models
+- [```/experiments/docker/```](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/docker/README.md): Information on how to run experiments in a Docker container
 - [```/rl_x/algorithms/```](https://github.com/nico-bohlinger/RL-X/blob/master/algorithms/README.md): Information on the folder structure of algorithms, how to add new algorithms and how to mix and match them with environments
 - [```/rl_x/algorithms/aqe/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/aqe/README.md): Implementation details of the Aggressive Q-Learning with Ensembles (AQE) algorithm
 - [```/rl_x/algorithms/dqn/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dqn/README.md): Implementation details of the Deep Q-Network (DQN) algorithm

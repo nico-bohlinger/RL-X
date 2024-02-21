@@ -66,3 +66,6 @@ bash start_experiment.sh
     - The ```<project_name>``` is set with ```--runner.project_name=<your_project_name>```
     - The ```<exp_name>``` is set with ```--runner.exp_name=<your_exp_name>```
     - The ```<run_name>``` is a timestamp of the training run or can be set manually with ```--runner.run_name=<your_run_name>```
+
+## Docker
+- On how to run experiments in a Docker container, see [README](https://github.com/nico-bohlinger/RL-X/blob/master/algorithms/README.md)

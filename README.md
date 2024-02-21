@@ -15,12 +15,12 @@ A framework for Reinforcement Learning research.
 - 💡 **Perfect to understand and prototype algorithms**:
     - One algorithm = One directory -> No backtracking through  parent classes
     - Algorithms can be easily copied out of RL-X
-- ⚒️ **Known DL libraries**: Implementations in PyTorch or JAX (Flax)
-- ⚡ **Maximum speed**: JAX versions utilize JIT compilation -> A lot faster than PyTorch's JIT
+- ⚒️ **Known DL libraries**: Implementations in PyTorch or mainly JAX (Flax)
+- ⚡ **Maximum speed**: Utilizing JIT compilation with PyTorch and JAX 
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
 - ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo or pure socket communication
 - 🚀​ **GPU environments**: MuJoCo XLA (MJX) supports running 4000 parallel environments on a GPU
-- 📈 **Experiment tracking**: Checkpoints, Evaluation, Console logging, Tensorboard, Weights and Biases
+- 📈 **Experiments**: Checkpoints, Evaluation, Console log, Tensorboard, Weights & Biases, SLURM, Docker
 
 
 ### Implemented Algorithms
