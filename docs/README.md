@@ -17,6 +17,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/experiments/```](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/README.md): Information on the different ways to run experiments, experiment tracking and saving/loading of models
 - [```/rl_x/algorithms/```](https://github.com/nico-bohlinger/RL-X/blob/master/algorithms/README.md): Information on the folder structure of algorithms, how to add new algorithms and how to mix and match them with environments
 - [```/rl_x/algorithms/aqe/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/aqe/README.md): Implementation details of the Aggressive Q-Learning with Ensembles (AQE) algorithm
+- [```/rl_x/algorithms/dqn/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dqn/README.md): Implementation details of the Deep Q-Network (DQN) algorithm
 - [```/rl_x/algorithms/droq/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/droq/README.md): Implementation details of the Dropout Q-Functions (DroQ) algorithm
 - [```/rl_x/algorithms/espo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/espo/README.md): Implementation details of the Early Stopping Policy Optimization (ESPO) algorithm
 - [```/rl_x/algorithms/mpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/mpo/README.md): Implementation details of the Maximum a Posteriori Policy Optimization (MPO) algorithm

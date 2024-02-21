@@ -14,6 +14,7 @@
 - Works as a template sbatch file to run experiments on a SLURM cluster
 - Runs ```experiment.py``` and saves the output to ```log/out_and_err.txt```
 - Can be used to run multiple experiments with different configs
+- Can also be used as an alternative to ```start_experiment.sh``` for running experiments locally
 
 **start_experiment.sh**
 - Works as a template for how to setup experiments with the command line
