@@ -7,7 +7,9 @@ The container setup is designed to pull the latest version of the code from the 
 The installation of RL-X in the Dockerfile assumes that the machine has an NVIDIA GPU. If that is not the case, adjust the installation according to the general [detailed installation guide](https://nico-bohlinger.github.io/RL-X/#detailed-installation-guide). 
 
 ## Example
-Building the image once: ```bash build.sh```
+Initial setup:
+- Build the image: ```bash build.sh```
+- Create file ```env.config``` and put in the following content: WANDB_API_KEY=\<your_wandb_api_key\>
 
 For running experiments:
 1. Create diff for the experiment (```experiment.sh```) and optionally store it in ```/diffs```
