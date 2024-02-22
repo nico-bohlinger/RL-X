@@ -77,9 +77,10 @@ class DDPG:
         state = jnp.array([self.env.single_observation_space.sample()])
         action = jnp.array([self.env.single_action_space.sample()])
 
-        self.policy_state = TrainState.create(
+        self.policy_state = RLTrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, state),
+            target_params=self.policy.init(policy_key, state),
             tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.policy_learning_rate)
         )
 
@@ -110,11 +111,12 @@ class DDPG:
                 policy_state: TrainState, critic_state: RLTrainState,
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray
             ):
-            def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict, critic_target_params: flax.core.FrozenDict,
+            def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict,
+                        critic_target_params: flax.core.FrozenDict, policy_target_params: flax.core.FrozenDict,
                         state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray
                 ):
                 # Critic loss
-                next_action = stop_gradient(self.policy.apply(policy_params, next_state))
+                next_action = stop_gradient(self.policy.apply(policy_target_params, next_state))
                 next_q_target = stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
                 y = reward + self.gamma * (1 - terminated) * next_q_target
                 q = self.critic.apply(critic_params, state, action)
@@ -138,13 +140,14 @@ class DDPG:
                 return loss, (metrics)
             
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, None, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
             (loss, (metrics)), (policy_gradients, critic_gradients) = grad_loss_fn(
-                policy_state.params, critic_state.params, critic_state.target_params,
+                policy_state.params, critic_state.params,
+                critic_state.target_params, policy_state.target_params,
                 states, next_states, actions, rewards, terminations)
 
             policy_state = policy_state.apply_gradients(grads=policy_gradients)
@@ -152,6 +155,7 @@ class DDPG:
 
             # Update targets
             critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
+            policy_state = policy_state.replace(target_params=optax.incremental_update(policy_state.params, policy_state.target_params, self.tau))
 
             metrics["lr/learning_rate"] = policy_state.opt_state.hyperparams["learning_rate"]
             metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
