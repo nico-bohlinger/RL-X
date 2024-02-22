@@ -9,7 +9,6 @@ import jax
 from jax.lax import stop_gradient
 import jax.numpy as jnp
 import flax
-from flax.training.train_state import TrainState
 from flax.training import checkpoints
 import optax
 import wandb
@@ -98,7 +97,7 @@ class DDPG:
     
     def train(self):
         @jax.jit
-        def get_action(policy_state: TrainState, state: np.ndarray, key: jax.random.PRNGKey):
+        def get_action(policy_state: RLTrainState, state: np.ndarray, key: jax.random.PRNGKey):
             key, subkey = jax.random.split(key)
             mean_action = self.policy.apply(policy_state.params, state)
             action = mean_action + self.epsilon * jax.random.normal(subkey, mean_action.shape)
@@ -108,7 +107,7 @@ class DDPG:
 
         @jax.jit
         def update(
-                policy_state: TrainState, critic_state: RLTrainState,
+                policy_state: RLTrainState, critic_state: RLTrainState,
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray
             ):
             def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict,
@@ -165,7 +164,7 @@ class DDPG:
         
 
         @jax.jit
-        def get_deterministic_action(policy_state: TrainState, state: np.ndarray):
+        def get_deterministic_action(policy_state: RLTrainState, state: np.ndarray):
             mean_action = self.policy.apply(policy_state.params, state)
             return self.get_processed_action(mean_action)
 
@@ -390,7 +389,7 @@ class DDPG:
 
     def test(self, episodes):
         @jax.jit
-        def get_action(policy_state: TrainState, state: np.ndarray):
+        def get_action(policy_state: RLTrainState, state: np.ndarray):
             mean_action = self.policy.apply(policy_state.params, state)
             return self.get_processed_action(mean_action)
         
