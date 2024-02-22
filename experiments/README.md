@@ -14,6 +14,7 @@
 - Works as a template sbatch file to run experiments on a SLURM cluster
 - Runs ```experiment.py``` and saves the output to ```log/out_and_err.txt```
 - Can be used to run multiple experiments with different configs
+- Can also be used as an alternative to ```start_experiment.sh``` for running experiments locally
 
 **start_experiment.sh**
 - Works as a template for how to setup experiments with the command line
@@ -65,3 +66,6 @@ bash start_experiment.sh
     - The ```<project_name>``` is set with ```--runner.project_name=<your_project_name>```
     - The ```<exp_name>``` is set with ```--runner.exp_name=<your_exp_name>```
     - The ```<run_name>``` is a timestamp of the training run or can be set manually with ```--runner.run_name=<your_run_name>```
+
+## Docker
+- On how to run experiments in a Docker container, see the docker directory and the corresponding [README](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/docker/README.md)
