@@ -68,4 +68,4 @@ bash start_experiment.sh
     - The ```<run_name>``` is a timestamp of the training run or can be set manually with ```--runner.run_name=<your_run_name>```
 
 ## Docker
-- On how to run experiments in a Docker container, see [README](https://github.com/nico-bohlinger/RL-X/blob/master/algorithms/README.md)
+- On how to run experiments in a Docker container, see the docker directory and the corresponding [README](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/docker/README.md)
