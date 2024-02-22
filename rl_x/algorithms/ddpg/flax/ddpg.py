@@ -116,19 +116,14 @@ class DDPG:
                 # Critic loss
                 next_action = stop_gradient(self.policy.apply(policy_params, next_state))
                 next_q_target = stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
-                min_next_q_target = jnp.min(next_q_target)
-
-                y = reward + self.gamma * (1 - terminated) * min_next_q_target
-
+                y = reward + self.gamma * (1 - terminated) * next_q_target
                 q = self.critic.apply(critic_params, state, action)
                 q_loss = (q - y) ** 2
 
                 # Policy loss
                 current_action = self.policy.apply(policy_params, state)
                 q = self.critic.apply(stop_gradient(critic_params), state, current_action)
-                min_q = jnp.min(q)
-
-                policy_loss = -min_q
+                policy_loss = -q
 
                 # Combine losses
                 loss = q_loss + policy_loss
@@ -137,7 +132,7 @@ class DDPG:
                 metrics = {
                     "loss/q_loss": q_loss,
                     "loss/policy_loss": policy_loss,
-                    "q_value/q_value": min_q,
+                    "q_value/q_value": q,
                 }
 
                 return loss, (metrics)
