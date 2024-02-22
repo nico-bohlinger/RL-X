@@ -231,7 +231,7 @@ class DDPG:
                 batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size)
 
 
-            # Optimizing - Q-functions and policy
+            # Optimizing - Q-function and policy
             if should_optimize:
                 self.policy_state, self.critic_state, optimization_metrics = update(self.policy_state, self.critic_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations)
                 for key, value in optimization_metrics.items():
