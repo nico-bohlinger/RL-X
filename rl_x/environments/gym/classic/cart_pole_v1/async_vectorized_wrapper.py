@@ -9,8 +9,18 @@ from gymnasium.vector.async_vector_env import AsyncState
 
 class AsyncVectorEnvWithSkipping(gym.vector.AsyncVectorEnv):
     def __init__(self, env_fns, async_skip_percentage=0.0,
-                 observation_space=None, action_space=None, shared_memory=True, copy=True, context=None, daemon=True, worker=None):
-        super().__init__(env_fns, observation_space, action_space, shared_memory, copy, context, daemon, worker)
+                 observation_space=None, action_space=None, shared_memory=True, copy=True, start_method=None, daemon=True, worker=None):
+        
+        if start_method is None:
+            all_start_methods = mp.get_all_start_methods()
+            start_method = mp.get_start_method()
+            # Only use fork if it is the only available start method to prevent interference with JAX
+            if start_method == "fork":
+                if "forkserver" in all_start_methods:
+                    start_method = "forkserver"
+                elif "spawn" in all_start_methods:
+                    start_method = "spawn"
+        super().__init__(env_fns, observation_space, action_space, shared_memory, copy, start_method, daemon, worker)
         
         if not shared_memory:
             raise NotImplementedError("AsyncVectorEnvWithSkipping only supports shared_memory=True.")
