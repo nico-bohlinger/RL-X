@@ -1,5 +1,3 @@
-<style>h1 {border-bottom: 0;}</style>
-
 <img src="docs/assets/images/logo.png" align="right" width="25%"/>
 
 
