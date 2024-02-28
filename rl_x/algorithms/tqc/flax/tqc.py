@@ -130,7 +130,7 @@ class TQC:
                 policy_state: TrainState, critic_state: RLTrainState, entropy_coefficient_state: TrainState,
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, key: jax.random.PRNGKey
             ):
-            def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict, critic_target_params: flax.core.FrozenDict, entropy_coefficient_params: flax.core.FrozenDict,
+            def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict, entropy_coefficient_params: flax.core.FrozenDict,
                         state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray,
                         key1: jax.random.PRNGKey, key2: jax.random.PRNGKey
                 ):
@@ -142,7 +142,7 @@ class TQC:
                 alpha_with_grad = self.entropy_coefficient.apply(entropy_coefficient_params)
                 alpha = stop_gradient(alpha_with_grad)
 
-                next_q_target_atoms = stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
+                next_q_target_atoms = self.critic.apply(critic_state.target_params, next_state, next_action)
                 next_q_target_atoms = jnp.sort(next_q_target_atoms.reshape(self.nr_total_atoms))[:self.nr_target_atoms]
 
                 y = reward + self.gamma * (1 - terminated) * (next_q_target_atoms - alpha * next_log_prob)
@@ -189,16 +189,16 @@ class TQC:
                 return loss, (metrics)
             
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, None, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
-            grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 3), has_aux=True)
+            grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 2), has_aux=True)
 
             keys = jax.random.split(key, (self.batch_size * 2) + 1)
             key, keys1, keys2 = keys[0], keys[1::2], keys[2::2]
 
             (loss, (metrics)), (policy_gradients, critic_gradients, entropy_gradients) = grad_loss_fn(
-                policy_state.params, critic_state.params, critic_state.target_params, entropy_coefficient_state.params,
+                policy_state.params, critic_state.params, entropy_coefficient_state.params,
                 states, next_states, actions, rewards, terminations, keys1, keys2)
 
             policy_state = policy_state.apply_gradients(grads=policy_gradients)

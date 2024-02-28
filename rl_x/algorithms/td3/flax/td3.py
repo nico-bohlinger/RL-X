@@ -119,17 +119,16 @@ class TD3:
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, key: jax.random.PRNGKey
             ):
             def loss_fn(critic_params: flax.core.FrozenDict,
-                        critic_target_params: flax.core.FrozenDict, policy_target_params: flax.core.FrozenDict,
                         state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray,
                         key1: jax.random.PRNGKey
                 ):
                 # Critic loss
-                next_action = stop_gradient(self.policy.apply(policy_target_params, next_state))
+                next_action = self.policy.apply(policy_state.target_params, next_state)
                 smoothing_noise = jax.random.normal(key1, next_action.shape) * self.smoothing_epsilon
                 smoothing_noise = jnp.clip(smoothing_noise, -self.smoothing_clip_value, self.smoothing_clip_value)
                 next_action = jnp.clip(next_action + smoothing_noise, -1.0, 1.0)
 
-                next_q_target = stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
+                next_q_target = self.critic.apply(critic_state.target_params, next_state, next_action)
                 min_next_q_target = jnp.min(next_q_target)
                 y = reward + self.gamma * (1 - terminated) * min_next_q_target
                 q = self.critic.apply(critic_params, state, action)
@@ -143,7 +142,7 @@ class TD3:
                 return q_loss, (metrics)
             
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0,), has_aux=True)
@@ -153,7 +152,6 @@ class TD3:
 
             (loss, (metrics)), (critic_gradients,) = grad_loss_fn(
                 critic_state.params,
-                critic_state.target_params, policy_state.target_params,
                 states, next_states, actions, rewards, terminations, keys1)
 
             critic_state = critic_state.apply_gradients(grads=critic_gradients)
@@ -167,10 +165,10 @@ class TD3:
         def update_policy_and_targets(
                 policy_state: RLTrainState, critic_state: RLTrainState, states: np.ndarray
             ):
-            def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict, state: np.ndarray):
+            def loss_fn(policy_params: flax.core.FrozenDict, state: np.ndarray):
                 # Policy loss
                 current_action = self.policy.apply(policy_params, state)
-                q = self.critic.apply(stop_gradient(critic_params), state, current_action)
+                q = self.critic.apply(critic_state.params, state, current_action)
                 min_q = jnp.min(q)
                 policy_loss = -min_q
 
@@ -183,12 +181,12 @@ class TD3:
                 return policy_loss, (metrics)
             
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0,), has_aux=True)
 
-            (loss, (metrics)), (policy_gradients,) = grad_loss_fn(policy_state.params, critic_state.params, states)
+            (loss, (metrics)), (policy_gradients,) = grad_loss_fn(policy_state.params, states)
 
             policy_state = policy_state.apply_gradients(grads=policy_gradients)
 

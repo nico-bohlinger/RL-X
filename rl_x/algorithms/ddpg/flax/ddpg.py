@@ -111,12 +111,11 @@ class DDPG:
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray
             ):
             def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict,
-                        critic_target_params: flax.core.FrozenDict, policy_target_params: flax.core.FrozenDict,
                         state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray
                 ):
                 # Critic loss
-                next_action = stop_gradient(self.policy.apply(policy_target_params, next_state))
-                next_q_target = stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
+                next_action = self.policy.apply(policy_state.target_params, next_state)
+                next_q_target = self.critic.apply(critic_state.target_params, next_state, next_action)
                 y = reward + self.gamma * (1 - terminated) * next_q_target
                 q = self.critic.apply(critic_params, state, action)
                 q_loss = (q - y) ** 2
@@ -139,14 +138,13 @@ class DDPG:
                 return loss, (metrics)
             
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, None, 0, 0, 0, 0, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
             (loss, (metrics)), (policy_gradients, critic_gradients) = grad_loss_fn(
                 policy_state.params, critic_state.params,
-                critic_state.target_params, policy_state.target_params,
                 states, next_states, actions, rewards, terminations)
 
             policy_state = policy_state.apply_gradients(grads=policy_gradients)

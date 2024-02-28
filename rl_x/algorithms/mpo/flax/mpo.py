@@ -162,7 +162,7 @@ class MPO():
 
         @jax.jit
         def update(train_state: TrainingState, states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey):
-            def loss_fn(agent_params: flax.core.FrozenDict, dual_params: flax.core.FrozenDict, agent_target_params: flax.core.FrozenDict,
+            def loss_fn(agent_params: flax.core.FrozenDict, dual_params: flax.core.FrozenDict,
                         states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey
                 ):
                 # Compute predictions. Atoms for TQC critic loss
@@ -173,12 +173,12 @@ class MPO():
 
 
                 # Compute targets
-                target_policy = self.policy.apply(agent_target_params.policy_params, states)
+                target_policy = self.policy.apply(train_state.agent_target_params.policy_params, states)
 
                 a_improvement = target_policy.sample(self.nr_samples, seed=key)
 
                 vmap_critic_call = jax.vmap(self.critic.apply, in_axes=(None, None, 0))
-                q_improvement = vmap_critic_call(agent_target_params.critic_params, states, a_improvement)
+                q_improvement = vmap_critic_call(train_state.agent_target_params.critic_params, states, a_improvement)
                 q_improvement = jnp.transpose(q_improvement, (0, 2, 1, 3)).reshape(self.nr_samples, self.trace_length, self.nr_total_atoms)
                 q_improvement = jnp.mean(q_improvement, axis=2)
 
@@ -186,14 +186,14 @@ class MPO():
 
                 a_evaluation = eval_policy.sample(self.nr_samples, seed=key)
 
-                value_atoms_target = vmap_critic_call(agent_target_params.critic_params, states, a_evaluation)
+                value_atoms_target = vmap_critic_call(train_state.agent_target_params.critic_params, states, a_evaluation)
                 value_atoms_target = jnp.transpose(value_atoms_target, (0, 2, 1, 3)).reshape(self.nr_samples, self.trace_length, self.nr_total_atoms)
                 value_atoms_target = jnp.mean(value_atoms_target, axis=0)
                 value_atoms_target = jnp.sort(value_atoms_target)[:, :self.nr_target_atoms]
 
                 ###
                 # Retrace calculation defined in rlax and used by acme: https://github.com/deepmind/rlax/blob/master/rlax/_src/multistep.py#L380#L433
-                q_t = self.critic.apply(agent_target_params.critic_params, states[1:-1], actions[1:-1])
+                q_t = self.critic.apply(train_state.agent_target_params.critic_params, states[1:-1], actions[1:-1])
                 q_t = jnp.transpose(q_t, (1, 0, 2)).reshape(self.trace_length - 2, self.nr_total_atoms)
                 q_t = jnp.sort(q_t)[:, :self.nr_target_atoms]
                 v_t = value_atoms_target[1:, :]
@@ -213,7 +213,7 @@ class MPO():
                 returns = jnp.concatenate([returns, g[jnp.newaxis]], axis=0)
                 ###
 
-                q_atoms_target = jax.lax.stop_gradient(returns)
+                q_atoms_target = returns
 
 
                 # Compute policy loss
@@ -336,12 +336,12 @@ class MPO():
             keys = jax.random.split(key, self.batch_size + 1)
             key, keys = keys[0], keys[1:]
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
-            (loss, (metrics)), (agent_gradients, dual_gradients) = grad_loss_fn(train_state.agent_params, train_state.dual_params, train_state.agent_target_params, states, actions, rewards, terminations, log_probs, keys)
+            (loss, (metrics)), (agent_gradients, dual_gradients) = grad_loss_fn(train_state.agent_params, train_state.dual_params, states, actions, rewards, terminations, log_probs, keys)
 
             agent_gradients_norm = optax.global_norm(agent_gradients)
             dual_gradients_norm = optax.global_norm(dual_gradients)

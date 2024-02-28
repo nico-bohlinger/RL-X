@@ -107,10 +107,10 @@ class DQN:
                 critic_state: RLTrainState, current_step: int,
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray
             ):
-            def loss_fn(critic_params: flax.core.FrozenDict, critic_target_params: flax.core.FrozenDict,
+            def loss_fn(critic_params: flax.core.FrozenDict,
                         state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray
                 ):
-                next_q_target = self.critic.apply(critic_target_params, next_state)
+                next_q_target = self.critic.apply(critic_state.target_params, next_state)
 
                 y = reward + self.gamma * (1 - terminated) * jnp.max(next_q_target)
 
@@ -129,13 +129,13 @@ class DQN:
             states = jnp.expand_dims(states, axis=1)
             next_states = jnp.expand_dims(next_states, axis=1)
             
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0, 0, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0,), has_aux=True)
 
             (loss, (metrics)), (critic_gradients,) = grad_loss_fn(
-                critic_state.params, critic_state.target_params,
+                critic_state.params,
                 states, next_states, actions, rewards, terminations)
 
             critic_state = critic_state.apply_gradients(grads=critic_gradients)
