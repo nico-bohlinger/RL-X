@@ -23,4 +23,4 @@ do
     esac
 done
 
-bash run.sh -c $commit_hash -d $diff_file_path
+bash run.sh -c $commit_hash -d $diff_file_path -h false

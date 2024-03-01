@@ -36,9 +36,13 @@ For running experiments:
 
 **run.sh**
 - Runs the docker run command to start the container
-- With ```bash run.sh -c <commit> -d <diff>``` the container will be started with the given commit and diff
+- With ```bash run.sh -c <commit> -d <diff> -h <headless>``` the container will be started with the given commit, diff and head mode
+- If ```-c``` is not specified, the latest commit will be used
+- If ```-d``` is not specified, no diff will be applied
+- If ```-h``` is not specified, the container will be started in headless mode, i.e. ```-h true```
 - The folder the diff is located in will be mounted into the container
 
 **slurm_experiment.sh**
 - Wrapper around ```run.sh```
 - Pass commit and diff like in ```run.sh```, i.e. ```sbatch slurm_experiment.sh -c <commit> -d <diff>```
+- Will always run the container in not-headless mode
