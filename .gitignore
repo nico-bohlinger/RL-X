@@ -3,7 +3,5 @@ __pycache__/
 dist/
 .vscode
 .DS_Store
-diffs/
-log/
 runs/
 wandb/
