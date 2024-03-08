@@ -382,7 +382,7 @@ class DQN:
         for i in range(episodes):
             done = False
             episode_return = 0
-            state = self.env.reset()
+            state, _ = self.env.reset()
             while not done:
                 action = get_action(self.critic_state, state)
                 state, reward, terminated, truncated, info = self.env.step(jax.device_get(action))

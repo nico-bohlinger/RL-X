@@ -395,7 +395,7 @@ class DDPG:
         for i in range(episodes):
             done = False
             episode_return = 0
-            state = self.env.reset()
+            state, _ = self.env.reset()
             while not done:
                 processed_action = get_action(self.policy_state, state)
                 state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
