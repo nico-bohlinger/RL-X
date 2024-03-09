@@ -69,9 +69,6 @@ class Runner:
         elif algorithm_uses_jax or environment_uses_jax:
             # Guarantee enough memory for CUBLAS to initialize when using jax
             os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
-            # Use old flax checkpointing
-            import flax
-            flax.config.update('flax_use_orbax_checkpointing', False)
             # Set device
             import jax
             alg_device = None

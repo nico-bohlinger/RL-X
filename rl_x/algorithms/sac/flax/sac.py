@@ -10,7 +10,8 @@ from jax.lax import stop_gradient
 import jax.numpy as jnp
 import flax
 from flax.training.train_state import TrainState
-from flax.training import checkpoints
+from flax.training import orbax_utils
+import orbax.checkpoint
 import optax
 import wandb
 
@@ -108,6 +109,9 @@ class SAC:
         if self.save_model:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
+            self.best_model_file_name = "model_best_jax"
+            best_model_check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=self.best_model_file_name)
+            self.best_model_checkpointer = orbax.checkpoint.Checkpointer(best_model_check_point_handler)
         
     
     def train(self):
@@ -378,51 +382,47 @@ class SAC:
 
 
     def save(self):
-        jax_file_path = self.save_path + "/model_best_jax_0"
-        config_file_path = self.save_path + "/model_best_config_0"
-
-        checkpoints.save_checkpoint(
-            ckpt_dir=self.save_path,
-            target={"policy": self.policy_state, "critic": self.critic_state, "entropy_coefficient": self.entropy_coefficient_state},
-            step=0,
-            prefix="model_best_jax_",
-            overwrite=True
-        )
-
-        with open(config_file_path, "wb") as file:
-            pickle.dump({"config_algorithm": self.config.algorithm}, file, pickle.HIGHEST_PROTOCOL)
+        checkpoint = {
+            "config_algorithm": self.config.algorithm.to_dict(),
+            "policy": self.policy_state,
+            "critic": self.critic_state,
+            "entropy_coefficient": self.entropy_coefficient_state,           
+        }
+        save_args = orbax_utils.save_args_from_target(checkpoint)
+        self.best_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
+        os.rename(f"{self.save_path}/tmp/{self.best_model_file_name}", f"{self.save_path}/{self.best_model_file_name}")
+        os.rmdir(f"{self.save_path}/tmp")
 
         if self.track_wandb:
-            wandb.save(jax_file_path, base_path=os.path.dirname(jax_file_path))
-            wandb.save(config_file_path, base_path=os.path.dirname(config_file_path))
-    
-            
+            wandb.save(f"{self.save_path}/{self.best_model_file_name}", base_path=self.save_path)
+
+
     def load(config, env, run_path, writer):
         splitted_path = config.runner.load_model.split("/")
         checkpoint_dir = "/".join(splitted_path[:-1])
-        checkpoint_name = splitted_path[-1]
-        splitted_checkpoint_name = checkpoint_name.split("_")
+        checkpoint_file_name = splitted_path[-1]
 
-        config_file_name = "_".join(splitted_checkpoint_name[:-2]) + "_config_" + splitted_checkpoint_name[-1]
-        with open(f"{checkpoint_dir}/{config_file_name}", "rb") as file:
-            loaded_algorithm_config = pickle.load(file)["config_algorithm"]
+        check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=checkpoint_file_name)
+        checkpointer = orbax.checkpoint.Checkpointer(check_point_handler)
+
+        loaded_algorithm_config = checkpointer.restore(checkpoint_dir)["config_algorithm"]
         default_algorithm_config = get_config(config.algorithm.name)
         for key, value in loaded_algorithm_config.items():
             if config.algorithm[key] == default_algorithm_config[key]:
                 config.algorithm[key] = value
         model = SAC(config, env, run_path, writer)
 
-        jax_file_name = "_".join(splitted_checkpoint_name[:-1]) + "_"
-        step = int(splitted_checkpoint_name[-1])
-        restored_train_state = checkpoints.restore_checkpoint(
-            ckpt_dir=checkpoint_dir,
-            target={"policy": model.policy_state, "critic": model.critic_state, "entropy_coefficient": model.entropy_coefficient_state},
-            step=step,
-            prefix=jax_file_name
-        )
-        model.policy_state = restored_train_state["policy"]
-        model.critic_state = restored_train_state["critic"]
-        model.entropy_coefficient_state = restored_train_state["entropy_coefficient"]
+        target = {
+            "config_algorithm": config.algorithm.to_dict(),
+            "policy": model.policy_state,
+            "critic": model.critic_state,
+            "entropy_coefficient": model.entropy_coefficient_state
+        }
+        checkpoint = checkpointer.restore(checkpoint_dir, item=target)
+
+        model.policy_state = checkpoint["policy"]
+        model.critic_state = checkpoint["critic"]
+        model.entropy_coefficient_state = checkpoint["entropy_coefficient"]
 
         return model
     
