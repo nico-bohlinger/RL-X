@@ -388,7 +388,7 @@ class SAC:
         for i in range(episodes):
             done = False
             episode_return = 0
-            state = self.env.reset()
+            state, _ = self.env.reset()
             while not done:
                 with torch.no_grad():
                     processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
