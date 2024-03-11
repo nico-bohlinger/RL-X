@@ -210,6 +210,7 @@ class Runner:
             )
 
         run_path = f"runs/{self._config.runner.project_name}/{self._config.runner.exp_name}/{self._config.runner.run_name}"
+        run_path = os.path.abspath(run_path)
         writer = None
         if self._config.runner.track_tb:
             from torch.utils.tensorboard import SummaryWriter

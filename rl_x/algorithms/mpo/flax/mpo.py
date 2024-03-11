@@ -593,6 +593,7 @@ class MPO():
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.best_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
         os.rename(f"{self.save_path}/tmp/{self.best_model_file_name}", f"{self.save_path}/{self.best_model_file_name}")
+        os.remove(f"{self.save_path}/tmp/_METADATA")
         os.rmdir(f"{self.save_path}/tmp")
 
         if self.track_wandb:
