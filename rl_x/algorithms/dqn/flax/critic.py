@@ -1,4 +1,3 @@
-from typing import Sequence
 import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
@@ -14,7 +13,7 @@ def get_critic(config, env):
 
 
 class Critic(nn.Module):
-    nr_available_actions: Sequence[int]
+    nr_available_actions: int
     nr_hidden_units: int
 
     @nn.compact
