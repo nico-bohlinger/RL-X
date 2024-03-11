@@ -124,7 +124,7 @@ class DQN:
                 # Create metrics
                 metrics = {
                     "loss/q_loss": q_loss,
-                    "q_value/q_value": q.mean(),
+                    "q_value/q_value": q,
                 }
 
                 return q_loss, (metrics)
