@@ -20,6 +20,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/aqe/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/aqe/README.md): Implementation details of the Aggressive Q-Learning with Ensembles (AQE) algorithm
 - [```/rl_x/algorithms/ddpg/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ddpg/README.md): Implementation details of the Deep Deterministic Policy Gradient (DDPG) algorithm
 - [```/rl_x/algorithms/dqn/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dqn/README.md): Implementation details of the Deep Q-Network (DQN) algorithm
+- [```/rl_x/algorithms/dqn_hl_gauss/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dqn_hl_gauss/README.md): Implementation details of the Deep Q-Network with Histogram Loss using Gaussians (DQN HL-Gauss) algorithm
 - [```/rl_x/algorithms/droq/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/droq/README.md): Implementation details of the Dropout Q-Functions (DroQ) algorithm
 - [```/rl_x/algorithms/espo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/espo/README.md): Implementation details of the Early Stopping Policy Optimization (ESPO) algorithm
 - [```/rl_x/algorithms/mpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/mpo/README.md): Implementation details of the Maximum a Posteriori Policy Optimization (MPO) algorithm
