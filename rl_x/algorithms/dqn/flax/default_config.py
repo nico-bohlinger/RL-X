@@ -11,7 +11,7 @@ def get_config(algorithm_name):
     config.learning_rate = 3e-4
     config.anneal_learning_rate = False
     config.buffer_size = 1e5
-    config.learning_starts = 200
+    config.learning_starts = 20000
     config.batch_size = 32
     config.gamma = 0.99
     config.epsilon_start = 1.0
