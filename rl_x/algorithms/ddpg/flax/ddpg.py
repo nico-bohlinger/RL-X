@@ -1,6 +1,5 @@
 import os
 import logging
-import pickle
 import time
 from collections import deque
 import tree
