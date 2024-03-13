@@ -9,7 +9,6 @@ import torch.optim as optim
 import wandb
 
 from rl_x.algorithms.sac.pytorch.general_properties import GeneralProperties
-from rl_x.algorithms.sac.pytorch.default_config import get_config
 from rl_x.algorithms.sac.pytorch.policy import get_policy
 from rl_x.algorithms.sac.pytorch.critic import get_critic
 from rl_x.algorithms.sac.pytorch.entropy_coefficient import EntropyCoefficient
@@ -363,12 +362,11 @@ class SAC:
             wandb.save(file_path, base_path=os.path.dirname(file_path))
     
 
-    def load(config, env, run_path, writer):
+    def load(config, env, run_path, writer, explicitly_set_algorithm_params):
         checkpoint = torch.load(config.runner.load_model)
         loaded_algorithm_config = checkpoint["config_algorithm"]
-        default_algorithm_config = get_config(config.algorithm.name)
         for key, value in loaded_algorithm_config.items():
-            if config.algorithm[key] == default_algorithm_config[key]:
+            if f"algorithm.{key}" not in explicitly_set_algorithm_params:
                 config.algorithm[key] = value
         model = SAC(config, env, run_path, writer)
         model.policy.load_state_dict(checkpoint["policy_state_dict"])

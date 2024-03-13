@@ -224,7 +224,8 @@ class Runner:
         env = self._create_env(self._config)
         
         if self._config.runner.load_model:
-            model = self._model_class.load(self._config, env, run_path, writer)
+            explicitly_set_algorithm_params = [param_name for param_name in self._algorithm_config_flag._flagvalues if param_name.startswith("algorithm.")]
+            model = self._model_class.load(self._config, env, run_path, writer, explicitly_set_algorithm_params)
         else:
             model = self._model_class(self._config, env, run_path, writer)
 

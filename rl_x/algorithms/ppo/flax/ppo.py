@@ -13,7 +13,6 @@ import optax
 import wandb
 
 from rl_x.algorithms.ppo.flax.general_properties import GeneralProperties
-from rl_x.algorithms.ppo.flax.default_config import get_config
 from rl_x.algorithms.ppo.flax.policy import get_policy
 from rl_x.algorithms.ppo.flax.critic import get_critic
 from rl_x.algorithms.ppo.flax.batch import Batch
@@ -421,7 +420,7 @@ class PPO:
             wandb.save(f"{self.save_path}/{self.best_model_file_name}", base_path=self.save_path)
 
 
-    def load(config, env, run_path, writer):
+    def load(config, env, run_path, writer, explicitly_set_algorithm_params):
         splitted_path = config.runner.load_model.split("/")
         checkpoint_dir = "/".join(splitted_path[:-1])
         checkpoint_file_name = splitted_path[-1]
@@ -430,9 +429,8 @@ class PPO:
         checkpointer = orbax.checkpoint.Checkpointer(check_point_handler)
 
         loaded_algorithm_config = checkpointer.restore(checkpoint_dir)["config_algorithm"]
-        default_algorithm_config = get_config(config.algorithm.name)
         for key, value in loaded_algorithm_config.items():
-            if config.algorithm[key] == default_algorithm_config[key]:
+            if f"algorithm.{key}" not in explicitly_set_algorithm_params:
                 config.algorithm[key] = value
         model = PPO(config, env, run_path, writer)
 
