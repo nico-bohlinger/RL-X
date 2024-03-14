@@ -2,6 +2,8 @@ import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
 
+from rl_x.algorithms.crossq.flax.batch_renorm import BatchRenorm
+
 from rl_x.environments.observation_space_type import ObservationSpaceType
 
 
@@ -9,7 +11,7 @@ def get_critic(config, env):
     observation_space_type = env.general_properties.observation_space_type
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return VectorCritic(config.algorithm.nr_hidden_units, 2)
+        return VectorCritic(config.algorithm.critic_nr_hidden_units, 2)
 
 
 class Critic(nn.Module):

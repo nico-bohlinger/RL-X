@@ -1,6 +1,6 @@
-# Soft Actor-Critic
+# CrossQ
 
-Contains the implementation of [Soft Actor-Critic (SAC)](https://arxiv.org/pdf/1801.01290).
+Contains the implementation of [CrossQ](https://openreview.net/pdf?id=PczQtTsTIX).
 
 On how the algorithms works, refer to the [Resources](#resources) section.
 
@@ -8,28 +8,19 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 ## RL-X implementation
 
 **Implementation Details**
-- Supports automatically adjusted temperature
+- Hyperparameters are exactly as in the paper but this means some standard parameters differ from the RL-X SAC implementation. So keep in mind, for a fair comparison between the two algorithms, these parameters have to be adjusted
 
 **Supported frameworks**
-- PyTorch, JAX (Flax)
+- JAX (Flax)
 
 **Supported action space, observation space and data interface types**
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
-| PyTorch | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 
 ## Resources
-- Paper: [Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor (Haarnoja et al., 2018)](https://arxiv.org/pdf/1801.01290)
-- Paper 2: [Soft Actor-Critic Algorithms and Applications (Haarnoja et al., 2018)](https://arxiv.org/pdf/1812.05905)
-
-- Spinning Up documentation: [here](https://spinningup.openai.com/en/latest/algorithms/sac.html)
-
-- Blog post by Lilian Weng: [here](https://lilianweng.github.io/posts/2018-04-08-policy-gradient/#sac)
+- Paper: [Batch Normalization in Deep Reinforcement Learning for Greater Sample Efficiency and Simplicity (Bhatt et al., 2024)](https://openreview.net/pdf?id=PczQtTsTIX)
 
 - Repositories:
-    - Stable Baselines3: [here](https://github.com/DLR-RM/stable-baselines3/blob/master/stable_baselines3/sac/sac.py)
-    - Stable Baselines Jax: [here](https://github.com/araffin/sbx/tree/master/sbx/sac)
-    - JAXRL: [here](https://github.com/ikostrikov/jaxrl/tree/main/jaxrl/agents/sac)
-    - CleanRL: [here](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/sac_continuous_action.py)
+    - Source code of the paper: [here](https://github.com/adityab/CrossQ/tree/main)

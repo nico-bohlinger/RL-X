@@ -19,7 +19,6 @@ from rl_x.algorithms.crossq.flax.policy import get_policy
 from rl_x.algorithms.crossq.flax.critic import get_critic
 from rl_x.algorithms.crossq.flax.entropy_coefficient import EntropyCoefficient
 from rl_x.algorithms.crossq.flax.replay_buffer import ReplayBuffer
-from rl_x.algorithms.crossq.flax.rl_train_state import RLTrainState
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -40,13 +39,14 @@ class CrossQ:
         self.nr_envs = config.environment.nr_envs
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
+        self.policy_adam_b1 = config.algorithm.policy_adam_b1
+        self.critic_adam_b1 = config.algorithm.critic_adam_b1
         self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
-        self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
+        self.policy_delay = config.algorithm.policy_delay
         self.target_entropy = config.algorithm.target_entropy
-        self.nr_hidden_units = config.algorithm.nr_hidden_units
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.evaluation_episodes = config.algorithm.evaluation_episodes
@@ -88,14 +88,19 @@ class CrossQ:
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, state),
-            tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.policy_learning_rate)
+            tx=optax.inject_hyperparams(optax.adam)(
+                learning_rate=self.policy_learning_rate,
+                b1=self.policy_adam_b1,
+            )
         )
 
-        self.critic_state = RLTrainState.create(
+        self.critic_state = TrainState.create(
             apply_fn=self.critic.apply,
             params=self.critic.init(critic_key, state, action),
-            target_params=self.critic.init(critic_key, state, action),
-            tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.q_learning_rate)
+            tx=optax.inject_hyperparams(optax.adam)(
+                learning_rate=self.q_learning_rate,
+                b1=self.critic_adam_b1,
+            )
         )
 
         self.entropy_coefficient_state = TrainState.create(
@@ -122,23 +127,22 @@ class CrossQ:
 
 
         @jax.jit
-        def update(
-                policy_state: TrainState, critic_state: RLTrainState, entropy_coefficient_state: TrainState,
+        def update_critic(
+                policy_state: TrainState, critic_state: TrainState, entropy_coefficient_state: TrainState,
                 states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, key: jax.random.PRNGKey
             ):
-            def loss_fn(policy_params: flax.core.FrozenDict, critic_params: flax.core.FrozenDict, entropy_coefficient_params: flax.core.FrozenDict,
+            def loss_fn(critic_params: flax.core.FrozenDict,
                         state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray,
-                        key1: jax.random.PRNGKey, key2: jax.random.PRNGKey
+                        subkey: jax.random.PRNGKey
                 ):
                 # Critic loss
-                dist = stop_gradient(self.policy.apply(policy_params, next_state))
-                next_action = dist.sample(seed=key1)
+                dist = stop_gradient(self.policy.apply(policy_state.params, next_state))
+                next_action = dist.sample(seed=subkey)
                 next_log_prob = dist.log_prob(next_action)
 
-                alpha_with_grad = self.entropy_coefficient.apply(entropy_coefficient_params)
-                alpha = stop_gradient(alpha_with_grad)
+                alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
 
-                next_q_target = self.critic.apply(critic_state.target_params, next_state, next_action)
+                next_q_target = stop_gradient(self.critic.apply(critic_params, next_state, next_action))
                 min_next_q_target = jnp.min(next_q_target)
 
                 y = reward + self.gamma * (1 - terminated) * (min_next_q_target - alpha * next_log_prob)
@@ -146,14 +150,53 @@ class CrossQ:
                 q = self.critic.apply(critic_params, state, action)
                 q_loss = (q - y) ** 2
 
+                # Create metrics
+                metrics = {
+                    "loss/q_loss": q_loss,
+                }
+
+                return q_loss, (metrics)
+            
+
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0, 0, 0, 0, 0, 0), out_axes=0)
+            safe_mean = lambda x: jnp.mean(x) if x is not None else x
+            mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
+            grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0,), has_aux=True)
+
+            keys = jax.random.split(key, self.batch_size + 1)
+            key, subkeys = keys[0], keys[1:]
+
+            (loss, (metrics)), (critic_gradients,) = grad_loss_fn(
+                critic_state.params,
+                states, next_states, actions, rewards, terminations, subkeys)
+
+            critic_state = critic_state.apply_gradients(grads=critic_gradients)
+
+            metrics["lr/learning_rate"] = critic_state.opt_state.hyperparams["learning_rate"]
+            metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
+
+            return critic_state, metrics, key
+        
+
+        @jax.jit
+        def update_policy_and_entropy_coefficient(
+                policy_state: TrainState, critic_state: TrainState, entropy_coefficient_state: TrainState,
+                states: np.ndarray, key: jax.random.PRNGKey
+            ):
+            def loss_fn(policy_params: flax.core.FrozenDict, entropy_coefficient_params: flax.core.FrozenDict,
+                        state: np.ndarray, subkey: jax.random.PRNGKey
+                ):
                 # Policy loss
                 dist = self.policy.apply(policy_params, state)
-                current_action = dist.sample(seed=key2)
+                current_action = dist.sample(seed=subkey)
                 current_log_prob = dist.log_prob(current_action)
                 entropy = stop_gradient(-current_log_prob)
 
-                q = self.critic.apply(stop_gradient(critic_params), state, current_action)
+                q = self.critic.apply(critic_state.params, state, current_action)
                 min_q = jnp.min(q)
+
+                alpha_with_grad = self.entropy_coefficient.apply(entropy_coefficient_params)
+                alpha = stop_gradient(alpha_with_grad)
 
                 policy_loss = alpha * current_log_prob - min_q
 
@@ -161,11 +204,10 @@ class CrossQ:
                 entropy_loss = alpha_with_grad * (entropy - self.target_entropy)
 
                 # Combine losses
-                loss = q_loss + policy_loss + entropy_loss
+                loss = policy_loss + entropy_loss
 
                 # Create metrics
                 metrics = {
-                    "loss/q_loss": q_loss,
                     "loss/policy_loss": policy_loss,
                     "loss/entropy_loss": entropy_loss,
                     "entropy/entropy": entropy,
@@ -176,31 +218,24 @@ class CrossQ:
                 return loss, (metrics)
             
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
-            grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 2), has_aux=True)
+            grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
-            keys = jax.random.split(key, (self.batch_size * 2) + 1)
-            key, keys1, keys2 = keys[0], keys[1::2], keys[2::2]
+            keys = jax.random.split(key, self.batch_size + 1)
+            key, subkeys = keys[0], keys[1:]
 
-            (loss, (metrics)), (policy_gradients, critic_gradients, entropy_gradients) = grad_loss_fn(
-                policy_state.params, critic_state.params, entropy_coefficient_state.params,
-                states, next_states, actions, rewards, terminations, keys1, keys2)
+            (loss, (metrics)), (policy_gradients, entropy_gradients) = grad_loss_fn(
+                policy_state.params, entropy_coefficient_state.params, states, subkeys)
 
             policy_state = policy_state.apply_gradients(grads=policy_gradients)
-            critic_state = critic_state.apply_gradients(grads=critic_gradients)
             entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=entropy_gradients)
 
-            # Update targets
-            critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
-
-            metrics["lr/learning_rate"] = policy_state.opt_state.hyperparams["learning_rate"]
             metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
-            metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
             metrics["gradients/entropy_grad_norm"] = optax.global_norm(entropy_gradients)
 
-            return policy_state, critic_state, entropy_coefficient_state, metrics, key
+            return policy_state, entropy_coefficient_state, metrics, key
         
 
         @jax.jit
@@ -218,7 +253,8 @@ class CrossQ:
 
         state, _ = self.env.reset()
         global_step = 0
-        nr_updates = 0
+        nr_critic_updates = 0
+        nr_policy_updates = 0
         nr_episodes = 0
         time_metrics_collection = {}
         step_info_collection = {}
@@ -261,23 +297,32 @@ class CrossQ:
 
             # What to do in this step after acting
             should_learning_start = global_step > self.learning_starts
-            should_optimize = should_learning_start
+            should_optimize_critic = should_learning_start
+            should_optimize_policy = should_learning_start and global_step % self.policy_delay == 0
             should_evaluate = global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1
             should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
             should_log = global_step % self.logging_frequency == 0
 
 
             # Optimizing - Prepare batches
-            if should_optimize:
+            if should_optimize_critic:
                 batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size)
 
 
-            # Optimizing - Q-functions, policy and entropy coefficient
-            if should_optimize:
-                self.policy_state, self.critic_state, self.entropy_coefficient_state, optimization_metrics, self.key = update(self.policy_state, self.critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations, self.key)
+            # Optimizing - Q-functions
+            if should_optimize_critic:
+                self.critic_state, optimization_metrics, self.key = update_critic(self.policy_state, self.critic_state, self.entropy_coefficient_state, batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations, self.key)
                 for key, value in optimization_metrics.items():
                     optimization_metrics_collection.setdefault(key, []).append(value)
-                nr_updates += 1
+                nr_critic_updates += 1
+
+
+            # Optimizing - Policy and entropy coefficient
+            if should_optimize_policy:
+                self.policy_state, self.entropy_coefficient_state, optimization_metrics, self.key = update_policy_and_entropy_coefficient(self.policy_state, self.critic_state, self.entropy_coefficient_state, batch_states, self.key)
+                for key, value in optimization_metrics.items():
+                    optimization_metrics_collection.setdefault(key, []).append(value)
+                nr_policy_updates += 1
             
             optimizing_end_time = time.time()
             time_metrics_collection.setdefault("time/optimizing_time", []).append(optimizing_end_time - acting_end_time)
@@ -326,7 +371,8 @@ class CrossQ:
                 self.start_logging(global_step)
 
                 steps_metrics["steps/nr_env_steps"] = global_step
-                steps_metrics["steps/nr_updates"] = nr_updates
+                steps_metrics["steps/nr_critic_updates"] = nr_critic_updates
+                steps_metrics["steps/nr_policy_updates"] = nr_policy_updates
                 steps_metrics["steps/nr_episodes"] = nr_episodes
 
                 rollout_info_metrics = {}

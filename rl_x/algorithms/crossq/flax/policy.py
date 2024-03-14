@@ -6,7 +6,8 @@ import flax.linen as nn
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
-from rl_x.algorithms.sac.flax.tanh_transformed_distribution import TanhTransformedDistribution
+from rl_x.algorithms.crossq.flax.tanh_transformed_distribution import TanhTransformedDistribution
+from rl_x.algorithms.crossq.flax.batch_renorm import BatchRenorm
 
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
@@ -17,7 +18,7 @@ def get_policy(config, env):
     observation_space_type = env.general_properties.observation_space_type
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return (Policy(env.single_action_space.shape, config.algorithm.log_std_min, config.algorithm.log_std_max, config.algorithm.nr_hidden_units),
+        return (Policy(env.single_action_space.shape, config.algorithm.log_std_min, config.algorithm.log_std_max, config.algorithm.policy_nr_hidden_units),
                 get_processed_action_function(jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high)))
 
 
