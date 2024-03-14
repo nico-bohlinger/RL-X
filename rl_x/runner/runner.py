@@ -1,7 +1,7 @@
 import os
 
 # Silence tensorflow warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
 
