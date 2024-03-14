@@ -220,7 +220,7 @@ class REDQ():
 
                 all_indices = jnp.arange(self.ensemble_size)
                 m_indices = jax.random.choice(key=sample_key, a=all_indices, shape=(self.in_target_minimization_size,), replace=False)
-                m_target_params = jax.tree_map(lambda x: x[m_indices], critic_state.target_params)
+                m_target_params = jax.tree_util.tree_map(lambda x: x[m_indices], critic_state.target_params)
 
                 (loss, (metrics)), (critic_gradients) = grad_critic_loss_fn(critic_state.params, m_target_params, states[i], next_states[i], actions[i], rewards[i], terminations[i], keys1)
                 
