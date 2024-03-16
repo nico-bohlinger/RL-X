@@ -18,8 +18,17 @@ def get_policy(config, env):
     observation_space_type = env.general_properties.observation_space_type
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return (Policy(env.single_action_space.shape, config.algorithm.log_std_min, config.algorithm.log_std_max, config.algorithm.policy_nr_hidden_units),
-                get_processed_action_function(jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high)))
+        return (
+            Policy(
+                env.single_action_space.shape,
+                config.algorithm.log_std_min,
+                config.algorithm.log_std_max,
+                config.algorithm.batch_renorm_momentum,
+                config.algorithm.batch_renorm_warmup_steps,
+                config.algorithm.policy_nr_hidden_units
+            ),
+            get_processed_action_function(jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high))
+        )
 
 
 
@@ -27,14 +36,33 @@ class Policy(nn.Module):
     as_shape: Sequence[int]
     log_std_min: float
     log_std_max: float
+    batch_renorm_momentum: float
+    batch_renorm_warmup_steps: int
     nr_hidden_units: int
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, train):
+        x = BatchRenorm(
+            use_running_average=not train,
+            momentum=self.batch_renorm_momentum,
+            warm_up_steps=self.batch_renorm_warmup_steps
+        )(x)
+
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
+        x = BatchRenorm(
+            use_running_average=not train,
+            momentum=self.batch_renorm_momentum,
+            warm_up_steps=self.batch_renorm_warmup_steps
+        )(x)
+
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
+        x = BatchRenorm(
+            use_running_average=not train,
+            momentum=self.batch_renorm_momentum,
+            warm_up_steps=self.batch_renorm_warmup_steps
+        )(x)
 
         mean = nn.Dense(np.prod(self.as_shape).item())(x)
         log_std = nn.Dense(np.prod(self.as_shape).item())(x)

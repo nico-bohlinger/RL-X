@@ -1,5 +1,8 @@
 # The code is taken and modified from the original CrossQ codebase:
 # https://github.com/adityab/CrossQ/blob/main/sbx/sac/policies.py
+# It is based on the Batch Renormalization paper (https://arxiv.org/abs/1702.03275)
+# and adapted from Flax's BatchNorm implementation:
+# https://github.com/google/flax/blob/ce8a3c74d8d1f4a7d8f14b9fb84b2cc76d7f8dbf/flax/linen/normalization.py#L228
 
 
 from typing import Any, Callable, Optional, Sequence, Tuple, Union

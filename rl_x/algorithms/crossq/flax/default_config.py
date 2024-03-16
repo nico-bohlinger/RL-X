@@ -20,6 +20,8 @@ def get_config(algorithm_name):
     config.target_entropy = "auto"
     config.log_std_min = -20
     config.log_std_max = 2
+    config.batch_renorm_momentum = 0.99
+    config.batch_renorm_warmup_steps = 100000
     config.policy_nr_hidden_units = 256
     config.critic_nr_hidden_units = 2048
     config.logging_frequency = 3000
