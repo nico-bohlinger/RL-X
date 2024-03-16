@@ -16,6 +16,7 @@ def get_config(algorithm_name):
     config.learning_starts = 5000
     config.batch_size = 256
     config.gamma = 0.99
+    config.ensemble_size = 2
     config.policy_delay = 3
     config.target_entropy = "auto"
     config.log_std_min = -20

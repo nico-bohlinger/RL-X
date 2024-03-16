@@ -15,7 +15,7 @@ def get_critic(config, env):
             config.algorithm.batch_renorm_momentum,
             config.algorithm.batch_renorm_warmup_steps,
             config.algorithm.critic_nr_hidden_units,
-            2
+            config.algorithm.ensemble_size
         )
 
 
