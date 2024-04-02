@@ -88,14 +88,14 @@ Example for Google Colab: [![Open In Colab](https://colab.research.google.com/as
 
 
 ## Citation
-If you use RL-X in your research, please cite the following [preprint](https://arxiv.org/abs/2310.13396):
+If you use RL-X in your research, please cite the following [paper](https://arxiv.org/abs/2310.13396):
 ```bibtex
-@misc{bohlinger2023rlx,
+@incollection{bohlinger2023rlx,
       title={RL-X: A Deep Reinforcement Learning Library (not only) for RoboCup}, 
       author={Nico Bohlinger and Klaus Dorer},
+      booktitle={Robot World Cup},
+      pages={228--239},
       year={2023},
-      eprint={2310.13396},
-      archivePrefix={arXiv},
-      primaryClass={cs.RO}
+      publisher={Springer}
 }
 ```
