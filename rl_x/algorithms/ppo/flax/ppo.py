@@ -51,6 +51,7 @@ class PPO:
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
         self.nr_updates = config.algorithm.total_timesteps // self.batch_size
         self.nr_minibatches = self.batch_size // self.minibatch_size
+        self.nr_rollouts = self.total_timesteps // (self.nr_steps * self.nr_envs)
 
         if self.evaluation_frequency % (self.nr_steps * self.nr_envs) != 0 and self.evaluation_frequency != -1:
             raise ValueError("Evaluation frequency must be a multiple of the number of steps and environments.")
@@ -104,7 +105,7 @@ class PPO:
 
     
     def train(self):
-        def custom_train():
+        def train_loop():
             @jax.jit
             def get_action_and_value(policy_state: TrainState, critic_state: TrainState, state: np.ndarray, key: jax.random.PRNGKey):
                 action_mean, action_logstd = self.policy.apply(policy_state.params, state)
@@ -236,206 +237,178 @@ class PPO:
                 return self.get_processed_action(action_mean)
             
 
+            def env_reset_callback():
+                state, _ = self.env.reset()
+                state = state.astype(np.float32)
+                return state
+            
+
+            def reset_step_info_collection_callback():
+                self.step_info_collection = {}
+            
+
             def env_step_callback(action):
                 next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(action))
                 next_state = next_state.astype(np.float32)
                 reward = reward.astype(np.float32)
 
-                # if "final_info" in info:
-                #     print(info["final_info"][0]["episode_length"])
+                actual_next_state = next_state.copy()
+                done = terminated | truncated
+                for i, single_done in enumerate(done):
+                    if single_done:
+                        actual_next_state[i] = self.env.get_final_observation_at_index(info, i)
+                        self.saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                self.current_nr_episodes += np.sum(done)
 
-                return next_state, reward, terminated, truncated
+                for key, info_value in self.env.get_logging_info_dict(info).items():
+                    self.step_info_collection.setdefault(key, []).extend(info_value)
 
+                return next_state, actual_next_state, reward, terminated, truncated
             
-            def log_callback(x):
-                print(x)
+
+            def evaluate_callback(policy_state, old_state):
+                self.evaluation_metrics = {}
+
+                if self.evaluation_frequency != -1 and self.global_step % self.evaluation_frequency == 0:
+                    self.set_eval_mode()
+                    state, _ = self.env.reset()
+                    eval_nr_episodes = 0
+                    evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
+                    while True:
+                        processed_action = get_deterministic_action(policy_state, state)
+                        state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                        done = terminated | truncated
+                        for i, single_done in enumerate(done):
+                            if single_done:
+                                eval_nr_episodes += 1
+                                evaluation_metrics["eval/episode_return"].append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                                evaluation_metrics["eval/episode_length"].append(self.env.get_final_info_value_at_index(info, "episode_length", i))
+                                if eval_nr_episodes == self.evaluation_episodes:
+                                    break
+                        if eval_nr_episodes == self.evaluation_episodes:
+                            break
+                    self.evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
+                    state, _ = self.env.reset()
+                    self.set_train_mode()
+                    return state.astype(np.float32)
+                else:
+                    return old_state
+            
+
+            def save_callback():
+                if self.save_model:
+                    mean_return = np.mean(self.saving_return_buffer)
+                    if mean_return > self.best_mean_return:
+                        self.best_mean_return = mean_return
+                        self.save()
+
+
+            def log_callback(optimization_metrics):
+                current_time = time.time()
+                fps = int((self.nr_steps * self.nr_envs) / (current_time - self.last_time))
+                self.last_time = current_time
+                time_metrics = {
+                    "time/fps": fps
+                }
+
+                self.global_step += self.nr_steps * self.nr_envs
+                self.current_nr_updates += self.nr_epochs * self.nr_minibatches
+                steps_metrics = {
+                    "steps/nr_env_steps": self.global_step,
+                    "steps/nr_updates": self.current_nr_updates,
+                    "steps/nr_episodes": self.current_nr_episodes
+                }
+
+                rollout_info_metrics = {}
+                env_info_metrics = {}
+                info_names = list(self.step_info_collection.keys())
+                for info_name in info_names:
+                    metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
+                    metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
+                    mean_value = np.mean(self.step_info_collection[info_name])
+                    if mean_value == mean_value:  # Check if mean_value is NaN
+                        metric_dict[f"{metric_group}/{info_name}"] = mean_value
+
+                additional_metrics = {**rollout_info_metrics, **self.evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics}
+
+                self.start_logging(self.global_step)
+                for key, value in additional_metrics.items():
+                    self.log(key, value, self.global_step)
+                for key, value in optimization_metrics.items():
+                    self.log(key, value, self.global_step)
+                self.end_logging()
             
 
             self.set_train_mode()
 
-            saving_return_buffer = deque(maxlen=100 * self.nr_envs)
+            state_shape = jax.ShapeDtypeStruct(self.np_state_shape, jnp.float32)
+            reward_shape = jax.ShapeDtypeStruct((self.nr_envs,), jnp.float32)
+            terminated_shape = jax.ShapeDtypeStruct((self.nr_envs,), jnp.bool_)
+            truncated_shape = jax.ShapeDtypeStruct((self.nr_envs,), jnp.bool_)
+            combined_callback_shapes = (state_shape, state_shape, reward_shape, terminated_shape, truncated_shape)
 
-            state = np.zeros((1, 376))
-            global_step = 0
-            nr_updates = 0
-            nr_episodes = 0
-            steps_metrics = {}
-
-            next_state_shape = jax.ShapeDtypeStruct((1, 376), jnp.float32)
-            reward_shape = jax.ShapeDtypeStruct((1,), jnp.float32)
-            terminated_shape = jax.ShapeDtypeStruct((1,), jnp.bool_)
-            truncated_shape = jax.ShapeDtypeStruct((1,), jnp.bool_)
-            combined_callback_shapes = (next_state_shape, reward_shape, terminated_shape, truncated_shape)
+            state = jax.pure_callback(env_reset_callback, state_shape)
 
             def train(carry, _):
                 def rollout(carry, _):
                     policy_state, critic_state, state, key = carry
                     processed_action, action, value, log_prob, key = get_action_and_value(policy_state, critic_state, state, key)
-                    next_state, reward, terminated, truncated = jax.pure_callback(env_step_callback, combined_callback_shapes, processed_action)
-
-                    done = terminated | truncated
-                    actual_next_state = next_state.copy()
+                    next_state, actual_next_state, reward, terminated, truncated = jax.pure_callback(env_step_callback, combined_callback_shapes, processed_action)
 
                     batch = (state, actual_next_state, action, reward, value, terminated, log_prob)
 
                     return (policy_state, critic_state, next_state, key), batch
                 
+
+                # Acting
+                jax.debug.callback(reset_step_info_collection_callback)
                 new_carry, batch = jax.lax.scan(rollout, carry, jnp.arange(self.nr_steps))
 
+
+                # Calculating advantages and returns
                 policy_state, critic_state, state, key = new_carry
                 states, actual_next_states, actions, rewards, values, terminations, log_probs = batch
-
                 advantages, returns = calculate_gae_advantages(critic_state, actual_next_states, rewards, terminations, values)
 
+
+                # Optimizing
                 policy_state, critic_state, optimization_metrics, key = update(
                     policy_state, critic_state,
                     states, actions, advantages, returns, values, log_probs,
                     key
                 )
 
-                new_carry = (policy_state, critic_state, state, key)
 
+                # Evaluating
+                state = jax.pure_callback(evaluate_callback, state_shape, policy_state, state)
+
+
+                # Saving
+                jax.debug.callback(save_callback)
+
+
+                # Logging
                 jax.debug.callback(log_callback, optimization_metrics)
 
-                return new_carry, ()
-            
-            start_time = time.time()
-            nr_rollouts = 20
+
+                return (policy_state, critic_state, state, key), ()
+
+
             init_carry = (self.policy_state, self.critic_state, state, self.key)
-            _, _ = jax.lax.scan(train, init_carry, jnp.arange(nr_rollouts))
-            jax.debug.callback(log_callback, (self.nr_steps * nr_rollouts) / (time.time() - start_time))
-
-            # while global_step < 40:
-                # start_time = time.time()
-                # time_metrics = {}
+            _, _ = jax.lax.scan(train, init_carry, jnp.arange(self.nr_rollouts))
 
 
-                # Acting
-                # dones_this_rollout = 0
-                # step_info_collection = {}
-                # for step in range(20):
-                #     processed_action, action, value, log_prob, self.key = get_action_and_value(self.policy_state, self.critic_state, state, self.key)
-                    
-                #     next_state, reward, terminated, truncated = jax.pure_callback(env_step_callback, combined_callback_shapes, processed_action)
-                #     jax.debug.callback(log_callback, reward)
+        state, _ = self.env.reset()
+        self.np_state_shape = state.shape
+        self.saving_return_buffer = deque(maxlen=100 * self.nr_envs)
+        self.evaluation_metrics = {}
+        self.last_time = time.time()
+        self.global_step = 0
+        self.current_nr_updates = 0
+        self.current_nr_episodes = 0
 
-                #     done = terminated | truncated
-                #     actual_next_state = next_state.copy()
-                    # for i, single_done in enumerate(done):
-                    #     if single_done:
-                    #         actual_next_state[i] = self.env.get_final_observation_at_index(info, i)
-                    #         saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                    #         dones_this_rollout += 1
-                    # for key, info_value in self.env.get_logging_info_dict(info).items():
-                    #     step_info_collection.setdefault(key, []).extend(info_value)
-
-                    # batch.states[step] = state
-                    # batch.next_states[step] = actual_next_state
-                    # batch.actions[step] = action
-                    # batch.rewards[step] = reward
-                    # batch.values[step] = value
-                    # batch.terminations[step] = terminated
-                    # batch.log_probs[step] = log_prob
-                #     state = next_state
-                #     global_step += self.nr_envs
-                # nr_episodes += dones_this_rollout
-
-                # break
-        
-        # custom_train()
-        jitted_custom_train = jax.jit(custom_train)
-        jitted_custom_train()
-
-            
-            # acting_end_time = time.time()
-            # time_metrics["time/acting_time"] = acting_end_time - start_time
-
-
-            # # Calculating advantages and returns
-            # batch.advantages, batch.returns = calculate_gae_advantages(self.critic_state, batch.next_states, batch.rewards, batch.terminations, batch.values)
-            
-            # calc_adv_return_end_time = time.time()
-            # time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
-
-
-            # # Optimizing
-            # self.policy_state, self.critic_state, optimization_metrics, self.key = update(
-            #     self.policy_state, self.critic_state,
-            #     batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs,
-            #     self.key
-            # )
-            # optimization_metrics = {key: value.item() for key, value in optimization_metrics.items()}
-            # nr_updates += self.nr_epochs * self.nr_minibatches
-
-            # optimizing_end_time = time.time()
-            # time_metrics["time/optimizing_time"] = optimizing_end_time - calc_adv_return_end_time
-
-
-            # # Evaluating
-            # evaluation_metrics = {}
-            # if global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1:
-            #     self.set_eval_mode()
-            #     state, _ = self.env.reset()
-            #     eval_nr_episodes = 0
-            #     evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
-            #     while True:
-            #         processed_action = get_deterministic_action(self.policy_state, state)
-            #         state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
-            #         done = terminated | truncated
-            #         for i, single_done in enumerate(done):
-            #             if single_done:
-            #                 eval_nr_episodes += 1
-            #                 evaluation_metrics["eval/episode_return"].append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-            #                 evaluation_metrics["eval/episode_length"].append(self.env.get_final_info_value_at_index(info, "episode_length", i))
-            #                 if eval_nr_episodes == self.evaluation_episodes:
-            #                     break
-            #         if eval_nr_episodes == self.evaluation_episodes:
-            #             break
-            #     evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
-            #     state, _ = self.env.reset()
-            #     self.set_train_mode()
-            
-            # evaluating_end_time = time.time()
-            # time_metrics["time/evaluating_time"] = evaluating_end_time - optimizing_end_time
-            
-
-            # # Saving
-            # # Also only save when there were finished episodes this update
-            # if self.save_model and dones_this_rollout > 0:
-            #     mean_return = np.mean(saving_return_buffer)
-            #     if mean_return > self.best_mean_return:
-            #         self.best_mean_return = mean_return
-            #         self.save()
-            
-            # saving_end_time = time.time()
-            # time_metrics["time/saving_time"] = saving_end_time - evaluating_end_time
-
-            # time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
-
-
-            # # Logging
-            # self.start_logging(global_step)
-
-            # steps_metrics["steps/nr_env_steps"] = global_step
-            # steps_metrics["steps/nr_updates"] = nr_updates
-            # steps_metrics["steps/nr_episodes"] = nr_episodes
-
-            # rollout_info_metrics = {}
-            # env_info_metrics = {}
-            # if step_info_collection:
-            #     info_names = list(step_info_collection.keys())
-            #     for info_name in info_names:
-            #         metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
-            #         metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
-            #         mean_value = np.mean(step_info_collection[info_name])
-            #         if mean_value == mean_value:  # Check if mean_value is NaN
-            #             metric_dict[f"{metric_group}/{info_name}"] = mean_value
-            
-            # combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
-            # for key, value in combined_metrics.items():
-            #     self.log(f"{key}", value, global_step)
-
-            # self.end_logging()
+        jitted_train_loop = jax.jit(train_loop)
+        jitted_train_loop()
 
 
     def log(self, name, value, step):
