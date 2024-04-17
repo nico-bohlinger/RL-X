@@ -69,7 +69,7 @@ conda create -n rlx python=3.11.4
 conda activate rlx
 git clone git@github.com:nico-bohlinger/RL-X.git
 cd RL-X
-pip install -e .[all]
+pip install -e .[all] --config-settings editable_mode=compat
 pip install "torch>=2.2.1" --index-url https://download.pytorch.org/whl/cu118 --upgrade
 pip uninstall $(pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
 pip install -U "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html

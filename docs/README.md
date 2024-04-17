@@ -65,6 +65,10 @@ For MacOS and Windows, EnvPool is currently not supported. Therefore, the follow
 ```
 pip install -e .
 ```
+To keep linting support when registering algorithms or environments outside of RL-X, add the `editable_mode=compat` argument, e.g.:
+```
+pip install -e .[all] --config-settings editable_mode=compat
+```
 
 ### 4. PyTorch
 For Linux, MacOS and Windows, PyTorch has to be installed separately to use the CUDA 11.8 version such that there are no conflicts with JAX.
