@@ -305,10 +305,10 @@ class PPO:
 
             def log_callback(optimization_metrics):
                 current_time = time.time()
-                fps = int((self.nr_steps * self.nr_envs) / (current_time - self.last_time))
+                sps = int((self.nr_steps * self.nr_envs) / (current_time - self.last_time))
                 self.last_time = current_time
                 time_metrics = {
-                    "time/fps": fps
+                    "time/sps": sps
                 }
 
                 self.global_step += self.nr_steps * self.nr_envs
