@@ -335,7 +335,8 @@ class DDQN:
         }
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.best_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
-        os.rename(f"{self.save_path}/tmp/{self.best_model_file_name}", f"{self.save_path}/{self.best_model_file_name}")
+        shutil.make_archive(f"{self.save_path}/{self.best_model_file_name}", "zip", f"{self.save_path}/tmp")
+        os.rename(f"{self.save_path}/{self.best_model_file_name}.zip", f"{self.save_path}/{self.best_model_file_name}")
         shutil.rmtree(f"{self.save_path}/tmp")
 
         if self.track_wandb:
@@ -346,6 +347,9 @@ class DDQN:
         splitted_path = config.runner.load_model.split("/")
         checkpoint_dir = "/".join(splitted_path[:-1])
         checkpoint_file_name = splitted_path[-1]
+
+        shutil.unpack_archive(f"{checkpoint_dir}/{checkpoint_file_name}", f"{checkpoint_dir}/tmp", "zip")
+        checkpoint_dir = f"{checkpoint_dir}/tmp"
 
         check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=checkpoint_file_name)
         checkpointer = orbax.checkpoint.Checkpointer(check_point_handler)
@@ -363,6 +367,8 @@ class DDQN:
         checkpoint = checkpointer.restore(checkpoint_dir, item=target)
 
         model.critic_state = checkpoint["critic"]
+
+        shutil.rmtree(checkpoint_dir)
 
         return model
     
