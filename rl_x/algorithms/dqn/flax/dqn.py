@@ -83,7 +83,7 @@ class DQN:
         if self.save_model:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
-            self.best_model_file_name = "model_best_jax"
+            self.best_model_file_name = "best.model"
             best_model_check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=self.best_model_file_name)
             self.best_model_checkpointer = orbax.checkpoint.Checkpointer(best_model_check_point_handler)
         
@@ -343,13 +343,14 @@ class DQN:
 
     def load(config, env, run_path, writer, explicitly_set_algorithm_params):
         splitted_path = config.runner.load_model.split("/")
-        checkpoint_dir = "/".join(splitted_path[:-1])
+        checkpoint_dir = "/".join(splitted_path[:-1]) if len(splitted_path) > 1 else "."
         checkpoint_file_name = splitted_path[-1]
 
         shutil.unpack_archive(f"{checkpoint_dir}/{checkpoint_file_name}", f"{checkpoint_dir}/tmp", "zip")
         checkpoint_dir = f"{checkpoint_dir}/tmp"
+        jax_model_file_name = [f for f in os.listdir(checkpoint_dir) if f.endswith(".model")][0]
 
-        check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=checkpoint_file_name)
+        check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=jax_model_file_name)
         checkpointer = orbax.checkpoint.Checkpointer(check_point_handler)
 
         loaded_algorithm_config = checkpointer.restore(checkpoint_dir)["config_algorithm"]
