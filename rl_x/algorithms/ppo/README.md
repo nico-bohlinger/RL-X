@@ -18,6 +18,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
 | PyTorch | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| JAX (Flax) full JIT | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 
 ## Resources
@@ -37,3 +38,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
     - Repo from Ilya Kostrikov: [here](https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/blob/master/a2c_ppo_acktr/algo/ppo.py)
     - CleanRL: [here](https://github.com/vwxyzjn/cleanrl/tree/master/cleanrl)
     - TorchScript + layer-normalized GRU: [here](https://gist.github.com/7thStringofZhef/67cb7b4cb17baec4fab339b3b9deb2f1)
+    - Fully jitted JAX implementations:
+        - PureJaxRL: [here](https://github.com/luchris429/purejaxrl/blob/main/purejaxrl/ppo.py)
+        - Stoix: [here](https://github.com/EdanToledo/Stoix/tree/main/stoix/systems/ppo)
+        - Rejax: [here](https://github.com/keraJLi/rejax/tree/main/rejax/algos/ppo)
