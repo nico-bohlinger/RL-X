@@ -4,7 +4,7 @@ from rl_x.environments.custom_mujoco.brax.general_properties import GeneralPrope
 
 
 def create_env(config):
-    env, env_params = BraxGymnaxWrapper("hopper"), None
+    env, env_params = BraxGymnaxWrapper("ant"), None
     env = LogWrapper(env)
     env = ClipAction(env)
     env = VecEnv(env)

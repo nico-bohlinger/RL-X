@@ -7,12 +7,12 @@ def get_config(algorithm_name):
     config.name = algorithm_name
 
     config.device = "gpu"  # cpu, gpu
-    config.total_timesteps = 1e9
+    config.total_timesteps = 1e7
     config.learning_rate = 3e-4
     config.anneal_learning_rate = False
-    config.nr_steps = 2048
-    config.nr_epochs = 10
-    config.minibatch_size = 64
+    config.nr_steps = 10
+    config.nr_epochs = 4
+    config.minibatch_size = 640
     config.gamma = 0.99
     config.gae_lambda = 0.95
     config.clip_range = 0.2

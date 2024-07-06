@@ -15,6 +15,7 @@ import wandb
 
 from rl_x.algorithms.ppo.flax_full_jit.general_properties import GeneralProperties
 from rl_x.algorithms.ppo.flax_full_jit.actor_critic import ActorCritic
+from rl_x.algorithms.ppo.flax_full_jit.transition import Transition
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -119,7 +120,139 @@ class PPO:
                 runner_state, traj_batch = jax.lax.scan(
                     _env_step, runner_state, None, self.nr_steps
                 )
-            
+
+                # CALCULATE ADVANTAGE
+                train_state, env_state, last_obs, rng = runner_state
+                _, last_val = network.apply(train_state.params, last_obs)
+
+                def _calculate_gae(traj_batch, last_val):
+                    def _get_advantages(gae_and_next_value, transition):
+                        gae, next_value = gae_and_next_value
+                        done, value, reward = (
+                            transition.done,
+                            transition.value,
+                            transition.reward,
+                        )
+                        delta = reward + self.gamma * next_value * (1 - done) - value
+                        gae = (
+                            delta
+                            + self.gamma * self.gae_lambda * (1 - done) * gae
+                        )
+                        return (gae, value), gae
+
+                    _, advantages = jax.lax.scan(
+                        _get_advantages,
+                        (jnp.zeros_like(last_val), last_val),
+                        traj_batch,
+                        reverse=True,
+                        unroll=16,
+                    )
+                    return advantages, advantages + traj_batch.value
+
+                advantages, targets = _calculate_gae(traj_batch, last_val)
+
+                # UPDATE NETWORK
+                def _update_epoch(update_state, unused):
+                    def _update_minbatch(train_state, batch_info):
+                        traj_batch, advantages, targets = batch_info
+
+                        def _loss_fn(params, traj_batch, gae, targets):
+                            # RERUN NETWORK
+                            pi, value = network.apply(params, traj_batch.obs)
+                            log_prob = pi.log_prob(traj_batch.action)
+
+                            # CALCULATE VALUE LOSS
+                            value_pred_clipped = traj_batch.value + (
+                                value - traj_batch.value
+                            ).clip(-self.clip_range, self.clip_range)
+                            value_losses = jnp.square(value - targets)
+                            value_losses_clipped = jnp.square(value_pred_clipped - targets)
+                            value_loss = (
+                                0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+                            )
+
+                            # CALCULATE ACTOR LOSS
+                            ratio = jnp.exp(log_prob - traj_batch.log_prob)
+                            gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                            loss_actor1 = ratio * gae
+                            loss_actor2 = (
+                                jnp.clip(
+                                    ratio,
+                                    1.0 - self.clip_range,
+                                    1.0 + self.clip_range,
+                                )
+                                * gae
+                            )
+                            loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
+                            loss_actor = loss_actor.mean()
+                            entropy = pi.entropy().mean()
+
+                            total_loss = (
+                                loss_actor
+                                + self.critic_coef * value_loss
+                                - self.entropy_coef * entropy
+                            )
+                            return total_loss, (value_loss, loss_actor, entropy)
+
+                        grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
+                        total_loss, grads = grad_fn(
+                            train_state.params, traj_batch, advantages, targets
+                        )
+                        train_state = train_state.apply_gradients(grads=grads)
+                        return train_state, total_loss
+
+                    train_state, traj_batch, advantages, targets, rng = update_state
+                    rng, _rng = jax.random.split(rng)
+                    batch_size = self.minibatch_size * self.nr_minibatches
+                    assert (
+                        batch_size == self.nr_steps * self.nr_envs
+                    ), "batch size must be equal to number of steps * number of envs"
+                    permutation = jax.random.permutation(_rng, batch_size)
+                    batch = (traj_batch, advantages, targets)
+                    batch = jax.tree_util.tree_map(
+                        lambda x: x.reshape((batch_size,) + x.shape[2:]), batch
+                    )
+                    shuffled_batch = jax.tree_util.tree_map(
+                        lambda x: jnp.take(x, permutation, axis=0), batch
+                    )
+                    minibatches = jax.tree_util.tree_map(
+                        lambda x: jnp.reshape(
+                            x, [self.nr_minibatches, -1] + list(x.shape[1:])
+                        ),
+                        shuffled_batch,
+                    )
+                    train_state, total_loss = jax.lax.scan(
+                        _update_minbatch, train_state, minibatches
+                    )
+                    update_state = (train_state, traj_batch, advantages, targets, rng)
+                    return update_state, total_loss
+
+                update_state = (train_state, traj_batch, advantages, targets, rng)
+                update_state, loss_info = jax.lax.scan(
+                    _update_epoch, update_state, None, self.nr_epochs
+                )
+                train_state = update_state[0]
+                metric = traj_batch.info
+                rng = update_state[-1]
+                if True:
+
+                    def callback(info):
+                        return_values = info["returned_episode_returns"][
+                            info["returned_episode"]
+                        ]
+                        timesteps = (
+                            info["timestep"][info["returned_episode"]] * self.nr_envs
+                        )
+                        for t in range(len(timesteps)):
+                            print(
+                                f"global step={timesteps[t]}, episodic return={return_values[t]}"
+                            )
+
+                    jax.debug.callback(callback, metric)
+                
+                runner_state = (train_state, env_state, last_obs, rng)
+                return runner_state, metric
+                
             rng, _rng = jax.random.split(rng)
             runner_state = (train_state, env_state, obsv, _rng)
             runner_state, metric = jax.lax.scan(
@@ -129,12 +262,19 @@ class PPO:
             
         
         # TODO: Do potentially multiple seeds here
+
+        import time
+        import matplotlib.pyplot as plt
         rng = jax.random.PRNGKey(self.seed)
         train_jit = jax.jit(_train)
-        out = train_jit(rng)
-
-        print("ok")
-        exit()
+        print("Ready")
+        t0 = time.time()
+        out = jax.block_until_ready(train_jit(rng))
+        print(f"time: {time.time() - t0:.2f} s")
+        plt.plot(out["metrics"]["returned_episode_returns"].mean(-1).reshape(-1))
+        plt.xlabel("Update Step")
+        plt.ylabel("Return")
+        plt.show()
     
 
     def test(self, episodes):
