@@ -66,7 +66,7 @@ class Ant(gym.Env):
 
         next_state = self.get_observation()
         reward, r_info = self.get_reward()
-        terminated = self.data.qpos[2] < 0.35
+        terminated = self.data.qpos[2] < 0.2 or self.data.qpos[2] > 1.0
         truncated = self.episode_step >= self.horizon
         info = {**r_info}
 

@@ -53,6 +53,17 @@ class PPO:
         self.nr_updates = config.algorithm.total_timesteps // self.batch_size
         self.nr_minibatches = self.batch_size // self.minibatch_size
 
+        if self.evaluation_frequency % (self.nr_steps * self.nr_envs) != 0 and self.evaluation_frequency != -1:
+            raise ValueError("Evaluation frequency must be a multiple of the number of steps and environments.")
+
+        rlx_logger.info(f"Using device: {jax.default_backend()}")
+
+        self.key = jax.random.PRNGKey(self.seed)
+        self.key, policy_key, critic_key = jax.random.split(self.key, 3)
+
+        self.os_shape = env.single_observation_space.shape
+        self.as_shape = env.single_action_space.shape
+
         def linear_schedule(count):
             frac = (
                 1.0
@@ -68,10 +79,10 @@ class PPO:
         def _train(rng):
             # INIT NETWORK
             network = ActorCritic(
-                action_dim=8, activation="tanh"
+                action_dim=self.env.single_action_space.shape[0], activation="tanh"
             )
             rng, _rng = jax.random.split(rng)
-            init_x = jnp.zeros(27)
+            init_x = jnp.zeros(self.env.single_observation_space.shape)
             network_params = network.init(_rng, init_x)
             if self.anneal_learning_rate:
                 tx = optax.chain(
@@ -153,6 +164,7 @@ class PPO:
                     return advantages, advantages + traj_batch.value
 
                 advantages, targets = _calculate_gae(traj_batch, last_val)
+                # jax.debug.print("{x}", x=(advantages.shape, targets.shape))
 
                 # UPDATE NETWORK
                 def _update_epoch(update_state, unused):
@@ -237,22 +249,19 @@ class PPO:
                 train_state = update_state[0]
                 metric = traj_batch.info
                 rng = update_state[-1]
-                if False:
+                if True:
 
                     def callback(info):
-                        print("update done")
+                        print(info)
 
-                    jax.debug.callback(callback, metric)
+                    jax.debug.callback(callback, jnp.mean(metric["xy_vel_diff_norm"]))
                 
                 runner_state = (train_state, env_state, last_obs, rng)
-                return runner_state, metric
+                return runner_state, None
                 
             rng, _rng = jax.random.split(rng)
             runner_state = (train_state, env_state, obsv, _rng)
-            runner_state, metric = jax.lax.scan(
-                _update_step, runner_state, None, self.nr_updates
-            )
-            return {"runner_state": runner_state, "metrics": metric}
+            jax.lax.scan(_update_step, runner_state, None, self.nr_updates)
             
         
         # TODO: Do potentially multiple seeds here
@@ -263,7 +272,7 @@ class PPO:
         train_jit = jax.jit(_train)
         print("Ready")
         t0 = time.time()
-        out = jax.block_until_ready(train_jit(rng))
+        jax.block_until_ready(train_jit(rng))
         print(f"time: {time.time() - t0:.2f} s")
         # plt.plot(out["metrics"]["returned_episode_returns"].mean(-1).reshape(-1))
         # plt.xlabel("Update Step")
