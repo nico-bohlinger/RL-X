@@ -68,10 +68,10 @@ class PPO:
         def _train(rng):
             # INIT NETWORK
             network = ActorCritic(
-                self.env.action_space(None).shape[0], activation="tanh"
+                action_dim=8, activation="tanh"
             )
             rng, _rng = jax.random.split(rng)
-            init_x = jnp.zeros(self.env.observation_space(None).shape)
+            init_x = jnp.zeros(27)
             network_params = network.init(_rng, init_x)
             if self.anneal_learning_rate:
                 tx = optax.chain(
@@ -92,7 +92,8 @@ class PPO:
             # INIT ENV
             rng, _rng = jax.random.split(rng)
             reset_rng = jax.random.split(_rng, self.nr_envs)
-            obsv, env_state = self.env.reset(reset_rng, None)
+            env_state = self.env.reset(reset_rng)
+            obsv = env_state.observation
 
             def _update_step(runner_state, unused):
                 # COLLECT TRAJECTORIES
@@ -106,11 +107,13 @@ class PPO:
                     log_prob = pi.log_prob(action)
 
                     # STEP ENV
-                    rng, _rng = jax.random.split(rng)
-                    rng_step = jax.random.split(_rng, self.nr_envs)
-                    obsv, env_state, reward, done, info = self.env.step(
-                        rng_step, env_state, action, None
+                    env_state = self.env.step(
+                        env_state, action
                     )
+                    obsv = env_state.observation
+                    reward = env_state.reward
+                    done = env_state.done
+                    info = env_state.info
                     transition = Transition(
                         done, action, value, reward, log_prob, last_obs, info
                     )
@@ -234,19 +237,10 @@ class PPO:
                 train_state = update_state[0]
                 metric = traj_batch.info
                 rng = update_state[-1]
-                if True:
+                if False:
 
                     def callback(info):
-                        return_values = info["returned_episode_returns"][
-                            info["returned_episode"]
-                        ]
-                        timesteps = (
-                            info["timestep"][info["returned_episode"]] * self.nr_envs
-                        )
-                        for t in range(len(timesteps)):
-                            print(
-                                f"global step={timesteps[t]}, episodic return={return_values[t]}"
-                            )
+                        print("update done")
 
                     jax.debug.callback(callback, metric)
                 
@@ -271,10 +265,10 @@ class PPO:
         t0 = time.time()
         out = jax.block_until_ready(train_jit(rng))
         print(f"time: {time.time() - t0:.2f} s")
-        plt.plot(out["metrics"]["returned_episode_returns"].mean(-1).reshape(-1))
-        plt.xlabel("Update Step")
-        plt.ylabel("Return")
-        plt.show()
+        # plt.plot(out["metrics"]["returned_episode_returns"].mean(-1).reshape(-1))
+        # plt.xlabel("Update Step")
+        # plt.ylabel("Return")
+        # plt.show()
     
 
     def test(self, episodes):

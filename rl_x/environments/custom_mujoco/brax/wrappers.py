@@ -1,250 +1,97 @@
-import functools
-from typing import Any, Dict, Generic, Optional, Tuple, TypeVar, Union, overload, Sequence
+from typing import Any, Union
 import jax
 import jax.numpy as jnp
 import chex
-import numpy as np
 from flax import struct
 from functools import partial
-from typing import Optional, Tuple, Union, Any
-from brax import envs
-from brax.envs.wrappers.training import EpisodeWrapper, AutoResetWrapper
 
 
 
 
-# Gymnax
-TEnvState = TypeVar("TEnvState", bound="EnvState")
-TEnvParams = TypeVar("TEnvParams", bound="EnvParams")
+# Brax
+class EpisodeWrapper:
+    """Maintains episode step count and sets done at episode end."""
 
+    def __init__(self, env, episode_length: int, action_repeat: int):
+        self.env = env
+        self.episode_length = episode_length
+        self.action_repeat = action_repeat
 
-@struct.dataclass
-class EnvState:
-    time: int
+    def reset(self, rng: jax.Array):
+        state = self.env.reset(rng)
+        state.info['steps'] = jnp.zeros(rng.shape[:-1])
+        state.info['truncation'] = jnp.zeros(rng.shape[:-1])
+        return state
 
+    def step(self, state, action: jax.Array):
+        def f(state, _):
+            nstate = self.env.step(state, action)
+            return nstate, nstate.reward
 
-@struct.dataclass
-class EnvParams:
-    max_steps_in_episode: int = 1
-
-
-class Environment(Generic[TEnvState, TEnvParams]):  # object):
-    """Jittable abstract base class for all gymnax Environments."""
-
-    @property
-    def default_params(self) -> EnvParams:
-        return EnvParams()
-
-    @functools.partial(jax.jit, static_argnums=(0,))
-    def step(
-        self,
-        key: chex.PRNGKey,
-        state: TEnvState,
-        action: Union[int, float, chex.Array],
-        params: Optional[TEnvParams] = None,
-    ) -> Tuple[chex.Array, TEnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
-        """Performs step transitions in the environment."""
-        # Use default env parameters if no others specified
-        if params is None:
-            params = self.default_params
-        key, key_reset = jax.random.split(key)
-        obs_st, state_st, reward, done, info = self.step_env(key, state, action, params)
-        obs_re, state_re = self.reset_env(key_reset, params)
-        # Auto-reset environment based on termination
-        state = jax.tree_map(
-            lambda x, y: jax.lax.select(done, x, y), state_re, state_st
+        state, rewards = jax.lax.scan(f, state, (), self.action_repeat)
+        state = state.replace(reward=jnp.sum(rewards, axis=0))
+        steps = state.info['steps'] + self.action_repeat
+        one = jnp.ones_like(state.done)
+        zero = jnp.zeros_like(state.done)
+        episode_length = jnp.array(self.episode_length, dtype=jnp.int32)
+        done = jnp.where(steps >= episode_length, one, state.done)
+        state.info['truncation'] = jnp.where(
+            steps >= episode_length, 1 - state.done, zero
         )
-        obs = jax.lax.select(done, obs_re, obs_st)
-        return obs, state, reward, done, info
+        state.info['steps'] = steps
+        return state.replace(done=done)
 
-    @functools.partial(jax.jit, static_argnums=(0,))
-    def reset(
-        self, key: chex.PRNGKey, params: Optional[TEnvParams] = None
-    ) -> Tuple[chex.Array, TEnvState]:
-        """Performs resetting of environment."""
-        # Use default env parameters if no others specified
-        if params is None:
-            params = self.default_params
-        obs, state = self.reset_env(key, params)
-        return obs, state
-
-    def step_env(
-        self,
-        key: chex.PRNGKey,
-        state: TEnvState,
-        action: Union[int, float, chex.Array],
-        params: TEnvParams,
-    ) -> Tuple[chex.Array, TEnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
-        """Environment-specific step transition."""
-        raise NotImplementedError
-
-    def reset_env(
-        self, key: chex.PRNGKey, params: TEnvParams
-    ) -> Tuple[chex.Array, TEnvState]:
-        """Environment-specific reset."""
-        raise NotImplementedError
-
-    @overload
-    def get_obs(
-        self,
-        state: TEnvState,
-        params: TEnvParams,
-    ) -> chex.Array:
-        """Applies observation function to state."""
-        raise NotImplementedError
-
-    @overload
-    def get_obs(
-        self,
-        state: TEnvState,
-    ) -> chex.Array:
-        """Applies observation function to state."""
-        raise NotImplementedError
-
-    @overload
-    def get_obs(
-        self, state: TEnvState, key: chex.PRNGKey, params: TEnvParams
-    ) -> chex.Array:
-        """Applies observation function to state."""
-        raise NotImplementedError
-
-    def get_obs(
-        self,
-        state,
-        params=None,
-        key=None,
-    ) -> chex.Array:
-        """Applies observation function to state."""
-        raise NotImplementedError
-
-    def is_terminal(self, state: TEnvState, params: TEnvParams) -> jnp.ndarray:
-        """Check whether state transition is terminal."""
-        raise NotImplementedError
-
-    def discount(self, state: TEnvState, params: TEnvParams) -> jnp.ndarray:
-        """Return a discount of zero if the episode has terminated."""
-        return jax.lax.select(self.is_terminal(state, params), 0.0, 1.0)
-
-    @property
-    def name(self) -> str:
-        """Environment name."""
-        return type(self).__name__
-
-    @property
-    def num_actions(self) -> int:
-        """Number of actions possible in environment."""
-        raise NotImplementedError
-
-    def action_space(self, params: TEnvParams):
-        """Action space of the environment."""
-        raise NotImplementedError
-
-    def observation_space(self, params: TEnvParams):
-        """Observation space of the environment."""
-        raise NotImplementedError
-
-    def state_space(self, params: TEnvParams):
-        """State space of the environment."""
-        raise NotImplementedError
+    def __getattr__(self, name):
+        if name == '__setstate__':
+            raise AttributeError(name)
+        return getattr(self.env, name)
 
 
+class AutoResetWrapper:
+    """Automatically resets Brax envs that are done."""
 
+    def __init__(self, env):
+        self.env = env
 
-class Space:
-    """Minimal jittable class for abstract gymnax space."""
+    def reset(self, rng: jax.Array):
+        state = self.env.reset(rng)
+        state.info['first_pipeline_state'] = state.pipeline_state
+        state.info['first_obs'] = state.obs
+        return state
 
-    def sample(self, rng: chex.PRNGKey) -> chex.Array:
-        raise NotImplementedError
+    def step(self, state, action: jax.Array):
+        if 'steps' in state.info:
+            steps = state.info['steps']
+            steps = jnp.where(state.done, jnp.zeros_like(steps), steps)
+            state.info.update(steps=steps)
+        state = state.replace(done=jnp.zeros_like(state.done))
+        state = self.env.step(state, action)
 
-    def contains(self, x: jnp.int_) -> Any:
-        raise NotImplementedError
+        def where_done(x, y):
+            done = state.done
+            if done.shape:
+                done = jnp.reshape(done, [x.shape[0]] + [1] * (len(x.shape) - 1))  # type: ignore
+            return jnp.where(done, x, y)
 
+        pipeline_state = jax.tree.map(
+            where_done, state.info['first_pipeline_state'], state.pipeline_state
+        )
+        obs = where_done(state.info['first_obs'], state.obs)
+        return state.replace(pipeline_state=pipeline_state, obs=obs)
+    
+    def __getattr__(self, name):
+        if name == '__setstate__':
+            raise AttributeError(name)
+        return getattr(self.env, name)
 
-
-class Box(Space):
-    """Minimal jittable class for array-shaped gymnax spaces."""
-
-    def __init__(
-        self,
-        low: Union[jnp.ndarray, float],
-        high: Union[jnp.ndarray, float],
-        shape: Any,  # Tuple[int],
-        dtype: jnp.dtype = jnp.float32,
-    ):
-        self.low = low
-        self.high = high
-        self.shape = shape
-        self.dtype = dtype
-
-    def sample(self, rng: chex.PRNGKey) -> chex.Array:
-        """Sample random action uniformly from 1D continuous range."""
-        return jax.random.uniform(
-            rng, shape=self.shape, minval=self.low, maxval=self.high
-        ).astype(self.dtype)
-
-    def contains(self, x: jnp.int_) -> jnp.ndarray:
-        """Check whether specific object is within space."""
-        # type_cond = isinstance(x, self.dtype)
-        # shape_cond = (x.shape == self.shape)
-        range_cond = jnp.logical_and(jnp.all(x >= self.low), jnp.all(x <= self.high))
-        return range_cond
 
 
 # PureJAXRL
 
 
-class GymnaxWrapper(object):
-    """Base class for Gymnax wrappers."""
-
-    def __init__(self, env):
-        self._env = env
-
-    # provide proxy access to regular attributes of wrapped object
-    def __getattr__(self, name):
-        return getattr(self._env, name)
-
-
-class FlattenObservationWrapper(GymnaxWrapper):
-    """Flatten the observations of the environment."""
-
-    def __init__(self, env: Environment):
-        super().__init__(env)
-
-    def observation_space(self, params) -> Box:
-        assert isinstance(
-            self._env.observation_space(params), Box
-        ), "Only Box spaces are supported for now."
-        return Box(
-            low=self._env.observation_space(params).low,
-            high=self._env.observation_space(params).high,
-            shape=(np.prod(self._env.observation_space(params).shape),),
-            dtype=self._env.observation_space(params).dtype,
-        )
-
-    @partial(jax.jit, static_argnums=(0,))
-    def reset(
-        self, key: chex.PRNGKey, params: Optional[EnvParams] = None
-    ) -> Tuple[chex.Array, EnvState]:
-        obs, state = self._env.reset(key, params)
-        obs = jnp.reshape(obs, (-1,))
-        return obs, state
-
-    @partial(jax.jit, static_argnums=(0,))
-    def step(
-        self,
-        key: chex.PRNGKey,
-        state: EnvState,
-        action: Union[int, float],
-        params: Optional[EnvParams] = None,
-    ) -> Tuple[chex.Array, EnvState, float, bool, dict]:
-        obs, state, reward, done, info = self._env.step(key, state, action, params)
-        obs = jnp.reshape(obs, (-1,))
-        return obs, state, reward, done, info
-
-
 @struct.dataclass
 class LogEnvState:
-    env_state: EnvState
+    env_state: Any
     episode_returns: float
     episode_lengths: int
     returned_episode_returns: float
@@ -252,28 +99,30 @@ class LogEnvState:
     timestep: int
 
 
-class LogWrapper(GymnaxWrapper):
+class LogWrapper:
     """Log the episode returns and lengths."""
 
-    def __init__(self, env: Environment):
-        super().__init__(env)
+    def __init__(self, env):
+        self._env = env
 
+    @partial(jax.vmap, in_axes=(None, 0, None))
     @partial(jax.jit, static_argnums=(0,))
     def reset(
-        self, key: chex.PRNGKey, params: Optional[EnvParams] = None
-    ) -> Tuple[chex.Array, EnvState]:
+        self, key: chex.PRNGKey, params=None
+    ):
         obs, env_state = self._env.reset(key, params)
         state = LogEnvState(env_state, 0, 0, 0, 0, 0)
         return obs, state
 
+    @partial(jax.vmap, in_axes=(None, 0, 0, 0, None))
     @partial(jax.jit, static_argnums=(0,))
     def step(
         self,
         key: chex.PRNGKey,
-        state: EnvState,
+        state,
         action: Union[int, float],
-        params: Optional[EnvParams] = None,
-    ) -> Tuple[chex.Array, EnvState, float, bool, dict]:
+        params=None,
+    ):
         obs, env_state, reward, done, info = self._env.step(
             key, state.env_state, action, params
         )
@@ -295,10 +144,12 @@ class LogWrapper(GymnaxWrapper):
         info["returned_episode"] = done
         return obs, state, reward, done, info
 
+    def __getattr__(self, name):
+        return getattr(self._env, name)
+
 
 class BraxGymnaxWrapper:
-    def __init__(self, env_name, backend="positional"):
-        env = envs.get_environment(env_name=env_name, backend=backend)
+    def __init__(self, env):
         env = EpisodeWrapper(env, episode_length=1000, action_repeat=1)
         env = AutoResetWrapper(env)
         self._env = env
@@ -313,19 +164,22 @@ class BraxGymnaxWrapper:
         next_state = self._env.step(state, action)
         return next_state.obs, next_state, next_state.reward, next_state.done > 0.5, {}
 
-    def observation_space(self, params):
-        return Box(
-            low=-jnp.inf,
-            high=jnp.inf,
-            shape=(self._env.observation_size,),
-        )
 
-    def action_space(self, params):
-        return Box(
-            low=-1.0,
-            high=1.0,
-            shape=(self._env.action_size,),
-        )
+
+
+
+
+
+
+class GymnaxWrapper(object):
+    """Base class for Gymnax wrappers."""
+
+    def __init__(self, env):
+        self._env = env
+
+    # provide proxy access to regular attributes of wrapped object
+    def __getattr__(self, name):
+        return getattr(self._env, name)
 
 class ClipAction(GymnaxWrapper):
     def __init__(self, env, low=-1.0, high=1.0):
@@ -338,45 +192,13 @@ class ClipAction(GymnaxWrapper):
         # action = jnp.clip(action, self.env.action_space.low, self.env.action_space.high)
         action = jnp.clip(action, self.low, self.high)
         return self._env.step(key, state, action, params)
-
-
-class TransformObservation(GymnaxWrapper):
-    def __init__(self, env, transform_obs):
-        super().__init__(env)
-        self.transform_obs = transform_obs
-
-    def reset(self, key, params=None):
-        obs, state = self._env.reset(key, params)
-        return self.transform_obs(obs), state
-
-    def step(self, key, state, action, params=None):
-        obs, state, reward, done, info = self._env.step(key, state, action, params)
-        return self.transform_obs(obs), state, reward, done, info
-
-
-class TransformReward(GymnaxWrapper):
-    def __init__(self, env, transform_reward):
-        super().__init__(env)
-        self.transform_reward = transform_reward
-
-    def step(self, key, state, action, params=None):
-        obs, state, reward, done, info = self._env.step(key, state, action, params)
-        return obs, state, self.transform_reward(reward), done, info
-
-
-class VecEnv(GymnaxWrapper):
-    def __init__(self, env):
-        super().__init__(env)
-        self.reset = jax.vmap(self._env.reset, in_axes=(0, None))
-        self.step = jax.vmap(self._env.step, in_axes=(0, 0, 0, None))
-
-
+    
 @struct.dataclass
 class NormalizeVecObsEnvState:
     mean: jnp.ndarray
     var: jnp.ndarray
     count: float
-    env_state: EnvState
+    env_state: Any
 
 
 class NormalizeVecObservation(GymnaxWrapper):
@@ -454,7 +276,7 @@ class NormalizeVecRewEnvState:
     var: jnp.ndarray
     count: float
     return_val: float
-    env_state: EnvState
+    env_state: Any
 
 
 class NormalizeVecReward(GymnaxWrapper):
