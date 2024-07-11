@@ -59,11 +59,12 @@ class Ant:
         data = data.replace(qpos=self.initial_qpos, qvel=self.initial_qvel, ctrl=jnp.zeros(self.sys.nu))
         data = mjx.forward(self.sys, data)
 
-        observation = self.get_observation(data)
+        next_observation = self.get_observation(data)
         reward = 0.0
-        done = False
+        terminated = False
+        truncated = False
         logging_info = {
-            "episode_return": reward,
+            "episode_return": reward,   # TODO: maybe actual logging info to logging/... and then move the summing return to non logging and add a logging one that is constant for the last total summed return 
             "episode_length": 0,
             "reward_xy_vel_cmd": 0.0,
             "xy_vel_diff_norm": 0.0,
@@ -73,7 +74,7 @@ class Ant:
             "key": subkey
         }
 
-        return State(data, observation, reward, done, info)
+        return State(data, next_observation, next_observation, reward, terminated, truncated, info)
 
 
     @partial(jax.vmap, in_axes=(None, 0, 0))
@@ -100,11 +101,11 @@ class Ant:
         def when_done(_):
             __, reset_key = jax.random.split(state.info["key"])
             start_state = self._reset(reset_key)
-            start_state = start_state.replace(reward=reward, done=done)
-            start_state.info.update(r_info)
+            start_state = start_state.replace(actual_next_observation=next_observation, reward=reward, terminated=terminated, truncated=truncated)
+            start_state.info.update(r_info)  # Keeps only actual last info and discards the reset info
             return start_state
         def when_not_done(_):
-            return state.replace(data=data, observation=next_observation, reward=reward, done=done)
+            return state.replace(data=data, next_observation=next_observation, actual_next_observation=next_observation, reward=reward, terminated=terminated, truncated=truncated)
         state = jax.lax.cond(done, when_done, when_not_done, None)
 
         return state

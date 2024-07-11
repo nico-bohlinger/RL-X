@@ -7,7 +7,9 @@ from mujoco import mjx
 @struct.dataclass
 class State:
     data: mjx.Data
-    observation: jax.Array
+    next_observation: jax.Array
+    actual_next_observation: jax.Array
     reward: float
-    done: bool
+    terminated: bool
+    truncated: bool
     info: Dict[str, Any] = struct.field(default_factory=dict)

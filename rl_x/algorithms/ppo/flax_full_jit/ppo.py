@@ -16,7 +16,6 @@ import wandb
 from rl_x.algorithms.ppo.flax_full_jit.general_properties import GeneralProperties
 from rl_x.algorithms.ppo.flax.policy import get_policy
 from rl_x.algorithms.ppo.flax.critic import get_critic
-from rl_x.algorithms.ppo.flax_full_jit.actor_critic import ActorCritic
 from rl_x.algorithms.ppo.flax_full_jit.transition import Transition
 
 rlx_logger = logging.getLogger("rl_x")
@@ -69,161 +68,130 @@ class PPO:
             best_model_check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=self.best_model_file_name)
             self.best_model_checkpointer = orbax.checkpoint.Checkpointer(best_model_check_point_handler)
 
-        def linear_schedule(count):
-            frac = (
-                1.0
-                - (count // (self.nr_minibatches * self.nr_epochs))
-                / self.nr_updates
-            )
-            return self.learning_rate * frac
-        
-        self.linear_schedule = linear_schedule
-
-    
+ 
     def train(self):
         def _train(key):
-            # INIT NETWORK
+
+            key, policy_key, critic_key, state_key = jax.random.split(key, 4)
+
             policy, get_processed_action = get_policy(self.config, self.env)
             critic = get_critic(self.config, self.env)
-            key, subkey1, subkey2 = jax.random.split(key, 3)
-            init_x = jnp.zeros(self.env.single_observation_space.shape)
-            network_params1 = policy.init(subkey1, init_x)
-            network_params2 = critic.init(subkey2, init_x)
-            if self.anneal_learning_rate:
-                tx1 = optax.chain(
-                    optax.clip_by_global_norm(self.max_grad_norm),
-                    optax.adam(learning_rate=self.linear_schedule, eps=1e-5),
-                )
-                tx2 = optax.chain(
-                    optax.clip_by_global_norm(self.max_grad_norm),
-                    optax.adam(learning_rate=self.linear_schedule, eps=1e-5),
-                )
-            else:
-                tx1 = optax.chain(
-                    optax.clip_by_global_norm(self.max_grad_norm),
-                    optax.adam(self.learning_rate, eps=1e-5),
-                )
-                tx2 = optax.chain(
-                    optax.clip_by_global_norm(self.max_grad_norm),
-                    optax.adam(self.learning_rate, eps=1e-5),
-                )
+
+            def linear_schedule(count):
+                fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates
+                return self.learning_rate * fraction
+
+            learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
+
+            state = jnp.array([self.env.single_observation_space.sample(state_key)])
+
             policy_state = TrainState.create(
                 apply_fn=policy.apply,
-                params=network_params1,
-                tx=tx1,
+                params=policy.init(policy_key, state),
+                tx=optax.chain(
+                    optax.clip_by_global_norm(self.max_grad_norm),
+                    optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
+                )
             )
+
             critic_state = TrainState.create(
                 apply_fn=critic.apply,
-                params=network_params2,
-                tx=tx2,
+                params=critic.init(critic_key, state),
+                tx=optax.chain(
+                    optax.clip_by_global_norm(self.max_grad_norm),
+                    optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
+                )
             )
 
-            # INIT ENV
             key, subkey = jax.random.split(key)
-            resetsubkey = jax.random.split(subkey, self.nr_envs)
-            env_state = self.env.reset(resetsubkey)
-            obsv = env_state.observation
+            reset_keys = jax.random.split(subkey, self.nr_envs)
+            env_state = self.env.reset(reset_keys)
 
-            def _update_step(runner_state, unused):
-                # COLLECT TRAJECTORIES
-                def _env_step(runner_state, unused):
-                    policy_state, critic_state, env_state, last_obs, key = runner_state
+            def learning_iteration(learning_iteration_carry, _):
+                policy_state, critic_state, env_state, state, key = learning_iteration_carry
 
-                    # SELECT ACTION
+                # Acting
+                def single_rollout(single_rollout_carry, _):
+                    policy_state, critic_state, env_state, state, key = single_rollout_carry
+
                     key, subkey = jax.random.split(key)
-                    action_mean, action_logstd = policy.apply(policy_state.params, last_obs)
-                    value = critic.apply(critic_state.params, last_obs)
-                    value = value.squeeze(-1)
+                    action_mean, action_logstd = policy.apply(policy_state.params, state)
                     action_std = jnp.exp(action_logstd)
                     action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
                     log_prob = (-0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd).sum(1)
+                    processed_action = get_processed_action(action)
+                    value = critic.apply(critic_state.params, state).squeeze(-1)
 
-                    # STEP ENV
-                    env_state = self.env.step(
-                        env_state, action
-                    )
-                    obsv = env_state.observation
+                    env_state = self.env.step(env_state, processed_action)
+                    next_state = env_state.next_observation
                     reward = env_state.reward
-                    done = env_state.done
+                    terminated = env_state.terminated
                     info = env_state.info
-                    transition = Transition(
-                        done, action, value, reward, log_prob, last_obs, info
-                    )
-                    runner_state = (policy_state, critic_state, env_state, obsv, key)
-                    return runner_state, transition
+                    actual_next_state = env_state.actual_next_observation
+                    transition = (state, actual_next_state, action, reward, value, terminated, log_prob, info)
 
-                runner_state, traj_batch = jax.lax.scan(
-                    _env_step, runner_state, None, self.nr_steps
-                )
+                    return (policy_state, critic_state, env_state, next_state, key), transition
 
-                # CALCULATE ADVANTAGE
-                policy_state, critic_state, env_state, last_obs, key = runner_state
-                last_val = critic.apply(critic_state.params, last_obs)
-                last_val = last_val.squeeze(-1)
+                single_rollout_carry, batch = jax.lax.scan(single_rollout, learning_iteration_carry, None, self.nr_steps)
+                policy_state, critic_state, env_state, state, key = single_rollout_carry
+                states, next_states, actions, rewards, values, terminations, log_probs, infos = batch
 
-                def _calculate_gae(traj_batch, last_val):
-                    def _get_advantages(gae_and_next_value, transition):
-                        gae, next_value = gae_and_next_value
-                        done, value, reward = (
-                            transition.done,
-                            transition.value,
-                            transition.reward,
-                        )
-                        delta = reward + self.gamma * next_value * (1 - done) - value
-                        gae = (
-                            delta
-                            + self.gamma * self.gae_lambda * (1 - done) * gae
-                        )
-                        return (gae, value), gae
 
-                    _, advantages = jax.lax.scan(
-                        _get_advantages,
-                        (jnp.zeros_like(last_val), last_val),
-                        traj_batch,
-                        reverse=True,
-                        unroll=16,
-                    )
-                    return advantages, advantages + traj_batch.value
+                # Calculating advantages and returns
+                def calculate_gae_advantages(critic_state, next_states, rewards, values, terminations):
+                    def compute_advantages(carry, t):
+                        prev_advantage = carry[0]
+                        advantage = delta[t] + self.gamma * self.gae_lambda * (1 - terminations[t]) * prev_advantage
+                        return (advantage,), advantage
 
-                advantages, targets = _calculate_gae(traj_batch, last_val)
+                    next_values = critic.apply(critic_state.params, next_states).squeeze(-1)
+                    delta = rewards + self.gamma * next_values * (1.0 - terminations) - values
+                    init_advantages = delta[-1]
+                    _, advantages = jax.lax.scan(compute_advantages, (init_advantages,), jnp.arange(self.nr_steps - 2, -1, -1))
+                    advantages = jnp.concatenate([advantages[::-1], jnp.array([init_advantages])])
+                    returns = advantages + values
+                    return advantages, returns
 
-                # UPDATE NETWORK
+                advantages, returns = calculate_gae_advantages(critic_state, next_states, rewards, values, terminations)
+
+
+                # Optimizing
                 def _update_epoch(update_state, unused):
-                    def _update_minbatch(train_state, batch_info):
-                        policy_state, critic_state = train_state
-                        traj_batch, advantages, targets = batch_info
+                    def _update_minbatch(policy_and_critic_states, batch_info):
+                        policy_state, critic_state = policy_and_critic_states
+                        states, actions, advantages, returns, values, log_probs = batch_info
 
-                        def _loss_fn(policy_params, critic_params, traj_batch, gae, targets):
+                        def _loss_fn(policy_params, critic_params, states, actions, advantages, returns, values, log_probs):
                             # RERUN NETWORK
-                            action_mean, action_logstd = policy.apply(policy_params, traj_batch.obs)
-                            value = critic.apply(critic_params, traj_batch.obs)
+                            action_mean, action_logstd = policy.apply(policy_params, states)
                             action_std = jnp.exp(action_logstd)
-                            log_prob = (-0.5 * ((traj_batch.action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd).sum(1)
+                            log_prob = (-0.5 * ((actions - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd).sum(1)
                             entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
-                            entropy_loss = entropy.sum()
+                            entropy_loss = entropy.sum(1).mean()
+                            value = critic.apply(critic_params, states)
                             value = value.squeeze(-1)
 
                             # CALCULATE VALUE LOSS
-                            value_pred_clipped = traj_batch.value + (
-                                value - traj_batch.value
+                            value_pred_clipped = values + (
+                                value - values
                             ).clip(-self.clip_range, self.clip_range)
-                            value_losses = jnp.square(value - targets)
-                            value_losses_clipped = jnp.square(value_pred_clipped - targets)
+                            value_losses = jnp.square(value - returns)
+                            value_losses_clipped = jnp.square(value_pred_clipped - returns)
                             value_loss = (
                                 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
                             )
 
                             # CALCULATE ACTOR LOSS
-                            ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                            gae = (gae - gae.mean()) / (gae.std() + 1e-8)
-                            loss_actor1 = ratio * gae
+                            ratio = jnp.exp(log_prob - log_probs)
+                            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+                            loss_actor1 = ratio * advantages
                             loss_actor2 = (
                                 jnp.clip(
                                     ratio,
                                     1.0 - self.clip_range,
                                     1.0 + self.clip_range,
                                 )
-                                * gae
+                                * advantages
                             )
                             loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
                             loss_actor = loss_actor.mean()
@@ -233,24 +201,22 @@ class PPO:
                                 + self.critic_coef * value_loss
                                 - self.entropy_coef * entropy_loss
                             )
-                            return total_loss, (value_loss, loss_actor, entropy)
+                            return total_loss, (value_loss, loss_actor, entropy_loss)
 
                         grad_fn = jax.value_and_grad(_loss_fn, argnums=(0, 1), has_aux=True)
-                        total_loss, (policy_gradients, critic_gradients) = grad_fn(
-                            policy_state.params, critic_state.params, traj_batch, advantages, targets
-                        )
+                        total_loss, (policy_gradients, critic_gradients) = grad_fn(policy_state.params, critic_state.params, states, actions, advantages, returns, values, log_probs)
                         policy_state = policy_state.apply_gradients(grads=policy_gradients)
                         critic_state = critic_state.apply_gradients(grads=critic_gradients)
                         return (policy_state, critic_state), total_loss
 
-                    policy_state, critic_state, traj_batch, advantages, targets, key = update_state
+                    policy_state, critic_state, states, actions, advantages, returns, values, log_probs, key = update_state
                     key, subkey = jax.random.split(key)
                     batch_size = self.minibatch_size * self.nr_minibatches
                     assert (
                         batch_size == self.nr_steps * self.nr_envs
                     ), "batch size must be equal to number of steps * number of envs"
                     permutation = jax.random.permutation(subkey, batch_size)
-                    batch = (traj_batch, advantages, targets)
+                    batch = (states, actions, advantages, returns, values, log_probs)
                     batch = jax.tree_util.tree_map(
                         lambda x: x.reshape((batch_size,) + x.shape[2:]), batch
                     )
@@ -263,20 +229,16 @@ class PPO:
                         ),
                         shuffled_batch,
                     )
-                    train_state, total_loss = jax.lax.scan(
-                        _update_minbatch, (policy_state, critic_state), minibatches
-                    )
-                    policy_state, critic_state = train_state
-                    update_state = (policy_state, critic_state, traj_batch, advantages, targets, key)
+                    policy_and_critic_states, total_loss = jax.lax.scan(_update_minbatch, (policy_state, critic_state), minibatches)
+                    policy_state, critic_state = policy_and_critic_states
+                    update_state = (policy_state, critic_state, states, actions, advantages, returns, values, log_probs, key)
                     return update_state, total_loss
 
-                update_state = (policy_state, critic_state, traj_batch, advantages, targets, key)
-                update_state, loss_info = jax.lax.scan(
-                    _update_epoch, update_state, None, self.nr_epochs
-                )
+                update_state = (policy_state, critic_state, states, actions, advantages, returns, values, log_probs, key)
+                update_state, loss_info = jax.lax.scan(_update_epoch, update_state, None, self.nr_epochs)
                 policy_state = update_state[0]
                 critic_state = update_state[1]
-                metric = traj_batch.info
+                metric = infos
                 key = update_state[-1]
                 if True:
 
@@ -285,12 +247,10 @@ class PPO:
 
                     jax.debug.callback(callback, jnp.mean(metric["xy_vel_diff_norm"]))
                 
-                runner_state = (policy_state, critic_state, env_state, last_obs, key)
-                return runner_state, None
+                return (policy_state, critic_state, env_state, state, key), None
                 
             key, subkey = jax.random.split(key)
-            runner_state = (policy_state, critic_state, env_state, obsv, subkey)
-            jax.lax.scan(_update_step, runner_state, None, self.nr_updates)
+            jax.lax.scan(learning_iteration, (policy_state, critic_state, env_state, env_state.next_observation, subkey), None, self.nr_updates)
             
         
         # TODO: Do potentially multiple seeds here
