@@ -16,17 +16,9 @@ class Ant:
         
         xml_path = (Path(__file__).resolve().parent / "data" / "ant.xml").as_posix()
         mj_model = mujoco.MjModel.from_xml_path(xml_path)
-        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
         self.model = mj_model
         self.data = mujoco.MjData(mj_model)
         self.sys = mjx.put_model(mj_model)
-
-        self.sys = self.sys.tree_replace({
-          'opt.solver': mujoco.mjtSolver.mjSOL_NEWTON,
-          'opt.disableflags': mujoco.mjtDisableBit.mjDSBL_EULERDAMP,
-          'opt.iterations': 1,
-          'opt.ls_iterations': 4,
-        })
 
         self.nr_intermediate_steps = 5
 
