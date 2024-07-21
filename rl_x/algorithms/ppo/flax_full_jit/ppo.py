@@ -124,15 +124,16 @@ class PPO:
                         policy_state, critic_state, env_state, key = single_rollout_carry
 
                         key, subkey = jax.random.split(key)
-                        action_mean, action_logstd = self.policy.apply(policy_state.params, env_state.next_observation)
+                        observation = env_state.next_observation
+                        action_mean, action_logstd = self.policy.apply(policy_state.params, observation)
                         action_std = jnp.exp(action_logstd)
                         action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
                         log_prob = (-0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd).sum(1)
                         processed_action = self.get_processed_action(action)
-                        value = self.critic.apply(critic_state.params, env_state.next_observation).squeeze(-1)
+                        value = self.critic.apply(critic_state.params, observation).squeeze(-1)
 
                         env_state = self.env.step(env_state, processed_action)
-                        transition = (env_state.next_observation, env_state.actual_next_observation, action, env_state.reward, value, env_state.terminated, log_prob, env_state.info)
+                        transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, env_state.terminated, log_prob, env_state.info)
 
                         return (policy_state, critic_state, env_state, key), transition
 
