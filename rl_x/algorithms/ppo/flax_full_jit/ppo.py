@@ -2,7 +2,6 @@ import os
 import shutil
 import logging
 import time
-from collections import deque
 import tree
 import numpy as np
 import jax
@@ -16,7 +15,6 @@ import wandb
 from rl_x.algorithms.ppo.flax_full_jit.general_properties import GeneralProperties
 from rl_x.algorithms.ppo.flax.policy import get_policy
 from rl_x.algorithms.ppo.flax.critic import get_critic
-from rl_x.algorithms.ppo.flax_full_jit.transition import Transition
 
 rlx_logger = logging.getLogger("rl_x")
 
