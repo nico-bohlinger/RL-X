@@ -12,4 +12,6 @@ class State:
     reward: float
     terminated: bool
     truncated: bool
-    info: Dict[str, Any] = struct.field(default_factory=dict)
+    info: Dict[str, Any]
+    info_episode_store: Dict[str, Any]
+    key: jax.random.PRNGKey

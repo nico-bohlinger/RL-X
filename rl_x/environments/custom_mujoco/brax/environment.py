@@ -63,23 +63,28 @@ class Ant:
         reward = 0.0
         terminated = False
         truncated = False
-        logging_info = {
-            "episode_return": reward,   # TODO: maybe actual logging info to logging/... and then move the summing return to non logging and add a logging one that is constant for the last total summed return 
-            "episode_length": 0,
-            "reward_xy_vel_cmd": 0.0,
-            "xy_vel_diff_norm": 0.0,
-        }
         info = {
-            **logging_info,
-            "key": subkey
+            "rollout/episode_return": reward,
+            "rollout/episode_length": 0,
+            "env_info/reward_xy_vel_cmd": 0.0,
+            "env_info/xy_vel_diff_norm": 0.0,
+        }
+        info_episode_store = {
+            "episode_return": reward,
+            "episode_length": 0,
         }
 
-        return State(data, next_observation, next_observation, reward, terminated, truncated, info)
+        return State(data, next_observation, next_observation, reward, terminated, truncated, info, info_episode_store, subkey)
 
 
     @partial(jax.vmap, in_axes=(None, 0, 0))
     @partial(jax.jit, static_argnums=(0,))
     def step(self, state, action):
+        return self._step(state, action)
+
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _step(self, state, action):
         data, _ = jax.lax.scan(
             f=lambda data, _: (mjx.step(self.sys, data.replace(ctrl=action)), None),
             init=state.data,
@@ -87,22 +92,24 @@ class Ant:
             length=self.nr_intermediate_steps
         )
 
-        state.info["episode_length"] += 1
+        state.info_episode_store["episode_length"] += 1
 
         next_observation = self.get_observation(data)
         reward, r_info = self.get_reward(data)
         terminated = jnp.logical_or(data.qpos[2] < 0.2, data.qpos[2] > 1.0)
-        truncated = state.info["episode_length"] >= self.horizon
+        truncated = state.info_episode_store["episode_length"] >= self.horizon
         done = terminated | truncated
 
         state.info.update(r_info)
-        state.info["episode_return"] += reward
+        state.info_episode_store["episode_return"] += reward
+        state.info["rollout/episode_return"] = jnp.where(done, state.info_episode_store["episode_return"], state.info["rollout/episode_return"])
+        state.info["rollout/episode_length"] = jnp.where(done, state.info_episode_store["episode_length"], state.info["rollout/episode_length"])
 
         def when_done(_):
-            __, reset_key = jax.random.split(state.info["key"])
+            __, reset_key = jax.random.split(state.key)
             start_state = self._reset(reset_key)
             start_state = start_state.replace(actual_next_observation=next_observation, reward=reward, terminated=terminated, truncated=truncated)
-            start_state.info.update(r_info)  # Keeps only actual last info and discards the reset info
+            start_state.info.update(state.info)  # Keeps only actual last info and discards the reset info
             return start_state
         def when_not_done(_):
             return state.replace(data=data, next_observation=next_observation, actual_next_observation=next_observation, reward=reward, terminated=terminated, truncated=truncated)
@@ -146,8 +153,8 @@ class Ant:
         reward = tracking_xy_velocity_command_reward
 
         info = {
-            "reward_xy_vel_cmd": tracking_xy_velocity_command_reward,
-            "xy_vel_diff_norm": xy_velocity_difference_norm,
+            "env_info/reward_xy_vel_cmd": tracking_xy_velocity_command_reward,
+            "env_info/xy_vel_diff_norm": xy_velocity_difference_norm,
         }
 
         return reward, info
