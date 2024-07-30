@@ -260,9 +260,10 @@ class PPO:
 
 
                     # Logging
+                    combined_learning_iteration_step = (multi_learnning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learnning_iteration_step + 1
                     steps_metrics = {
-                        "steps/nr_env_steps": (multi_learnning_iteration_step + 1) * (learnning_iteration_step + 1) * self.nr_steps * self.nr_envs,
-                        "steps/nr_updates": (multi_learnning_iteration_step + 1) * (learnning_iteration_step + 1) * self.nr_epochs * self.nr_minibatches,
+                        "steps/nr_env_steps": combined_learning_iteration_step * self.nr_steps * self.nr_envs,
+                        "steps/nr_updates": combined_learning_iteration_step * self.nr_epochs * self.nr_minibatches,
                     }
 
                     combined_metrics = {**infos, **steps_metrics, **optimization_metrics}
