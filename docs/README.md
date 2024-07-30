@@ -78,7 +78,7 @@ pip uninstall $(pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
 ```
 Afterwards, PyTorch can be installed with the following command:
 ```
-pip install "torch>=2.2.1" --index-url https://download.pytorch.org/whl/cu118 --upgrade
+pip install "torch>=2.4.0" --index-url https://download.pytorch.org/whl/cu118 --upgrade
 ```
 
 ### 5. JAX
