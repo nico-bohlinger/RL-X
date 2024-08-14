@@ -90,7 +90,10 @@ class Runner:
             device = alg_device or env_device
             if device == "cpu":
                 jax.config.update("jax_platform_name", "cpu")
-            jax.default_backend()
+            try:
+                jax.default_backend()
+            except:
+                pass
 
         self._model_class = get_algorithm_model_class(algorithm_name)
         self._create_env = get_environment_create_env(environment_name)
