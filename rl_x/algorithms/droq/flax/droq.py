@@ -78,19 +78,19 @@ class DroQ():
         self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
 
         def q_linear_schedule(count):
-            step = count - self.learning_starts
+            step = (count * self.nr_envs) - self.learning_starts
             total_steps = self.total_timesteps - self.learning_starts
             fraction = 1.0 - (step / (total_steps * self.q_update_steps))
             return self.learning_rate * fraction
     
         def policy_linear_schedule(count):
-            step = count - self.learning_starts
+            step = (count * self.nr_envs) - self.learning_starts
             total_steps = self.total_timesteps - self.learning_starts
             fraction = 1.0 - (step / (total_steps * self.policy_update_steps))
             return self.learning_rate * fraction
 
         def entropy_linear_schedule(count):
-            step = count - self.learning_starts
+            step = (count * self.nr_envs) - self.learning_starts
             total_steps = self.total_timesteps - self.learning_starts
             fraction = 1.0 - (step / (total_steps * self.entropy_update_steps))
             return self.learning_rate * fraction

@@ -74,8 +74,9 @@ class CrossQ:
 
         self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
 
-        def linear_schedule(step):
-            total_steps = self.total_timesteps
+        def linear_schedule(count):
+            step = (count * self.nr_envs) - self.learning_starts
+            total_steps = self.total_timesteps - self.learning_starts
             fraction = 1.0 - (step / total_steps)
             return self.learning_rate * fraction
         
