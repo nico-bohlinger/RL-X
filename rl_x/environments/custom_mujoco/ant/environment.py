@@ -37,9 +37,7 @@ class Ant(gym.Env):
         
         qpos = np.zeros(self.model.nq)
         qpos[2] = 0.75  # z position
-        rotation_angles = np.array([0.0, 0.0, 0.0])  # yaw, pitch, roll
-        rotation_quaternion = Rotation.from_euler("xyz", rotation_angles).as_quat()
-        qpos[3:7] = rotation_quaternion
+        qpos[3:7] = [1.0, 0.0, 0.0, 0.0]  # mujoco quaternion format: [w, x, y, z]
 
         qvel = np.zeros(self.model.nv)
 
@@ -79,7 +77,8 @@ class Ant(gym.Env):
         joint_velocities = self.data.qvel[6:]
         local_angular_velocities = self.data.qvel[3:6]
 
-        inverted_rotation = Rotation.from_quat(self.data.qpos[3:7]).inv()
+        base_orientation = [self.data.qpos[4], self.data.qpos[5], self.data.qpos[6], self.data.qpos[3]]  # scipy quaternion format: [x, y, z, w]
+        inverted_rotation = Rotation.from_quat(base_orientation).inv()
         global_linear_velocities = self.data.qvel[:3]
         local_linear_velocities = inverted_rotation.apply(global_linear_velocities)
         projected_gravity_vector = inverted_rotation.apply(np.array([0.0, 0.0, -1.0]))
@@ -96,13 +95,12 @@ class Ant(gym.Env):
 
 
     def get_reward(self):
-        rotation_quaternion = self.data.qpos[3:7]
-        yaw_angle = Rotation.from_quat(rotation_quaternion).as_euler("xyz")[0]
-        target_global_x_velocity = self.target_local_x_velocity * np.cos(yaw_angle) - self.target_local_y_velocity * np.sin(yaw_angle)
-        target_global_y_velocity = self.target_local_x_velocity * np.sin(yaw_angle) + self.target_local_y_velocity * np.cos(yaw_angle)
-        target_global_xy_velocity = np.array([target_global_x_velocity, target_global_y_velocity])
-        current_global_xy_velocity = self.data.qvel[:2]
-        xy_velocity_difference_norm = np.sum(np.square(target_global_xy_velocity - current_global_xy_velocity))
+        base_orientation = [self.data.qpos[4], self.data.qpos[5], self.data.qpos[6], self.data.qpos[3]]
+        inverted_rotation = Rotation.from_quat(base_orientation).inv()
+        current_global_linear_velocity = self.data.qvel[:3]
+        current_local_linear_velocity = inverted_rotation.apply(current_global_linear_velocity)
+        target_local_linear_velocity_xy = np.array([self.target_local_x_velocity, self.target_local_y_velocity])
+        xy_velocity_difference_norm = np.sum(np.square(target_local_linear_velocity_xy - current_local_linear_velocity[:2]))
         tracking_xy_velocity_command_reward = np.exp(-xy_velocity_difference_norm / 0.25)
 
         reward = tracking_xy_velocity_command_reward
