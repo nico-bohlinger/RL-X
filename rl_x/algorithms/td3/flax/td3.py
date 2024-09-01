@@ -1,5 +1,6 @@
 import os
 import shutil
+import json
 import logging
 import time
 from collections import deque
@@ -102,8 +103,7 @@ class TD3:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
             self.best_model_file_name = "best.model"
-            best_model_check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=self.best_model_file_name)
-            self.best_model_checkpointer = orbax.checkpoint.Checkpointer(best_model_check_point_handler)
+            self.best_model_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
         
     
     def train(self):
@@ -391,12 +391,13 @@ class TD3:
 
     def save(self):
         checkpoint = {
-            "config_algorithm": self.config.algorithm.to_dict(),
             "policy": self.policy_state,
             "critic": self.critic_state         
         }
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.best_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
+        with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as f:
+            json.dump(self.config.algorithm.to_dict(), f)
         shutil.make_archive(f"{self.save_path}/{self.best_model_file_name}", "zip", f"{self.save_path}/tmp")
         os.rename(f"{self.save_path}/{self.best_model_file_name}.zip", f"{self.save_path}/{self.best_model_file_name}")
         shutil.rmtree(f"{self.save_path}/tmp")
@@ -407,28 +408,24 @@ class TD3:
 
     def load(config, env, run_path, writer, explicitly_set_algorithm_params):
         splitted_path = config.runner.load_model.split("/")
-        checkpoint_dir = "/".join(splitted_path[:-1]) if len(splitted_path) > 1 else "."
+        checkpoint_dir = os.path.abspath("/".join(splitted_path[:-1]))
         checkpoint_file_name = splitted_path[-1]
-
         shutil.unpack_archive(f"{checkpoint_dir}/{checkpoint_file_name}", f"{checkpoint_dir}/tmp", "zip")
         checkpoint_dir = f"{checkpoint_dir}/tmp"
-        jax_model_file_name = [f for f in os.listdir(checkpoint_dir) if f.endswith(".model")][0]
 
-        check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=jax_model_file_name)
-        checkpointer = orbax.checkpoint.Checkpointer(check_point_handler)
-
-        loaded_algorithm_config = checkpointer.restore(checkpoint_dir)["config_algorithm"]
+        loaded_algorithm_config = json.load(open(f"{checkpoint_dir}/config_algorithm.json", "r"))
         for key, value in loaded_algorithm_config.items():
             if f"algorithm.{key}" not in explicitly_set_algorithm_params:
                 config.algorithm[key] = value
         model = TD3(config, env, run_path, writer)
 
         target = {
-            "config_algorithm": config.algorithm.to_dict(),
             "policy": model.policy_state,
             "critic": model.critic_state
         }
-        checkpoint = checkpointer.restore(checkpoint_dir, item=target)
+        restore_args = orbax_utils.restore_args_from_target(target)
+        checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+        checkpoint = checkpointer.restore(checkpoint_dir, item=target, restore_args=restore_args)
 
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
