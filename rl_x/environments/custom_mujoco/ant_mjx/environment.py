@@ -22,7 +22,7 @@ class Ant:
         self.nr_intermediate_steps = 1
 
         initial_height = 0.75
-        initial_rotation_quaternion = [0.0, 0.0, 0.0, 1.0]  # mujoco quaternion format: [x, y, z, w]
+        initial_rotation_quaternion = [1.0, 0.0, 0.0, 0.0]  # mujoco quaternion format: [w, x, y, z]
         initial_joint_angles = [0.0, 0.0] * 4
         self.initial_qpos = jnp.array([0.0, 0.0, initial_height, *initial_rotation_quaternion, *initial_joint_angles])
         self.initial_qvel = jnp.zeros(self.sys.nv)
