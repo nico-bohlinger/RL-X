@@ -78,13 +78,13 @@ pip uninstall $(pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
 ```
 Afterwards, PyTorch can be installed with the following command:
 ```
-pip install "torch>=2.4.0" --index-url https://download.pytorch.org/whl/cu118 --upgrade
+pip install "torch>=2.4.1" --index-url https://download.pytorch.org/whl/cu118 --upgrade
 ```
 
 ### 5. JAX
 For Linux, JAX with GPU support can be installed with the following command:
 ```
-pip install -U "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install -U "jax[cuda12]"
 ```
 For MacOS and Windows, JAX with GPU support is not supported out-of-the-box. However, it can be done with some extra effort (see [here](https://github.com/google/jax) for more information).
 
