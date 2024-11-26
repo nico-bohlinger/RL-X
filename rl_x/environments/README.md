@@ -87,4 +87,4 @@ If the wrappers of an environment provide all data in the standard format, i.e. 
 Keep in mind the algorithm has to be able to handle the action space, observation space and data interface type of the environment.  
 For simplicity most of the implemented algorithms only support continuous actions and non-image observations in the form of a numpy arrays.
 
-> ✅ **Every environment can be used with the PPO PyTorch version.** The PyTorch implementation of PPO supports all currently used action space, observation space and data interface types.
+> ✅ **Every environment can be used with PPO.** The PyTorch implementation of PPO supports all currently used action space, observation space and data interface types besides the JAX data interface. For fully JIT-able JAX environments, use the ```flax_full_jit``` version of PPO.   

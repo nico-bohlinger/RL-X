@@ -76,4 +76,4 @@ The handling of the action and observation space types should be done by the cla
 The handling of the data interface types should be done by the algorithm class itself and revolves around the step() function or more precisely the action and observation variables.  
 For simplicity most of the implemented algorithms only support continuous actions and non-image observations in the form of a numpy arrays. 
 
-> ✅ **Every environment can be used with the PPO PyTorch version.** The PyTorch implementation of PPO supports all currently used action space, observation space and data interface types.
+> ✅ **Every environment can be used with PPO.** The PyTorch implementation of PPO supports all currently used action space, observation space and data interface types besides the JAX data interface. For fully JIT-able JAX environments, use the ```flax_full_jit``` version of PPO.  
