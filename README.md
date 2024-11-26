@@ -71,7 +71,7 @@ git clone git@github.com:nico-bohlinger/RL-X.git
 cd RL-X
 pip install -e .[all] --config-settings editable_mode=compat
 pip uninstall $(pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
-pip install "torch>=2.4.1" --index-url https://download.pytorch.org/whl/cu118 --upgrade
+pip install "torch>=2.1.2" --index-url https://download.pytorch.org/whl/cu118 --upgrade
 pip install -U "jax[cuda12]"
 ```
 For other configurations, see the [detailed installation guide](https://nico-bohlinger.github.io/RL-X/#detailed-installation-guide) in the documentation.
