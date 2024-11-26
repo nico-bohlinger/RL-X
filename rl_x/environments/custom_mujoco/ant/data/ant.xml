@@ -76,4 +76,7 @@
     <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="hip_3" gear="150"/>
     <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="ankle_3" gear="150"/>
   </actuator>
+  <keyframe>
+    <key name="home" qpos="0 0 0.75 1 0 0 0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0"/>
+  </keyframe>
 </mujoco>

@@ -1,5 +1,6 @@
 from typing import Sequence
 import numpy as np
+import jax
 import jax.numpy as jnp
 import flax.linen as nn
 from flax.linen.initializers import constant, orthogonal
@@ -13,28 +14,36 @@ def get_policy(config, env):
     observation_space_type = env.general_properties.observation_space_type
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return (Policy(env.single_action_space.shape, config.algorithm.std_dev, config.algorithm.nr_hidden_units),
-                get_processed_action_function(jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high)))
+        return (Policy(env.single_action_space.shape, config.algorithm.std_dev),
+                get_processed_action_function(
+                    config.algorithm.action_clipping_and_rescaling,
+                    jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high)
+                ))
 
 
 class Policy(nn.Module):
     as_shape: Sequence[int]
     std_dev: float
-    nr_hidden_units: int
 
     @nn.compact
     def __call__(self, x):
-        policy_mean = nn.Dense(self.nr_hidden_units, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
-        policy_mean = nn.tanh(policy_mean)
-        policy_mean = nn.Dense(self.nr_hidden_units, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(policy_mean)
-        policy_mean = nn.tanh(policy_mean)
+        policy_mean = nn.Dense(512, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        policy_mean = nn.LayerNorm()(policy_mean)
+        policy_mean = nn.elu(policy_mean)
+        policy_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(policy_mean)
+        policy_mean = nn.elu(policy_mean)
+        policy_mean = nn.Dense(128, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(policy_mean)
+        policy_mean = nn.elu(policy_mean)
         policy_mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=orthogonal(0.01), bias_init=constant(0.0))(policy_mean)
         policy_logstd = self.param("policy_logstd", constant(jnp.log(self.std_dev)), (1, np.prod(self.as_shape).item()))
         return policy_mean, policy_logstd
 
 
-def get_processed_action_function(env_as_low, env_as_high):
-    def get_clipped_and_scaled_action(action, env_as_low=env_as_low, env_as_high=env_as_high):
-        clipped_action = jnp.clip(action, -1, 1)
-        return env_as_low + (0.5 * (clipped_action + 1.0) * (env_as_high - env_as_low))
-    return get_clipped_and_scaled_action
+def get_processed_action_function(action_clipping_and_rescaling, env_as_low, env_as_high):
+    if action_clipping_and_rescaling:
+        def get_clipped_and_scaled_action(action, env_as_low=env_as_low, env_as_high=env_as_high):
+            clipped_action = jnp.clip(action, -1, 1)
+            return env_as_low + (0.5 * (clipped_action + 1.0) * (env_as_high - env_as_low))
+        return jax.jit(get_clipped_and_scaled_action)
+    else:
+        return jax.jit(lambda x: x)

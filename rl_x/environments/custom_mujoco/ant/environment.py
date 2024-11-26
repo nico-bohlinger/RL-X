@@ -19,7 +19,11 @@ class Ant(gym.Env):
         self.nr_intermediate_steps = 1
         self.dt = self.model.opt.timestep * self.nr_substeps * self.nr_intermediate_steps
 
-        self.viewer = None if not render else MujocoViewer(self.model, self.dt)
+        self.initial_qpos = self.model.keyframe("home").qpos
+        self.initial_qvel = self.model.keyframe("home").qvel
+
+        self.target_local_x_velocity = 2.0
+        self.target_local_y_velocity = 0.0
 
         action_bounds = self.model.actuator_ctrlrange.copy().astype(np.float32)
         action_low, action_high = action_bounds.T
@@ -27,28 +31,20 @@ class Ant(gym.Env):
 
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(34,), dtype=np.float32)
 
-        self.target_local_x_velocity = 2.0
-        self.target_local_y_velocity = 0.0
+        self.viewer = None if not render else MujocoViewer(self.model, self.dt)
 
 
     def reset(self, seed=None):
         self.episode_step = 0
-        self.current_action = np.zeros(self.model.nu)
-        
-        qpos = np.zeros(self.model.nq)
-        qpos[2] = 0.75  # z position
-        qpos[3:7] = [1.0, 0.0, 0.0, 0.0]  # mujoco quaternion format: [w, x, y, z]
 
-        qvel = np.zeros(self.model.nv)
-
-        self.data.qpos[:] = qpos
-        self.data.qvel[:] = qvel
+        self.data.qpos[:] = self.initial_qpos
+        self.data.qvel[:] = self.initial_qvel
         mujoco.mj_forward(self.model, self.data)
 
         if self.viewer:
             self.viewer.render(self.data)
 
-        return self.get_observation(), {}
+        return self.get_observation(np.zeros(self.model.nu)), {}
 
 
     def step(self, action):
@@ -60,9 +56,8 @@ class Ant(gym.Env):
             self.viewer.render(self.data)
         
         self.episode_step += 1
-        self.current_action = action.copy()
 
-        next_state = self.get_observation()
+        next_state = self.get_observation(action)
         reward, r_info = self.get_reward()
         terminated = self.data.qpos[2] < 0.2 or self.data.qpos[2] > 1.0
         truncated = self.episode_step >= self.horizon
@@ -71,7 +66,7 @@ class Ant(gym.Env):
         return next_state, reward, terminated, truncated, info
 
 
-    def get_observation(self):
+    def get_observation(self, current_action):
         global_height = [self.data.qpos[2]]
         joint_positions = self.data.qpos[7:]
         joint_velocities = self.data.qvel[6:]
@@ -88,7 +83,7 @@ class Ant(gym.Env):
             joint_positions, joint_velocities,
             local_linear_velocities, local_angular_velocities,
             projected_gravity_vector,
-            self.current_action
+            current_action
         ])
         
         return observation

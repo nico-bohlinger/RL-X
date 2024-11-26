@@ -1,5 +1,7 @@
 import os
 import shutil
+import json
+from copy import deepcopy
 import logging
 import time
 import tree
@@ -31,8 +33,10 @@ class PPO:
         self.track_tb = config.runner.track_tb
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
+        self.nr_parallel_seeds = config.algorithm.nr_parallel_seeds
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
+        self.render = config.environment.render
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.nr_steps = config.algorithm.nr_steps
@@ -45,22 +49,24 @@ class PPO:
         self.critic_coef = config.algorithm.critic_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
-        self.nr_hidden_units = config.algorithm.nr_hidden_units
-        self.evaluation_frequency = config.algorithm.evaluation_frequency
-        self.evaluation_episodes = config.algorithm.evaluation_episodes
+        self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
+        self.evaluation_active = config.algorithm.evaluation_active
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
         self.nr_updates = config.algorithm.total_timesteps // self.batch_size
         self.nr_minibatches = self.batch_size // self.minibatch_size
-        self.evaluation_active = config.algorithm.evaluation_frequency != -1
-        if config.algorithm.evaluation_frequency == -1:
-            self.evaluation_frequency = self.batch_size * (self.total_timesteps // self.batch_size)
-        self.nr_multi_learning_and_eval_iterations = self.total_timesteps // self.evaluation_frequency
-        self.nr_updates_per_multi_learning_iteration = self.evaluation_frequency // self.batch_size
+        if config.algorithm.evaluation_and_save_frequency == -1:
+            self.evaluation_and_save_frequency = self.batch_size * (self.total_timesteps // self.batch_size)
+        self.nr_multi_learning_and_eval_save_iterations = self.total_timesteps // self.evaluation_and_save_frequency
+        self.nr_updates_per_multi_learning_iteration = self.evaluation_and_save_frequency // self.batch_size
         self.os_shape = env.single_observation_space.shape
         self.as_shape = env.single_action_space.shape
+        self.horizon = env.horizon
 
-        if self.evaluation_frequency % self.batch_size != 0:
-            raise ValueError("Evaluation frequency must be a multiple of batch size")
+        if self.evaluation_and_save_frequency % self.batch_size != 0:
+            raise ValueError("Evaluation and save frequency must be a multiple of batch size")
+        
+        if self.nr_parallel_seeds > 1:
+            raise ValueError("Parallel seeds are not supported yet. This is mainly limited by not being able to log mutliple wandb runs at the same time.")
 
         rlx_logger.info(f"Using device: {jax.default_backend()}")
 
@@ -99,22 +105,23 @@ class PPO:
 
         if self.save_model:
             os.makedirs(self.save_path)
-            self.best_mean_return = -np.inf
-            self.best_model_file_name = "best.model"
-            best_model_check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=self.best_model_file_name)
-            self.best_model_checkpointer = orbax.checkpoint.Checkpointer(best_model_check_point_handler)
+            self.latest_model_file_name = "latest.model"
+            self.latest_model_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
  
     def train(self):
-        def jitable_train_function(key):
-            key, subkey = jax.random.split(key)
-            reset_keys = jax.random.split(subkey, self.nr_envs)
+        def jitable_train_function(key, parallel_seed_id):
+            key, reset_key = jax.random.split(key, 2)
+            reset_keys = jax.random.split(reset_key, self.nr_envs)
             env_state = self.env.reset(reset_keys)
 
-            def multi_learning_and_eval_iteration(multi_learning_and_eval_iteration_carry, multi_learnning_iteration_step):
-                policy_state, critic_state, env_state, key = multi_learning_and_eval_iteration_carry
+            policy_state = self.policy_state
+            critic_state = self.critic_state
 
-                def learning_iteration(learning_iteration_carry, learnning_iteration_step):
+            def multi_learning_and_eval_save_iteration(multi_learning_and_eval_save_iteration_carry, multi_learning_iteration_step):
+                policy_state, critic_state, env_state, key = multi_learning_and_eval_save_iteration_carry
+
+                def learning_iteration(learning_iteration_carry, learning_iteration_step):
                     policy_state, critic_state, env_state, key = learning_iteration_carry
 
                     # Acting
@@ -132,6 +139,12 @@ class PPO:
 
                         env_state = self.env.step(env_state, processed_action)
                         transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, env_state.terminated, log_prob, env_state.info)
+
+                        if self.render:
+                            def render(env_state):
+                                return self.env.render(env_state)
+                            
+                            env_state = jax.experimental.io_callback(render, env_state, env_state)
 
                         return (policy_state, critic_state, env_state, key), transition
 
@@ -243,24 +256,13 @@ class PPO:
                     carry, (optimization_metrics) = jax.lax.scan(minibatch_update, init_carry, batch_indices)
                     policy_state, critic_state = carry
 
-                    optimization_metrics = {key: jnp.mean(optimization_metrics[key]) for key in optimization_metrics}
                     optimization_metrics["lr/learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
                     optimization_metrics["v_value/explained_variance"] = 1 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
                     optimization_metrics["policy/std_dev"] = jnp.mean(jnp.exp(policy_state.params["params"]["policy_logstd"]))
 
 
-                    # Saving
-                    if self.save_model:
-                        def save_with_check(infos):
-                            mean_return = np.mean(infos["rollout/episode_return"])
-                            if mean_return > self.best_mean_return:
-                                self.best_mean_return = mean_return
-                                self.save()
-                        jax.debug.callback(save_with_check, infos)
-
-
                     # Logging
-                    combined_learning_iteration_step = (multi_learnning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learnning_iteration_step + 1
+                    combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
                     steps_metrics = {
                         "steps/nr_env_steps": combined_learning_iteration_step * self.nr_steps * self.nr_envs,
                         "steps/nr_updates": combined_learning_iteration_step * self.nr_epochs * self.nr_minibatches,
@@ -269,17 +271,18 @@ class PPO:
                     combined_metrics = {**infos, **steps_metrics, **optimization_metrics}
                     combined_metrics = tree.map_structure(lambda x: jnp.mean(x), combined_metrics)
 
-                    def callback(metrics):
+                    def callback(carry):
+                        metrics, parallel_seed_id = carry
                         current_time = time.time()
-                        metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (current_time - self.last_time))
-                        self.last_time = current_time
+                        metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (current_time - self.last_time[parallel_seed_id]))
+                        self.last_time[parallel_seed_id] = current_time
                         global_step = int(metrics["steps/nr_env_steps"])
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
                         self.end_logging()
 
-                    jax.debug.callback(callback, combined_metrics)
+                    jax.debug.callback(callback, (combined_metrics, parallel_seed_id))
                     
                     return (policy_state, critic_state, env_state, key), None
                     
@@ -290,50 +293,58 @@ class PPO:
 
                 # Evaluating
                 if self.evaluation_active:
-                    def evaluate_single(policy_state, env_state):
-                        def single_deterministic_rollout(single_rollout_carry):
-                            policy_state, env_state, _, episode_return, episode_length = single_rollout_carry
-                            action_mean, _ = self.policy.apply(policy_state.params, env_state.next_observation)
-                            processed_action = self.get_processed_action(action_mean)
-                            env_state = self.env._step(env_state, processed_action)
-                            done = env_state.terminated | env_state.truncated
-                            return (policy_state, env_state, done, episode_return + env_state.reward, episode_length + 1)
+                    def single_eval_rollout(single_eval_rollout_carry, _):
+                        policy_state, env_state, episode_return, episode_length, seen_done, key = single_eval_rollout_carry
 
-                        single_rollout_carry = jax.lax.while_loop(
-                            lambda carry: jnp.logical_not(carry[2]),
-                            single_deterministic_rollout,
-                            (policy_state, env_state, False, 0.0, 0)
-                        )
-                        _, _, _, episode_return, episode_length = single_rollout_carry
-                        return {"eval/episode_return": episode_return, "eval/episode_length": episode_length}
+                        key, subkey = jax.random.split(key)
+                        action_mean, action_logstd = self.policy.apply(policy_state.params, env_state.next_observation)
+                        action_std = jnp.exp(action_logstd)
+                        action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
+                        processed_action = self.get_processed_action(action)
+                        # env_state = self.env._step(env_state, processed_action) # TODO
+                        episode_return += env_state.reward * (1 - seen_done)
+                        episode_length += 1 * (1 - seen_done)
+                        seen_done = seen_done | env_state.terminated | env_state.truncated
+
+                        return (policy_state, env_state, episode_return, episode_length, seen_done, key), None
                     
-                    key, subkey = jax.random.split(key)
-                    reset_keys = jax.random.split(subkey, self.evaluation_episodes)
-                    eval_env_state = self.env.reset(reset_keys)
-                    eval_infos = jax.vmap(evaluate_single, in_axes=(None, 0))(policy_state, eval_env_state)
-                    eval_infos = tree.map_structure(lambda x: jnp.mean(x), eval_infos)
+                    eval_env_state = self.env._vmap_reset(env_state)
+                    single_eval_rollout_carry = (policy_state, eval_env_state, jnp.zeros(self.nr_envs), jnp.zeros(self.nr_envs), jnp.zeros(self.nr_envs, dtype=bool), key)
+                    single_eval_rollout_carry, _ = jax.lax.scan(single_eval_rollout, single_eval_rollout_carry, jnp.arange(self.horizon))
+                    _, _, episode_returns, episode_lengths, _, key = single_eval_rollout_carry
+                    eval_infos = {"eval/episode_return": jnp.mean(episode_returns), "eval/episode_length": jnp.mean(episode_lengths)}
 
                     def callback(metrics_and_global_step):
                         metrics, global_step = metrics_and_global_step
+                        global_step = int(global_step)
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
                         self.end_logging()
 
-                    global_step = (multi_learnning_iteration_step + 1) * self.evaluation_frequency
+                    global_step = (multi_learning_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration * self.nr_steps * self.nr_envs
                     jax.debug.callback(callback, (eval_infos, global_step))
-            
+                
+
+                # Saving
+                if self.save_model:
+                    def save_with_check(policy_state, critic_state):
+                        self.save(policy_state, critic_state)
+                    jax.debug.callback(save_with_check, policy_state, critic_state)
+
+                
                 return (policy_state, critic_state, env_state, key), None
 
-            jax.lax.scan(multi_learning_and_eval_iteration, (self.policy_state, self.critic_state, env_state, key), jnp.arange(self.nr_multi_learning_and_eval_iterations))
+            jax.lax.scan(multi_learning_and_eval_save_iteration, (policy_state, critic_state, env_state, key), jnp.arange(self.nr_multi_learning_and_eval_save_iterations))
             
 
         self.key, subkey = jax.random.split(self.key)
-        train_function = jax.jit(jitable_train_function)
-        self.last_time = time.time()
-        self.start_time = self.last_time
-        jax.block_until_ready(train_function(subkey))
-        rlx_logger.info(f"time: {time.time() - self.start_time:.2f} s")
+        seed_keys = jax.random.split(subkey, self.nr_parallel_seeds)
+        train_function = jax.jit(jax.vmap(jitable_train_function))
+        self.last_time = [time.time() for _ in range(self.nr_parallel_seeds)]
+        self.start_time = deepcopy(self.last_time)
+        jax.block_until_ready(train_function(seed_keys, jnp.arange(self.nr_parallel_seeds)))
+        rlx_logger.info(f"Average time: {max([time.time() - t for t in self.start_time]):.2f} s")
     
 
     def log(self, name, value, step):
@@ -360,46 +371,43 @@ class PPO:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
 
-    def save(self):
+    def save(self, policy_state, critic_state):
         checkpoint = {
-            "config_algorithm": self.config.algorithm.to_dict(),
-            "policy": self.policy_state,
-            "critic": self.critic_state
+            "policy": policy_state,
+            "critic": critic_state
         }
         save_args = orbax_utils.save_args_from_target(checkpoint)
-        self.best_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
-        shutil.make_archive(f"{self.save_path}/{self.best_model_file_name}", "zip", f"{self.save_path}/tmp")
-        os.rename(f"{self.save_path}/{self.best_model_file_name}.zip", f"{self.save_path}/{self.best_model_file_name}")
+        self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
+        with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as f:
+            json.dump(self.config.algorithm.to_dict(), f)
+        shutil.make_archive(f"{self.save_path}/{self.latest_model_file_name}", "zip", f"{self.save_path}/tmp")
+        os.rename(f"{self.save_path}/{self.latest_model_file_name}.zip", f"{self.save_path}/{self.latest_model_file_name}")
         shutil.rmtree(f"{self.save_path}/tmp")
 
         if self.track_wandb:
-            wandb.save(f"{self.save_path}/{self.best_model_file_name}", base_path=self.save_path)
+            wandb.save(f"{self.save_path}/{self.latest_model_file_name}", base_path=self.save_path)
     
 
     def load(config, env, run_path, writer, explicitly_set_algorithm_params):
         splitted_path = config.runner.load_model.split("/")
-        checkpoint_dir = "/".join(splitted_path[:-1]) if len(splitted_path) > 1 else "."
+        checkpoint_dir = os.path.abspath("/".join(splitted_path[:-1]))
         checkpoint_file_name = splitted_path[-1]
-
         shutil.unpack_archive(f"{checkpoint_dir}/{checkpoint_file_name}", f"{checkpoint_dir}/tmp", "zip")
         checkpoint_dir = f"{checkpoint_dir}/tmp"
-        jax_model_file_name = [f for f in os.listdir(checkpoint_dir) if f.endswith(".model")][0]
-
-        check_point_handler = orbax.checkpoint.PyTreeCheckpointHandler(aggregate_filename=jax_model_file_name)
-        checkpointer = orbax.checkpoint.Checkpointer(check_point_handler)
-
-        loaded_algorithm_config = checkpointer.restore(checkpoint_dir)["config_algorithm"]
+        
+        loaded_algorithm_config = json.load(open(f"{checkpoint_dir}/config_algorithm.json", "r"))
         for key, value in loaded_algorithm_config.items():
             if f"algorithm.{key}" not in explicitly_set_algorithm_params:
                 config.algorithm[key] = value
         model = PPO(config, env, run_path, writer)
 
         target = {
-            "config_algorithm": config.algorithm.to_dict(),
             "policy": model.policy_state,
             "critic": model.critic_state
         }
-        checkpoint = checkpointer.restore(checkpoint_dir, item=target)
+        restore_args = orbax_utils.restore_args_from_target(target)
+        checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+        checkpoint = checkpointer.restore(checkpoint_dir, item=target, restore_args=restore_args)
 
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
@@ -410,30 +418,26 @@ class PPO:
 
 
     def test(self, episodes):
-        @jax.jit
-        def run_single(policy_state, env_state):
-            def deterministic_rollout(single_rollout_carry):
-                policy_state, env_state, _, episode_return = single_rollout_carry
-                action_mean, _ = self.policy.apply(policy_state.params, env_state.next_observation)
-                processed_action = self.get_processed_action(action_mean)
-                env_state = self.env.step(env_state, processed_action)
-                done = env_state.terminated | env_state.truncated
-                return (policy_state, env_state, done[0], episode_return + env_state.reward[0])
+        rlx_logger.info("Testing runs infinitely. The episodes parameter is ignored.")
 
-            single_rollout_carry = jax.lax.while_loop(
-                lambda carry: jnp.logical_not(carry[2]),
-                deterministic_rollout,
-                (policy_state, env_state, False, 0.0)
-            )
-            _, _, _, episode_return = single_rollout_carry
-            return episode_return
-        
+        @jax.jit
+        def rollout(env_state, key):
+            key, subkey = jax.random.split(key)
+            action_mean, action_logstd = self.policy.apply(self.policy_state.params, env_state.next_observation)
+            action_std = jnp.exp(action_logstd)
+            # Only use mean for evaluating the deterministic policy
+            action = action_mean # + action_std * jax.random.normal(subkey, shape=action_mean.shape)
+            processed_action = self.get_processed_action(action)
+            env_state = self.env.step(env_state, processed_action)
+            return env_state, key
+
         self.key, subkey = jax.random.split(self.key)
-        reset_keys = jax.random.split(subkey, 1)
+        reset_keys = jax.random.split(subkey, self.nr_envs)
         env_state = self.env.reset(reset_keys)
-        for i in range(episodes):
-            episode_return = run_single(self.policy_state, env_state)
-            rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
+        while True:
+            env_state, self.key = rollout(env_state, self.key)
+            if self.render:
+                env_state = self.env.render(env_state)
 
 
     def general_properties():
