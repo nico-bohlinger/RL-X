@@ -50,12 +50,16 @@ class MujocoViewer:
         self.viewport = mujoco.MjrRect(0, 0, framebuffer_width, framebuffer_height)
         self.context = mujoco.MjrContext(model, mujoco.mjtFontScale(self.font_scale))
 
+        self.last_render_time = time.time()
+
+
     def mouse_button(self, window, button, act, mods):
         self.button_left = glfw.get_mouse_button(self.window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
         self.button_right = glfw.get_mouse_button(self.window, glfw.MOUSE_BUTTON_RIGHT) == glfw.PRESS
         self.button_middle = glfw.get_mouse_button(self.window, glfw.MOUSE_BUTTON_MIDDLE) == glfw.PRESS
 
         self.last_x, self.last_y = glfw.get_cursor_pos(self.window)
+
 
     def mouse_move(self, window, x_pos, y_pos):
         if not self.button_left and not self.button_right and not self.button_middle:
@@ -79,6 +83,7 @@ class MujocoViewer:
 
         mujoco.mjv_moveCamera(self.model, action, dx / width, dy / height, self.scene, self.camera)
 
+
     def keyboard(self, window, key, scancode, act, mods):
         if act != glfw.RELEASE:
             return
@@ -93,13 +98,14 @@ class MujocoViewer:
         elif key == glfw.KEY_F:
             self.run_speed_factor *= 2.0
 
+
     def scroll(self, window, x_offset, y_offset):
         mujoco.mjv_moveCamera(self.model, mujoco.mjtMouse.mjMOUSE_ZOOM, 0, 0.05 * y_offset, self.scene, self.camera)
+
 
     def render(self, data):
         def render_inner_loop(self):
             self.create_overlay()
-            render_start = time.time()
 
             mujoco.mjv_updateScene(self.model, data, self.scene_option, None, self.camera,
                                    mujoco.mjtCatBit.mjCAT_ALL,
@@ -121,8 +127,12 @@ class MujocoViewer:
                 self.stop()
                 exit(0)
 
-            time.sleep(max(0, self.target_render_time - (time.time() - render_start) - 0.0002))
-            self.time_per_render = time.time() - render_start
+            render_and_sim_time = time.time() - self.last_render_time
+            time.sleep(max(0, self.target_render_time - render_and_sim_time))
+
+            current_time = time.time()
+            self.time_per_render = current_time - self.last_render_time
+            self.last_render_time = current_time
 
         if self.paused:
             while self.paused:
@@ -134,11 +144,14 @@ class MujocoViewer:
             self.set_camera()
             self.loop_count -= 1
 
+
     def stop(self):
         glfw.destroy_window(self.window)
 
+
     def close(self):
         glfw.set_window_should_close(self.window, True)
+
 
     def create_overlay(self):
         topleft = mujoco.mjtGridPos.mjGRID_TOPLEFT
@@ -156,6 +169,7 @@ class MujocoViewer:
         self.overlay[topleft][1] += self.camera_mode+"\n"
         self.overlay[topleft][0] += "Run speed = %.3f x real time" % self.run_speed_factor
         self.overlay[topleft][1] += "[S]lower, [F]aster"
+
 
     def set_camera(self):
         if self.camera_mode_target == "static" and self.camera_mode != "static":
