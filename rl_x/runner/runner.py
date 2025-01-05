@@ -69,8 +69,11 @@ class Runner:
         elif algorithm_uses_jax or environment_uses_jax:
             # Guarantee enough memory for CUBLAS to initialize when using jax
             os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
-            # Set device
             import jax
+            # Spent most possible time to optimize execution time and memory usage
+            jax.config.update("jax_exec_time_optimization_effort", 1.0)
+            jax.config.update("jax_memory_fitting_effort", 1.0)
+            # Set device
             alg_device = None
             if algorithm_uses_jax:
                 alg_device = [arg for arg in sys.argv if arg.startswith("--algorithm.device=")]
