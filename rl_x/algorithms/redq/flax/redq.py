@@ -87,13 +87,13 @@ class REDQ():
         def policy_linear_schedule(count):
             step = (count * self.nr_envs) - self.learning_starts
             total_steps = self.total_timesteps - self.learning_starts
-            fraction = 1.0 - (step / (total_steps * self.policy_update_steps))
+            fraction = 1.0 - (step / total_steps)
             return self.learning_rate * fraction
 
         def entropy_linear_schedule(count):
             step = (count * self.nr_envs) - self.learning_starts
             total_steps = self.total_timesteps - self.learning_starts
-            fraction = 1.0 - (step / (total_steps * self.entropy_update_steps))
+            fraction = 1.0 - (step / total_steps)
             return self.learning_rate * fraction
         
         self.q_learning_rate = q_linear_schedule if self.anneal_learning_rate else self.learning_rate
