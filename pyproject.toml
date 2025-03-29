@@ -12,18 +12,18 @@ readme = "README.md"
 dependencies = [
     "absl-py>=2.1.0",
     "ml-collections>=1.0.0",
-    "wandb>=0.19.1",
+    "wandb>=0.19.8",
     "gymnasium[mujoco,classic-control,atari,accept-rom-license,other]<=0.29.1",
-    "mujoco<=3.2.4",
-    "mujoco-mjx<=3.2.4",
+    "mujoco>=3.3.0",
+    "mujoco-mjx>=3.3.0",
     "numpy>=2.0.2",
-    "tensorflow>=2.18.0",
-    "tensorboard>=2.18.0",
-    "jax[cpu]>=0.4.38",
-    "flax>=0.10.2",
-    "orbax_checkpoint>=0.11.0",
+    "tensorflow>=2.19.0",
+    "tensorboard>=2.19.0",
+    "jax[cpu]>=0.5.3",
+    "flax>=0.10.4",
+    "orbax_checkpoint>=0.11.10",
     "optax>=0.2.4",
-    "chex>=0.1.88",
+    "chex>=0.1.89",
     "tensorflow_probability>=0.25.0"
 ]
 
