@@ -277,7 +277,7 @@ class ESPO:
                 actual_next_state = next_state.copy()
                 for i, single_done in enumerate(done):
                     if single_done:
-                        actual_next_state[i] = self.env.get_final_observation_at_index(info, i)
+                        actual_next_state[i] = np.array(self.env.get_final_observation_at_index(info, i))
                         saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
                         dones_this_rollout += 1
                 for key, info_value in self.env.get_logging_info_dict(info).items():

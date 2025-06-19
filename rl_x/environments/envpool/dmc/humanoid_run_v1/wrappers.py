@@ -10,7 +10,7 @@ class RLXInfo(gym.Wrapper):
         self.episode_lengths = None
 
 
-    def extract_obervation(self, timestep):
+    def extract_observation(self, timestep):
         joint_angles = timestep.observation.joint_angles
         head_height = timestep.observation.head_height.reshape(-1, 1)
         extremities = timestep.observation.extremities
@@ -23,7 +23,7 @@ class RLXInfo(gym.Wrapper):
 
     def reset(self, **kwargs):
         timestep = self.env.reset()
-        observations = self.extract_obervation(timestep)
+        observations = self.extract_observation(timestep)
         self.episode_returns = np.zeros(self.nr_envs, dtype=np.float32)
         self.episode_lengths = np.zeros(self.nr_envs, dtype=np.int32)
         return observations, {}
@@ -31,7 +31,7 @@ class RLXInfo(gym.Wrapper):
 
     def step(self, action):
         timestep = super(RLXInfo, self).step(action)
-        observations = self.extract_obervation(timestep)
+        observations = self.extract_observation(timestep)
         rewards = timestep.reward
         terminations = timestep.step_type == 2  # 2 is StepType.LAST
         truncations = np.zeros_like(terminations)  # dmc envs don't have truncated episodes
@@ -52,7 +52,7 @@ class RLXInfo(gym.Wrapper):
                     self.episode_returns[i] = 0
                     self.episode_lengths[i] = 0
                     timestep_ = self.env.reset(np.array([i]))
-                    observations[i] = self.extract_obervation(timestep_)
+                    observations[i] = self.extract_observation(timestep_)
 
         return (observations, rewards, terminations, truncations, infos)
 
