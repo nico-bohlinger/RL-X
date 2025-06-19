@@ -6,6 +6,7 @@ def get_config(environment_name):
 
     config.name = environment_name
 
+    config.type = "Pong-v5"
     config.seed = 1
     config.nr_envs = 1
     config.async_skip_percentage = 0.0

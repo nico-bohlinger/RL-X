@@ -5,7 +5,7 @@ from rl_x.environments.envpool.atari.pong_v5.general_properties import GeneralPr
 
 
 def create_env(config):
-    env = envpool.make("Pong-v5", env_type="gymnasium", seed=config.environment.seed, num_envs=config.environment.nr_envs)
+    env = envpool.make(config.environment.type, env_type="gymnasium", seed=config.environment.seed, num_envs=config.environment.nr_envs)
     env = RLXInfo(env)
     env.general_properties = GeneralProperties
 

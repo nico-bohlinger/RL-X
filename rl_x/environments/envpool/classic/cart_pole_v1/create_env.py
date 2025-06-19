@@ -5,7 +5,7 @@ from rl_x.environments.envpool.classic.cart_pole_v1.general_properties import Ge
 
 
 def create_env(config):
-    env = envpool.make("CartPole-v1", env_type="gymnasium", seed=config.environment.seed, num_envs=config.environment.nr_envs)
+    env = envpool.make(config.environment.type, env_type="gymnasium", seed=config.environment.seed, num_envs=config.environment.nr_envs)
     env = RLXInfo(env)
     env.general_properties = GeneralProperties
 
