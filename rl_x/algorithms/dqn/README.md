@@ -23,12 +23,12 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 - Paper: [Playing Atari with Deep Reinforcement Learning (Mnih et al., 2013)](https://arxiv.org/pdf/1312.5602.pdf)
 - Paper 2: [Human-level control through deep reinforcement learning (Mnih et al., 2015)](https://www.nature.com/articles/nature14236.pdf)
 
-- Blog post by Julien Vitay: [here](https://julien-vitay.net/deeprl/2-Valuebased.html#deep-q-network-dqn)
+- Blog post by Julien Vitay: [here](https://julien-vitay.net/deeprl/src/2.3-DQN.html)
 
 - Blog post by Lilian Weng: [here](https://lilianweng.github.io/posts/2018-02-19-rl-overview/#deep-q-network)
 
 - Repositories:
-    - Dopamine: [here](https://github.com/google/dopamine/tree/master/dopamine/agents/dqn)
+    - Dopamine: [here](https://github.com/google/dopamine/tree/master/dopamine/jax/agents/dqn)
     - Stable Baselines3: [here](https://github.com/DLR-RM/stable-baselines3/blob/master/stable_baselines3/dqn)
     - Stable Baselines Jax: [here](https://github.com/araffin/sbx/tree/master/sbx/dqn)
     - CleanRL: [here](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/dqn_atari_jax.py)
