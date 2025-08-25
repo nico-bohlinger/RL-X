@@ -21,4 +21,6 @@ def get_config(runner_mode):
 
     config.nr_test_episodes = 10  # if runner mode = test
 
+    config.jax_cache_dir = "/tmp/jax_cache"
+
     return config

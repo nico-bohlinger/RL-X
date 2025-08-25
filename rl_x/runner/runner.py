@@ -42,7 +42,7 @@ rlx_logger = logging.getLogger("rl_x")
 
 class Runner:
     def __init__(self, implementation_package_names=["rl_x"]):
-        algorithm_name, environment_name, self._mode = self.parse_arguments(implementation_package_names)
+        algorithm_name, environment_name, self._mode, jax_cache_dir = self.parse_arguments(implementation_package_names)
 
         # Compatibility check
         algorithm_general_properties = get_algorithm_general_properties(algorithm_name)
@@ -73,6 +73,11 @@ class Runner:
             # Spent most possible time to optimize execution time and memory usage
             jax.config.update("jax_exec_time_optimization_effort", 1.0)
             jax.config.update("jax_memory_fitting_effort", 1.0)
+            # Enable jax cache
+            jax.config.update("jax_compilation_cache_dir", jax_cache_dir)
+            jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+            jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+            jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
             # Set device
             alg_device = None
             if algorithm_uses_jax:
@@ -135,6 +140,7 @@ class Runner:
         algorithm_name = [arg for arg in sys.argv if arg.startswith("--algorithm.name=")]
         environment_name = [arg for arg in sys.argv if arg.startswith("--environment.name=")]
         runner_mode = [arg for arg in sys.argv if arg.startswith("--runner.mode=")]
+        jax_cache_dir = [arg for arg in sys.argv if arg.startswith("--runner.jax_cache_dir=")]
 
         if algorithm_name:
             algorithm_name = algorithm_name[0].split("=")[1]
@@ -168,7 +174,13 @@ class Runner:
         else:
             runner_mode = DEFAULT_RUNNER_MODE
 
-        return algorithm_name, environment_name, runner_mode
+        if jax_cache_dir:
+            jax_cache_dir = jax_cache_dir[0].split("=")[1]
+            del sys.argv[sys.argv.index("--runner.jax_cache_dir=" + jax_cache_dir)]
+        else:
+            jax_cache_dir = get_runner_config(None).jax_cache_dir
+
+        return algorithm_name, environment_name, runner_mode, jax_cache_dir
 
 
     def run(self):
