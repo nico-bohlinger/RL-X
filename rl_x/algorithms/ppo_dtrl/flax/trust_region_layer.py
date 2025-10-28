@@ -1,25 +1,14 @@
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 from typing import Tuple
 from jax.lax import stop_gradient
-from jaxopt import LBFGS
-from functools import partial
-
-
-####################################################################
-####################################################################
-"""
-KL divergence projection layer from https://arxiv.org/pdf/2101.09207
-"""
-####################################################################
-####################################################################
 
 
 def dual(eta_omega, pred_std, target_std, target_logdet, eps, omega_offset):
     """ Lagrangian dual to be optimized
     """
+
     eta = jnp.where(eta_omega[0] > 0.0, eta_omega[0], 0.0)
     new_std = jnp.sqrt((eta + omega_offset) / jnp.clip((eta/(target_std**2)) + (1/pred_std)**2, a_min=1e-8))
     new_std = jnp.clip(jnp.nan_to_num(new_std), a_min=1e-8)
@@ -33,10 +22,10 @@ def dual(eta_omega, pred_std, target_std, target_logdet, eps, omega_offset):
 
     return dual_val, jnp.array([grad_val])
 
+
 @jax.custom_vjp
 def kl_cov_proj(pred_std: jnp.ndarray, target_std: jnp.ndarray, eps: float, max_eval: int = 50, 
                         omega_offset: float = 1.0, eta_init: float = 0.0) -> Tuple[jnp.ndarray, float]:
-
     """
     Covariance proj function
 
@@ -46,17 +35,14 @@ def kl_cov_proj(pred_std: jnp.ndarray, target_std: jnp.ndarray, eps: float, max_
     omega_offset: offset to include entropy term in the original optimization objective (see pg: 17 in paper)
     eta_init: initial guess for L-BFGS
     """
+
     target_logdet = -2.0 * jnp.sum(jnp.log(jnp.clip(1/target_std, a_min=1e-8)))
 
-    """ Optax L BFGS """
     def objective(eta_omega):
         val, grad = dual(eta_omega, pred_std, target_std, target_logdet, eps, omega_offset)
         return val, grad
 
     def opt_bfgs(init_params, fun, opt, max_iter, tol):
-
-        value_and_grad_fun = objective
-
         def step(carry):
             params, state = carry
             value, grad = objective(params)
@@ -88,25 +74,9 @@ def kl_cov_proj(pred_std: jnp.ndarray, target_std: jnp.ndarray, eps: float, max_
     params, _ = opt_bfgs(init_params, lambda x: objective(x)[0], lbfgs, max_iter=max_eval, tol=1e-9)
     eta_opt = params[0]
 
-    # """Jaxopt L BFGS """
-    # def objective(eta_omega):
-    #     val, grad = dual(eta_omega, pred_std, target_std, target_logdet, eps, omega_offset)
-    #     return val, grad
-
-    # # Initialize parameters
-    # init_params = jnp.array([eta_init])
-
-    # solver = LBFGS(fun=objective, maxiter=max_eval, value_and_grad=True, tol=1e-9)
-    # opt_res = solver.run(init_params)
-
-    # params = opt_res.params
-    # eta_opt = params[0]
-
-    """ Computing projected cov """
     projected_cov = (eta_opt + omega_offset) / jnp.clip(eta_opt/(target_std**2) + (1.0/pred_std)**2, a_min=1e-8)
     projected_cov = jnp.clip(jnp.nan_to_num(projected_cov), a_min=1e-16)
     return projected_cov, eta_opt
-
 
 
 def kl_cov_proj_backward(d_proj: jnp.ndarray,
@@ -164,10 +134,12 @@ def kl_cov_proj_backward(d_proj: jnp.ndarray,
 
     return d_pred_std
 
+
 def kl_cov_proj_fwd(pred_std, target_std, eps, max_eval, omega_offset, eta_init):
     projected_cov, eta = kl_cov_proj(pred_std, target_std, eps, max_eval, omega_offset, eta_init)
     residuals = (pred_std, target_std, projected_cov, eta, omega_offset)
     return (projected_cov, eta), residuals
+
 
 def kl_cov_proj_bwd(residuals, cotangents):
     d_projected_cov, d_eta = cotangents
@@ -176,7 +148,9 @@ def kl_cov_proj_bwd(residuals, cotangents):
     d_std_pred = kl_cov_proj_backward(d_proj=d_projected_cov, succ=True, omega_offset=omega_offset, eta=eta, pred_std=pred_std, target_std=target_std, projected_std=projected_std)
     return (d_std_pred, None, None, None, None, None)
 
+
 kl_cov_proj.defvjp(kl_cov_proj_fwd, kl_cov_proj_bwd)
+
 
 def kl_projection(mean, std, mean_other, std_other, eps_mean, eps_cov):
     """

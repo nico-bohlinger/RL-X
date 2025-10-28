@@ -19,14 +19,12 @@ def get_config(algorithm_name):
     config.entropy_coef = 0.001
     config.critic_coef = 0.5
     config.max_grad_norm = 0.5
-    config.std_dev = 1.0 # initial std
-    config.nr_hidden_units = 256
-    config.evaluation_frequency = 204800  # -1 to disable
-    config.evaluation_episodes = 10
-
-    # Projection Layer Parameters (proj layer)
+    config.std_dev = 1.0
     config.mean_bound = 0.03
     config.cov_bound = 0.001
     config.trust_region_coef = 0.1
+    config.nr_hidden_units = 256
+    config.evaluation_frequency = 204800  # -1 to disable
+    config.evaluation_episodes = 10
 
     return config

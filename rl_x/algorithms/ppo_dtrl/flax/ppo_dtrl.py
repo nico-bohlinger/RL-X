@@ -8,22 +8,20 @@ import tree
 import numpy as np
 import jax
 import jax.numpy as jnp
-from jax.lax import stop_gradient
 from flax.training.train_state import TrainState
 from flax.training import orbax_utils
 import orbax.checkpoint
 import optax
-from jaxopt import LBFGS
 import wandb
-from typing import Tuple
 
 from rl_x.algorithms.ppo_dtrl.flax.general_properties import GeneralProperties
 from rl_x.algorithms.ppo_dtrl.flax.policy import get_policy
 from rl_x.algorithms.ppo_dtrl.flax.critic import get_critic
 from rl_x.algorithms.ppo_dtrl.flax.batch import Batch
-from rl_x.algorithms.ppo_dtrl.flax.trust_region_layer import *
+from rl_x.algorithms.ppo_dtrl.flax.trust_region_layer import kl_projection, entropy_projection
 
 rlx_logger = logging.getLogger("rl_x")
+
 
 class PPO_DTRL:
     def __init__(self, config, env, run_path, writer) -> None:
@@ -51,17 +49,15 @@ class PPO_DTRL:
         self.critic_coef = config.algorithm.critic_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
+        self.mean_bound = config.algorithm.mean_bound
+        self.cov_bound = config.algorithm.cov_bound
+        self.trust_region_coef = config.algorithm.trust_region_coef
         self.nr_hidden_units = config.algorithm.nr_hidden_units
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.evaluation_episodes = config.algorithm.evaluation_episodes
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
         self.nr_updates = config.algorithm.total_timesteps // self.batch_size
         self.nr_minibatches = self.batch_size // self.minibatch_size
-
-        # Projection layer
-        self.mean_bound = config.algorithm.mean_bound
-        self.cov_bound = config.algorithm.cov_bound
-        self.trust_region_coef = config.algorithm.trust_region_coef
 
         if self.evaluation_frequency % (self.nr_steps * self.nr_envs) != 0 and self.evaluation_frequency != -1:
             raise ValueError("Evaluation frequency must be a multiple of the number of steps and environments.")
@@ -142,39 +138,24 @@ class PPO_DTRL:
             returns = advantages + values
             return advantages, returns
         
-        """
-        PPO + Trust Region Update
-        """
         @jax.jit
         def update(policy_state: TrainState, critic_state: TrainState,
-                   states: np.ndarray, actions: np.ndarray, advantages: np.ndarray, returns: np.ndarray, values: np.ndarray, log_probs: np.ndarray,
-                   key: jax.random.PRNGKey,
-                   old_action_means:np.ndarray, old_action_logstd:np.ndarray, global_step):
-            
+                   states: np.ndarray, actions: np.ndarray, advantages: np.ndarray, returns: np.ndarray, values: np.ndarray, log_probs: np.ndarray, old_action_means: np.ndarray, old_action_logstd: np.ndarray, global_step: int,
+                   key: jax.random.PRNGKey):
             def loss_fn(policy_params, critic_params, state_b, action_b, log_prob_b, return_b, advantage_b, old_mean_b, old_logstd_b, global_step):
-                # Policy eval
+                # Policy loss + Trust Region Loss
                 action_mean, action_logstd = self.policy.apply(policy_params, state_b)
-
-                # Entropy projection (project std to satisfy an entropy constraint)
-                old_logstd_b = jnp.expand_dims(old_logstd_b, 0) # shape (1, as_shape)
-                old_entropy = jnp.sum(old_logstd_b + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e))
-                tau = 0.5
-                beta = old_entropy * tau ** (10 * global_step / self.total_timesteps)
-                # Entropy projection before KL projection
-                # action_logstd = entropy_projection(action_logstd, beta, dim=dim)
-
-                # Projection layer
+                old_logstd_b = jnp.expand_dims(old_logstd_b, 0)
                 action_std = jnp.exp(action_logstd)
-                old_action_mean = old_mean_b
                 old_action_std = jnp.exp(old_logstd_b)
+                old_entropy = jnp.sum(old_logstd_b + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e))
+                beta = old_entropy * 0.5 ** (10 * global_step / self.total_timesteps)
 
-                proj_action_mean, proj_action_std, eta_mu, eta_cov, kl_mean_part, post_proj_kl_mean_part, kl_cov_part, post_proj_kl_cov_part = kl_projection(action_mean, action_std, old_action_mean, old_action_std, self.mean_bound, self.cov_bound)
-                # Entropy projection after KL projection
+                proj_action_mean, proj_action_std, eta_mu, eta_cov, kl_mean_part, post_proj_kl_mean_part, kl_cov_part, post_proj_kl_cov_part = kl_projection(action_mean, action_std, old_mean_b, old_action_std, self.mean_bound, self.cov_bound)
                 proj_action_logstd = jnp.log(proj_action_std)
                 proj_action_logstd = entropy_projection(proj_action_logstd, beta, dim=self.dim)
 
-                # Trust Region Loss (amortized optimization)
-                proj_action_mean_det = jax.lax.stop_gradient(proj_action_mean) # detaching to prevent gradient flow through projection from the regression term
+                proj_action_mean_det = jax.lax.stop_gradient(proj_action_mean)
                 proj_action_std_det  = jax.lax.stop_gradient(proj_action_std)
                 tr_loss_maha = 0.5 * jnp.sum(((proj_action_mean_det - action_mean)/ proj_action_std_det) ** 2, axis=1)
                 tr_loss_cov_part = 0.5 * jnp.sum(2.0 * (jnp.log(proj_action_std_det) - jnp.log(action_std)) + (action_std/proj_action_std_det)**2 - 1.0, axis=1)
@@ -223,10 +204,6 @@ class PPO_DTRL:
                 }
 
                 return loss, (metrics)
-            
-            # Gradients must only flow through the predicted ones
-            old_action_means = stop_gradient(old_action_means)
-            old_action_logstd = stop_gradient(old_action_logstd)
 
             batch_states = states.reshape((-1,) + self.os_shape)
             batch_actions = actions.reshape((-1,) + self.as_shape)
@@ -260,8 +237,8 @@ class PPO_DTRL:
                     batch_returns[minibatch_indices],
                     minibatch_advantages,
                     batch_action_means[minibatch_indices],
-                    # batch_action_logstds[minibatch_indices],
-                    old_action_logstd, global_step
+                    old_action_logstd,
+                    global_step
                 )
 
                 policy_state = policy_state.apply_gradients(grads=policy_gradients)
@@ -346,7 +323,6 @@ class PPO_DTRL:
                 batch.log_probs[step] = log_prob
                 batch.old_action_means[step] = action_mean
                 batch.old_action_logstd = action_logstd
-
                 state = next_state
                 global_step += self.nr_envs
             nr_episodes += dones_this_rollout
@@ -366,7 +342,7 @@ class PPO_DTRL:
             self.policy_state, self.critic_state, optimization_metrics, self.key = update(
                 self.policy_state, self.critic_state,
                 batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs,
-                self.key, batch.old_action_means, batch.old_action_logstd, global_step,
+                batch.old_action_means, batch.old_action_logstd, global_step, self.key,
             )
             optimization_metrics = {key: value.item() for key, value in optimization_metrics.items()}
             nr_updates += self.nr_epochs * self.nr_minibatches
@@ -476,7 +452,7 @@ class PPO_DTRL:
         with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as f:
             json.dump(self.config.algorithm.to_dict(), f)
         shutil.make_archive(f"{self.save_path}/{self.best_model_file_name}", "zip", f"{self.save_path}/tmp")
-        # os.rename(f"{self.save_path}/{self.best_model_file_name}.zip", f"{self.save_path}/{self.best_model_file_name}")
+        os.rename(f"{self.save_path}/{self.best_model_file_name}.zip", f"{self.save_path}/{self.best_model_file_name}")
         shutil.rmtree(f"{self.save_path}/tmp")
 
         if self.track_wandb:
@@ -517,113 +493,18 @@ class PPO_DTRL:
         def get_action(policy_state: TrainState, state: np.ndarray):
             action_mean, action_logstd = self.policy.apply(policy_state.params, state)
             return self.get_processed_action(action_mean)
-
-        def evaluate():
-            nr_steps = 1000
-            mean_episode_return = []
-
-            batch = Batch(
-                states=np.zeros((episodes-1, nr_steps, self.nr_envs) + self.os_shape),
-                next_states=np.zeros((episodes-1, nr_steps, self.nr_envs) + self.os_shape),
-                actions=np.zeros((episodes-1, nr_steps, self.nr_envs) + self.as_shape),
-                rewards=np.zeros((episodes-1, nr_steps, self.nr_envs)),
-                terminations=np.zeros((episodes-1, nr_steps, self.nr_envs)),
-
-                values=np.zeros((episodes-1, nr_steps, self.nr_envs)),
-                log_probs=np.zeros((episodes-1, nr_steps, self.nr_envs)),
-                advantages=np.zeros((episodes-1, nr_steps, self.nr_envs)),
-                returns=np.zeros((episodes-1, nr_steps, self.nr_envs)),
-            )
-            for i in range(episodes):
-                done = False
-                episode_return = 0
-                state, _ = self.env.reset()
-
-
-                # UGLY FIX: for some reason the first episode's step returns nans!! Skip the first one!
-                if i == 0:
-                    dummy_return = 0
-                    for step in range(10):
-                        processed_action = get_action(self.policy_state, state)
-                        next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
-                        done = terminated | truncated
-                        state = next_state
-                        dummy_return += reward
-                    rlx_logger.info(f"Episode {i + 1} - Return: {dummy_return.mean()}")
-
-                else:
-                    state, _ = self.env.reset()
-
-                    for step in range(nr_steps):
-                        processed_action = get_action(self.policy_state, state)
-                        next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
-                        done = terminated | truncated
-                        actual_next_state = next_state.copy()
-
-                        for idx, single_done in enumerate(done):
-                            if single_done:
-                                actual_next_state[idx] = np.array(self.env.get_final_observation_at_index(info, idx))
-
-                        batch.states[i-1, step] = state
-                        batch.next_states[i-1, step] = actual_next_state
-                        batch.actions[i-1, step] = processed_action
-                        batch.rewards[i-1, step] = reward
-                        batch.terminations[i-1, step] = terminated
-
-                        state = next_state
-                        episode_return += reward
-                    
-                    mean_episode_return.append(episode_return.mean())
-                    rlx_logger.info(f"Episode {i + 1} - Return: {episode_return.mean()}")
-                
-            mean_episode_return = np.array(mean_episode_return).mean()
-            rlx_logger.info(f"Mean Episode Return: {mean_episode_return}") 
-
-
-            def flatten_and_prune(arr):
-                flat = arr.reshape(-1, arr.shape[-1])
-                nan_mask = ~np.isnan(flat).any(axis=1)
-                return flat[nan_mask]
-
-            exp_states = flatten_and_prune(batch.states)
-            exp_actions = flatten_and_prune(batch.actions)
-            exp_next_states = flatten_and_prune(batch.next_states)            
-            exp_absorbing = flatten_and_prune(batch.terminations)
-            exp_rewards = flatten_and_prune(batch.rewards)
-
-            print(f"save path: {self.save_path}")
-            print(f"states shape: {exp_states.shape}")
-            print(f"rewards mean: {exp_states.shape}")
-            np.savez(f"{self.save_path}/expert_dataset_Humanoid-v5_{episodes-1}_PPO", states=exp_states, actions=exp_actions, 
-                next_states=exp_next_states, absorbing=exp_absorbing, rewards=exp_rewards)
-
-
-        def visualise():
-
-            nr_steps = 1000
+        
+        self.set_eval_mode()
+        for i in range(episodes):
             done = False
             episode_return = 0
             state, _ = self.env.reset()
-
-
-            for step in range(nr_steps):
+            while not done:
                 processed_action = get_action(self.policy_state, state)
-                next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
                 done = terminated | truncated
-                actual_next_state = next_state.copy()
-
-                if done:
-                    break
-
-                state = next_state
                 episode_return += reward
-            
-            rlx_logger.info(f"Episode Return: {episode_return.mean()}")
-            rlx_logger.info(f"Step: {step}")
-                
-        
-        # evaluate()
-        visualise()
+            rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
 
             
     def set_train_mode(self):
