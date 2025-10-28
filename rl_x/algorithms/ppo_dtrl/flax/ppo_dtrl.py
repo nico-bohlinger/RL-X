@@ -17,15 +17,15 @@ from jaxopt import LBFGS
 import wandb
 from typing import Tuple
 
-from rl_x.algorithms.trpl.flax.general_properties import GeneralProperties
-from rl_x.algorithms.trpl.flax.policy import get_policy
-from rl_x.algorithms.trpl.flax.critic import get_critic
-from rl_x.algorithms.trpl.flax.batch import Batch
-from rl_x.algorithms.trpl.flax.trust_region_layer import *
+from rl_x.algorithms.ppo_dtrl.flax.general_properties import GeneralProperties
+from rl_x.algorithms.ppo_dtrl.flax.policy import get_policy
+from rl_x.algorithms.ppo_dtrl.flax.critic import get_critic
+from rl_x.algorithms.ppo_dtrl.flax.batch import Batch
+from rl_x.algorithms.ppo_dtrl.flax.trust_region_layer import *
 
 rlx_logger = logging.getLogger("rl_x")
 
-class TRPL:
+class PPO_DTRL:
     def __init__(self, config, env, run_path, writer) -> None:
         self.config = config
         self.env = env
@@ -494,7 +494,7 @@ class TRPL:
         for key, value in loaded_algorithm_config.items():
             if f"algorithm.{key}" not in explicitly_set_algorithm_params:
                 config.algorithm[key] = value
-        model = TRPL(config, env, run_path, writer)
+        model = PPO_DTRL(config, env, run_path, writer)
 
         target = {
             "policy": model.policy_state,
