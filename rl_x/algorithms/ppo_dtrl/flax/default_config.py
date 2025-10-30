@@ -16,7 +16,7 @@ def get_config(algorithm_name):
     config.gamma = 0.99
     config.gae_lambda = 0.95
     config.clip_range = 0.2
-    config.entropy_coef = 0.001
+    config.entropy_coef = 0.0
     config.critic_coef = 0.5
     config.max_grad_norm = 0.5
     config.std_dev = 1.0
