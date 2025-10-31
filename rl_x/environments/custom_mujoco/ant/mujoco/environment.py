@@ -1,5 +1,6 @@
 from pathlib import Path
 import mujoco
+from dm_control import mjcf
 import numpy as np
 from scipy.spatial.transform import Rotation
 import gymnasium as gym
@@ -11,8 +12,15 @@ class Ant(gym.Env):
     def __init__(self, horizon=1000, render=False):
         self.horizon = horizon
 
-        xml_path = (Path(__file__).resolve().parent / "data" / "ant.xml").as_posix()
-        self.model = mujoco.MjModel.from_xml_path(xml_path)
+        xml_path = (Path(__file__).resolve().parent.parent / "data" / "ant.xml").as_posix()
+        xml_handle = mjcf.from_path(xml_path)
+
+        # Modify solver settings for better simulation stability in CPU-based MuJoCo
+        xml_handle.option.iterations = 100
+        xml_handle.option.ls_iterations = 50
+        xml_handle.option.flag.eulerdamp = "enable"
+
+        self.model = mujoco.MjModel.from_xml_string(xml=xml_handle.to_xml_string(), assets=xml_handle.get_assets())
         self.data = mujoco.MjData(self.model)
 
         self.nr_substeps = 1

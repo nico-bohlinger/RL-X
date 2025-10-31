@@ -16,9 +16,8 @@ class Ant:
     def __init__(self, render, horizon=1000):
         self.horizon = horizon
         
-        xml_path = (Path(__file__).resolve().parent / "data" / "ant.xml").as_posix()
+        xml_path = (Path(__file__).resolve().parent.parent / "data" / "ant.xml").as_posix()
         self.mj_model = mujoco.MjModel.from_xml_path(xml_path)
-        self.mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
         self.mj_data = mujoco.MjData(self.mj_model)
         self.mjx_model = mjx.put_model(self.mj_model)
         self.mjx_data = mjx.make_data(self.mjx_model)
@@ -83,12 +82,6 @@ class Ant:
 
         state = State(data, next_observation, next_observation, reward, terminated, truncated, info, info_episode_store, key)
 
-        return self._reset(state)
-
-
-    @partial(jax.vmap, in_axes=(None, 0))
-    @partial(jax.jit, static_argnums=(0,))
-    def _vmap_reset(self, state):
         return self._reset(state)
 
 

@@ -294,25 +294,25 @@ class PPO:
                 # Evaluating
                 if self.evaluation_active:
                     def single_eval_rollout(single_eval_rollout_carry, _):
-                        policy_state, env_state, episode_return, episode_length, seen_done, key = single_eval_rollout_carry
+                        policy_state, eval_env_state = single_eval_rollout_carry
 
-                        key, subkey = jax.random.split(key)
-                        action_mean, action_logstd = self.policy.apply(policy_state.params, env_state.next_observation)
-                        action_std = jnp.exp(action_logstd)
-                        action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
+                        action_mean, _ = self.policy.apply(policy_state.params, eval_env_state.next_observation)
+                        action = action_mean
                         processed_action = self.get_processed_action(action)
-                        # env_state = self.env._step(env_state, processed_action) # TODO
-                        episode_return += env_state.reward * (1 - seen_done)
-                        episode_length += 1 * (1 - seen_done)
-                        seen_done = seen_done | env_state.terminated | env_state.truncated
+                        eval_env_state = self.env.step(eval_env_state, processed_action)
 
-                        return (policy_state, env_state, episode_return, episode_length, seen_done, key), None
-                    
-                    eval_env_state = self.env._vmap_reset(env_state)
-                    single_eval_rollout_carry = (policy_state, eval_env_state, jnp.zeros(self.nr_envs), jnp.zeros(self.nr_envs), jnp.zeros(self.nr_envs, dtype=bool), key)
-                    single_eval_rollout_carry, _ = jax.lax.scan(single_eval_rollout, single_eval_rollout_carry, jnp.arange(self.horizon))
-                    _, _, episode_returns, episode_lengths, _, key = single_eval_rollout_carry
-                    eval_infos = {"eval/episode_return": jnp.mean(episode_returns), "eval/episode_length": jnp.mean(episode_lengths)}
+                        return (policy_state, eval_env_state), None
+
+                    key, reset_key = jax.random.split(key)
+                    reset_keys = jax.random.split(reset_key, self.nr_envs)
+                    eval_env_state = self.env.reset(reset_keys)
+                    single_eval_rollout_carry, _ = jax.lax.scan(single_eval_rollout, (policy_state, eval_env_state), jnp.arange(self.horizon))
+                    _, eval_env_state = single_eval_rollout_carry
+
+                    eval_metrics = {
+                        "eval/episode_return": jnp.mean(eval_env_state.info["rollout/episode_return"]),
+                        "eval/episode_length": jnp.mean(eval_env_state.info["rollout/episode_length"]),
+                    }
 
                     def callback(metrics_and_global_step):
                         metrics, global_step = metrics_and_global_step
@@ -323,7 +323,7 @@ class PPO:
                         self.end_logging()
 
                     global_step = (multi_learning_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration * self.nr_steps * self.nr_envs
-                    jax.debug.callback(callback, (eval_infos, global_step))
+                    jax.debug.callback(callback, (eval_metrics, global_step))
                 
 
                 # Saving
@@ -422,10 +422,9 @@ class PPO:
 
         @jax.jit
         def rollout(env_state, key):
-            key, subkey = jax.random.split(key)
+            # key, subkey = jax.random.split(key)
             action_mean, action_logstd = self.policy.apply(self.policy_state.params, env_state.next_observation)
-            action_std = jnp.exp(action_logstd)
-            # Only use mean for evaluating the deterministic policy
+            # action_std = jnp.exp(action_logstd)
             action = action_mean # + action_std * jax.random.normal(subkey, shape=action_mean.shape)
             processed_action = self.get_processed_action(action)
             env_state = self.env.step(env_state, processed_action)
