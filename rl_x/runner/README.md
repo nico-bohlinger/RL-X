@@ -32,4 +32,6 @@ See ```experiments/experiment.py``` for an example of how to run an experiment b
 
 See ```experiments/start_experiment.sh``` for an example of how to run an experiment and setting all configs via the command line.
 
-When a new algorithm or environment is added and registered outside of RL-X, the package needs to be added to the implementation_package_names list when creating the Runner object in the experiment script. See the README files in ```rl_x/algorithms``` and ```rl_x/environments``` for more details.
+When a new algorithm or environment is added and registered outside of RL-X, the package needs to be added to the implementation_package_names list when creating the Runner object in the experiment script.
+See the README files in ```rl_x/algorithms``` and ```rl_x/environments``` for more details.
+An example for using RL-X in a different project can be found [here](https://github.com/nico-bohlinger/one_policy_to_run_them_all).
