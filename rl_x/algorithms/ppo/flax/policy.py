@@ -15,7 +15,10 @@ def get_policy(config, env):
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
         return (Policy(env.single_action_space.shape, config.algorithm.std_dev, config.algorithm.nr_hidden_units),
-                get_processed_action_function(jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high)))
+                get_processed_action_function(
+                    config.algorithm.action_clipping_and_rescaling,
+                    jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high)
+                ))
 
 
 class Policy(nn.Module):
@@ -34,8 +37,11 @@ class Policy(nn.Module):
         return policy_mean, policy_logstd
 
 
-def get_processed_action_function(env_as_low, env_as_high):
-    def get_clipped_and_scaled_action(action, env_as_low=env_as_low, env_as_high=env_as_high):
-        clipped_action = jnp.clip(action, -1, 1)
-        return env_as_low + (0.5 * (clipped_action + 1.0) * (env_as_high - env_as_low))
-    return jax.jit(get_clipped_and_scaled_action)
+def get_processed_action_function(action_clipping_and_rescaling, env_as_low, env_as_high):
+    if action_clipping_and_rescaling:
+        def get_clipped_and_scaled_action(action, env_as_low=env_as_low, env_as_high=env_as_high):
+            clipped_action = jnp.clip(action, -1, 1)
+            return env_as_low + (0.5 * (clipped_action + 1.0) * (env_as_high - env_as_low))
+        return jax.jit(get_clipped_and_scaled_action)
+    else:
+        return jax.jit(lambda x: x)

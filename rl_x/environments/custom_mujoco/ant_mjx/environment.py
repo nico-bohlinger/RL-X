@@ -1,4 +1,6 @@
+from copy import deepcopy
 from pathlib import Path
+from functools import partial
 import mujoco
 from mujoco import mjx
 from jax.scipy.spatial.transform import Rotation
@@ -6,91 +8,149 @@ import jax
 import jax.numpy as jnp
 
 from rl_x.environments.custom_mujoco.ant_mjx.state import State
+from rl_x.environments.custom_mujoco.ant_mjx.box_space import BoxSpace
+from rl_x.environments.custom_mujoco.ant_mjx.viewer import MujocoViewer
 
 
 class Ant:
-    def __init__(self, horizon=100):
+    def __init__(self, render, horizon=1000):
         self.horizon = horizon
         
         xml_path = (Path(__file__).resolve().parent / "data" / "ant.xml").as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(xml_path)
-        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
-        self.model = mj_model
-        self.data = mujoco.MjData(mj_model)
-        self.sys = mjx.put_model(mj_model)
+        self.mj_model = mujoco.MjModel.from_xml_path(xml_path)
+        self.mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
+        self.mj_data = mujoco.MjData(self.mj_model)
+        self.mjx_model = mjx.put_model(self.mj_model)
+        self.mjx_data = mjx.make_data(self.mjx_model)
 
         self.nr_intermediate_steps = 1
 
-        initial_height = 0.75
-        initial_rotation_quaternion = [1.0, 0.0, 0.0, 0.0]  # mujoco quaternion format: [w, x, y, z]
-        initial_joint_angles = [0.0, 0.0] * 4
-        self.initial_qpos = jnp.array([0.0, 0.0, initial_height, *initial_rotation_quaternion, *initial_joint_angles])
-        self.initial_qvel = jnp.zeros(self.sys.nv)
+        self.initial_qpos = jnp.array(self.mj_model.keyframe("home").qpos)
+        self.initial_qvel = jnp.array(self.mj_model.keyframe("home").qvel)
 
         self.target_local_x_velocity = 2.0
         self.target_local_y_velocity = 0.0
 
+        action_bounds = self.mj_model.actuator_ctrlrange
+        action_low, action_high = action_bounds.T
+        self.single_action_space = BoxSpace(low=action_low, high=action_high, shape=(8,), dtype=jnp.float32)
+        self.single_observation_space = BoxSpace(low=-jnp.inf, high=jnp.inf, shape=(34,), dtype=jnp.float32)
 
+        self.viewer = None
+        if render:
+            dt = self.mj_model.opt.timestep * self.nr_intermediate_steps
+            self.viewer = MujocoViewer(self.mj_model, dt)
+            c_model = deepcopy(self.mj_model)
+            c_data = mujoco.MjData(c_model)
+            mujoco.mj_step(c_model, c_data, 1)
+            self.light_xdir = c_data.light_xdir
+            self.light_xpos = c_data.light_xpos
+            del c_model, c_data
+
+    
+    def render(self, state):
+        env_id = 0
+        data = mjx.get_data(self.mj_model, state.data)[env_id]
+
+        data.light_xdir = self.light_xdir
+        data.light_xpos = self.light_xpos
+
+        self.viewer.render(data)
+
+        return state
+    
+
+
+    @partial(jax.vmap, in_axes=(None, 0))
+    @partial(jax.jit, static_argnums=(0,))
     def reset(self, key):
-        key, subkey = jax.random.split(key)
+        data = self.mjx_data
 
-        data = mjx.put_data(self.model, self.data)
-        data = data.replace(qpos=self.initial_qpos, qvel=self.initial_qvel, ctrl=jnp.zeros(self.sys.nu))
-        data = mjx.forward(self.sys, data)
-
-        observation = self.get_observation(data)
+        next_observation = jnp.zeros(self.single_observation_space.shape, dtype=jnp.float32)
         reward = 0.0
         terminated = False
         truncated = False
-        logging_info = {
+        info = {
+            "rollout/episode_return": reward,
+            "rollout/episode_length": 0,
+            "env_info/reward_xy_vel_cmd": 0.0,
+            "env_info/xy_vel_diff_norm": 0.0,
+        }
+        info_episode_store = {
             "episode_return": reward,
             "episode_length": 0,
-            "reward_xy_vel_cmd": 0.0,
-            "xy_vel_diff_norm": 0.0,
-        }
-        info = {
-            **logging_info,
-            "final_observation": jnp.zeros_like(observation),
-            "final_info": {**logging_info},
-            "done": False,
-            "key": subkey
         }
 
-        return State(data, observation, reward, terminated, truncated, info)
+        state = State(data, next_observation, next_observation, reward, terminated, truncated, info, info_episode_store, key)
+
+        return self._reset(state)
 
 
+    @partial(jax.vmap, in_axes=(None, 0))
+    @partial(jax.jit, static_argnums=(0,))
+    def _vmap_reset(self, state):
+        return self._reset(state)
+
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _reset(self, state):
+        data = self.mjx_data
+        data = data.replace(qpos=self.initial_qpos, qvel=self.initial_qvel)
+
+        next_observation = self.get_observation(data)
+        reward = 0.0
+        terminated = False
+        truncated = False
+        info_episode_store = {
+            "episode_return": reward,
+            "episode_length": 0,
+        }
+
+        new_state = state.replace(
+            data=data,
+            next_observation=next_observation, actual_next_observation=next_observation,
+            reward=reward,
+            terminated=terminated, truncated=truncated,
+            info_episode_store=info_episode_store
+        )
+
+        return new_state
+
+
+    @partial(jax.vmap, in_axes=(None, 0, 0))
+    @partial(jax.jit, static_argnums=(0,))
     def step(self, state, action):
+        return self._step(state, action)
+
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _step(self, state, action):
         data, _ = jax.lax.scan(
-            f=lambda data, _: (mjx.step(self.sys, data.replace(ctrl=action)), None),
+            f=lambda data, _: (mjx.step(self.mjx_model, data.replace(ctrl=action)), None),
             init=state.data,
             xs=(),
             length=self.nr_intermediate_steps
         )
 
-        state.info["episode_length"] += 1
+        state.info_episode_store["episode_length"] += 1
 
         next_observation = self.get_observation(data)
         reward, r_info = self.get_reward(data)
-        terminated = False
-        truncated = state.info["episode_length"] >= self.horizon
+        terminated = (data.qpos[2] < 0.2) | (data.qpos[2] > 1.0)
+        truncated = state.info_episode_store["episode_length"] >= self.horizon
         done = terminated | truncated
 
         state.info.update(r_info)
-        state.info["episode_return"] += reward
-        state.info["done"] = done
+        state.info_episode_store["episode_return"] += reward
+        state.info["rollout/episode_return"] = jnp.where(done, state.info_episode_store["episode_return"], state.info["rollout/episode_return"])
+        state.info["rollout/episode_length"] = jnp.where(done, state.info_episode_store["episode_length"], state.info["rollout/episode_length"])
 
         def when_done(_):
-            __, reset_key = jax.random.split(state.info["key"])
-            start_state = self.reset(reset_key)
-            start_state = start_state.replace(reward=reward, terminated=terminated, truncated=truncated)
-            start_state.info.update(r_info)
-            start_state.info["done"] = True
-            start_state.info["final_observation"] = next_observation
-            info_keys_to_remove = ["key", "final_observation", "final_info", "done"]
-            start_state.info["final_info"] = {key: state.info[key] for key in state.info if key not in info_keys_to_remove}
+            start_state = self._reset(state)
+            start_state = start_state.replace(actual_next_observation=next_observation, reward=reward, terminated=terminated, truncated=truncated)
             return start_state
         def when_not_done(_):
-            return state.replace(data=data, observation=next_observation, reward=reward, terminated=terminated, truncated=truncated)
+            return state.replace(data=data, next_observation=next_observation, actual_next_observation=next_observation, reward=reward, terminated=terminated, truncated=truncated)
         state = jax.lax.cond(done, when_done, when_not_done, None)
 
         return state
@@ -116,6 +176,9 @@ class Ant:
             data.ctrl
         ])
 
+        observation = jnp.nan_to_num(observation, nan=0.0, posinf=0.0, neginf=0.0)
+        observation = jnp.clip(observation, -100.0, 100.0)
+
         return observation
     
     
@@ -130,9 +193,17 @@ class Ant:
 
         reward = tracking_xy_velocity_command_reward
 
+        reward = jnp.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
+        reward = jnp.clip(reward, -10.0, 10.0)
+
         info = {
-            "reward_xy_vel_cmd": tracking_xy_velocity_command_reward,
-            "xy_vel_diff_norm": xy_velocity_difference_norm,
+            "env_info/reward_xy_vel_cmd": tracking_xy_velocity_command_reward,
+            "env_info/xy_vel_diff_norm": xy_velocity_difference_norm,
         }
 
         return reward, info
+
+
+    def close(self):
+        if self.viewer:
+            self.viewer.close()

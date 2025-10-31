@@ -4,7 +4,6 @@
 - [READMEs](#readmes)
 - [Detailed Installation Guide](#detailed-installation-guide)
 - [Google Colab](#google-colab)
-- [Run custom MJX environment](#run-custom-mjx-environment)
 - [Asynchronous vectorized environments with skipping](#asynchronous-vectorized-environments-with-skipping)
 
 
@@ -93,13 +92,6 @@ For MacOS and Windows, JAX with GPU support is not supported out-of-the-box. How
 
 ## Google Colab
 To run experiments in Google Colab take a look ```experiments/colab_experiment.ipynb``` or directly open it here:  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb) 
-
-
-
-## Run custom MJX environment
-```
-python experiment.py --algorithm.name=ppo.flax --environment.name=custom_mujoco.ant_mjx --runner.track_console=True --environment.nr_envs=4000 --algorithm.nr_steps=10 --algorithm.minibatch_size=1000 --algorithm.nr_epochs=5 --algorithm.evaluation_frequency=-1
-```
 
 
 

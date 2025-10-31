@@ -48,11 +48,11 @@ class Runner:
         algorithm_general_properties = get_algorithm_general_properties(algorithm_name)
         environment_general_properties = get_environment_general_properties(environment_name)
         if environment_general_properties.action_space_type not in algorithm_general_properties.action_space_types:
-            raise ValueError("Incompatible action space type")
+            raise ValueError(f"Incompatible action space type. Environment: {environment_general_properties.action_space_type}, Algorithm: {algorithm_general_properties.action_space_types}")
         if environment_general_properties.observation_space_type not in algorithm_general_properties.observation_space_types:
-            raise ValueError("Incompatible observation space type")
+            raise ValueError(f"Incompatible observation space type. Environment: {environment_general_properties.observation_space_type}, Algorithm: {algorithm_general_properties.observation_space_types}")
         if environment_general_properties.data_interface_type not in algorithm_general_properties.data_interface_types:
-            raise ValueError("Incompatible data interface type")
+            raise ValueError(f"Incompatible data interface type. Environment: {environment_general_properties.data_interface_type}, Algorithm: {algorithm_general_properties.data_interface_types}")
 
         # General Deep Learning framework settings
         algorithm_uses_torch = DeepLearningFrameworkType.TORCH == algorithm_general_properties.deep_learning_framework_type
