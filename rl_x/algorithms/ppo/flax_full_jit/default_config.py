@@ -21,7 +21,7 @@ def get_config(algorithm_name):
     config.critic_coef = 1.0
     config.max_grad_norm = 5.0
     config.std_dev = 1.0
-    config.action_clipping_and_rescaling = True
+    config.action_clipping_and_rescaling = False
     config.evaluation_and_save_frequency = 17301504  # -1 to disable
     config.evaluation_active = True
 

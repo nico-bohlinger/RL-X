@@ -76,7 +76,7 @@ Environments can be added and registered outside of RL-X by keeping the same dir
 
 For concrete implementations of provided frameworks, look into the ```rl_x/environments/gym``` and ```rl_x/environments/envpool``` directories.
 
-An example for a custom mujoco environment can be found in ```rl_x/environments/custom_mujoco```.
+Multiple examples for custom mujoco environments can be found in ```rl_x/environments/custom_mujoco```.
 
 A prototype for a custom environment interface with simple socket communication can be found in ```rl_x/environments/custom_interface```.
 
