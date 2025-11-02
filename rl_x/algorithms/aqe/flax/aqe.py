@@ -26,7 +26,7 @@ from rl_x.algorithms.aqe.flax.rl_train_state import RLTrainState
 rlx_logger = logging.getLogger("rl_x")
 
 
-class AQE():
+class AQE:
     def __init__(self, config, env, run_path, writer) -> None:
         self.config = config
         self.env = env
@@ -133,9 +133,10 @@ class AQE():
     def train(self):
         @jax.jit
         def get_action(policy_state: TrainState, state: np.ndarray, key: jax.random.PRNGKey):
-            dist = self.policy.apply(policy_state.params, state)
+            action_mean, action_logstd = self.policy.apply(policy_state.params, state)
+            action_std = jnp.exp(action_logstd)
             key, subkey = jax.random.split(key)
-            action = dist.sample(seed=subkey)
+            action = jnp.tanh(action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape))
             return action, key
 
 
@@ -149,9 +150,13 @@ class AQE():
                         key1: jax.random.PRNGKey
                 ):
                 # Critic loss
-                dist = self.policy.apply(policy_state.params, next_state)
-                next_action = dist.sample(seed=key1)
-                next_log_prob = dist.log_prob(next_action)
+                next_action_mean, next_action_logstd = self.policy.apply(policy_state.params, next_state)
+                next_action_std = jnp.exp(next_action_logstd)
+                next_action_pretanh = next_action_mean + next_action_std * jax.random.normal(key1, shape=next_action_mean.shape)
+                next_action = jnp.tanh(next_action_pretanh)
+                next_log_prob = -0.5 * ((next_action_pretanh - next_action_mean) / next_action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - next_action_logstd
+                next_log_prob -= jnp.log(1.0 - next_action ** 2 + 1e-6)
+                next_log_prob = jnp.sum(next_log_prob, axis=-1)
 
                 alpha = self.entropy_coefficient.apply(entropy_coefficient_state.params)
 
@@ -179,9 +184,13 @@ class AQE():
                 alpha_with_grad = self.entropy_coefficient.apply(entropy_coefficient_params)
                 alpha = stop_gradient(alpha_with_grad)
 
-                dist = self.policy.apply(policy_params, state)
-                current_action = dist.sample(seed=key1)
-                current_log_prob = dist.log_prob(current_action)
+                current_action_mean, current_action_logstd = self.policy.apply(policy_params, state)
+                current_action_std = jnp.exp(current_action_logstd)
+                current_action_pretanh = current_action_mean + current_action_std * jax.random.normal(key1, shape=current_action_mean.shape)
+                current_action = jnp.tanh(current_action_pretanh)
+                current_log_prob = -0.5 * ((current_action_pretanh - current_action_mean) / current_action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - current_action_logstd
+                current_log_prob -= jnp.log(1.0 - current_action ** 2 + 1e-6)
+                current_log_prob = jnp.sum(current_log_prob, axis=-1)
                 entropy = stop_gradient(-current_log_prob)
 
                 qs = self.critic.apply(critic_state.params, state, current_action)
@@ -251,8 +260,8 @@ class AQE():
 
         @jax.jit
         def get_deterministic_action(policy_state: TrainState, state: np.ndarray):
-            dist = self.policy.apply(policy_state.params, state)
-            action = dist.mode()
+            action_mean, _ = self.policy.apply(policy_state.params, state)
+            action = jnp.tanh(action_mean)
             return self.get_processed_action(action)
 
 
@@ -481,8 +490,8 @@ class AQE():
     def test(self, episodes):
         @jax.jit
         def get_action(policy_state: TrainState, state: np.ndarray):
-            dist = self.policy.apply(policy_state.params, state)
-            action = dist.mode()
+            action_mean, _ = self.policy.apply(policy_state.params, state)
+            action = jnp.tanh(action_mean)
             return self.get_processed_action(action)
         
         self.set_eval_mode()

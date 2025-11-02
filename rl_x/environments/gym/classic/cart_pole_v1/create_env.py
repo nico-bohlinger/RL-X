@@ -8,7 +8,7 @@ from rl_x.environments.gym.classic.cart_pole_v1.general_properties import Genera
 def create_env(config):
     def make_env(seed):
         def thunk():
-            env = gym.make("CartPole-v1", render_mode="human" if config.environment.render else None)
+            env = gym.make(config.environment.type, render_mode="human" if config.environment.render else None)
             env = RecordEpisodeStatistics(env)
             env.action_space.seed(seed)
             env.observation_space.seed(seed)

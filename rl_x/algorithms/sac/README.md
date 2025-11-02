@@ -9,6 +9,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 
 **Implementation Details**
 - Supports automatically adjusted temperature
+- The hyperparameters and network architecture for the ```flax_full_jit``` version are tuned for many parallel environments
 
 **Supported frameworks**
 - PyTorch, JAX (Flax)
@@ -18,6 +19,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
 | PyTorch | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| JAX (Flax) full JIT | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 
 ## Resources

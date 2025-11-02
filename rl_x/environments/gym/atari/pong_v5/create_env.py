@@ -8,7 +8,7 @@ from rl_x.environments.gym.atari.pong_v5.general_properties import GeneralProper
 def create_env(config):
     def make_env(seed):
         def thunk():
-            env = gym.make("ALE/Pong-v5", render_mode="human" if config.environment.render else None)
+            env = gym.make(f"ALE/{config.environment.type}", render_mode="human" if config.environment.render else None)
             env = RecordEpisodeStatistics(env)
             env = NoopResetEnv(env, noop_max=30)
             env = MaxAndSkipEnv(env, skip=4)

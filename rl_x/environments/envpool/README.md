@@ -14,5 +14,6 @@ The reference implementation contains the following environments:
 | DeepMind Control Suite | HumanoidRun-v1 | Flat value | Continuous | Numpy |
 | MuJoCo Humanoid-v4 | Flat value | Continuous | Numpy |
 
-For testing other EnvPool environments, the environment name can simply be changed in the create_env.py file.
-Or for proper usage, create a new directory for the environment.
+For testing other EnvPool environments, the environment name can simply be changed with the ```type``` config, e.g. ```--environment.envpool.atari.pong_v5.type="Breakout-v5"```
+Or for proper usage, create a new directory for the environment.  
+The DeepMind Control Suite environments do not support the ```type``` config, as every environment needs specific handling of the observations.

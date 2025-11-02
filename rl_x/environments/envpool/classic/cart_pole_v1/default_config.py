@@ -6,6 +6,7 @@ def get_config(environment_name):
 
     config.name = environment_name
 
+    config.type = "CartPole-v1"
     config.seed = 1
     config.nr_envs = 1
 

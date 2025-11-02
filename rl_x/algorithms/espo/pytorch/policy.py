@@ -12,12 +12,13 @@ def get_policy(config, env, device):
     observation_space_type = env.general_properties.observation_space_type
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return Policy(env, config.algorithm.std_dev, config.algorithm.nr_hidden_units, device)
+        return Policy(env, config.algorithm.std_dev, config.algorithm.action_clipping_and_rescaling, config.algorithm.nr_hidden_units, device)
 
 
 class Policy(nn.Module):
-    def __init__(self, env, std_dev, nr_hidden_units, device):
+    def __init__(self, env, std_dev, action_clipping_and_rescaling, nr_hidden_units, device):
         super().__init__()
+        self.action_clipping_and_rescaling = action_clipping_and_rescaling
         self.policy_as_low = -1
         self.policy_as_high = 1
         self.env_as_low = torch.tensor(env.single_action_space.low, dtype=torch.float32).to(device)
@@ -48,8 +49,11 @@ class Policy(nn.Module):
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         action = probs.sample()
-        clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)
-        clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        if self.action_clipping_and_rescaling:
+            clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)
+            clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        else:
+            clipped_and_scaled_action = action
         return action, clipped_and_scaled_action, probs.log_prob(action).sum(1)
     
 
@@ -66,6 +70,9 @@ class Policy(nn.Module):
     def get_deterministic_action(self, x):
         with torch.no_grad():
             action = self.policy_mean(x)
-        clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)
-        clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        if self.action_clipping_and_rescaling:
+            clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)
+            clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
+        else:
+            clipped_and_scaled_action = action
         return clipped_and_scaled_action

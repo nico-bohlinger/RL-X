@@ -64,6 +64,7 @@ ppo
 To add a new algorithm, create a new directory with the algorithm name, a subdirectory for the framework and add the files described above.
 
 Algorithms can be added and registered outside of RL-X by keeping the same directory structure as RL-X, e.g. ```mypackage/algorithms/ppo/tensorflow``` and then adding ```mypackage``` to the ```implementation_package_names``` list when creating the Runner object in the experiment script, e.g. ```Runner(implementation_package_names=["rl_x", "mypackage"])```.
+An example for using RL-X in a different project can be found [here](https://github.com/nico-bohlinger/one_policy_to_run_them_all).
 
 For concrete implementations see the provided algorithms, e.g. ```rl_x/algorithm/ppo/pytorch``` or ```rl_x/algorithm/sac/flax```.
 
@@ -76,4 +77,4 @@ The handling of the action and observation space types should be done by the cla
 The handling of the data interface types should be done by the algorithm class itself and revolves around the step() function or more precisely the action and observation variables.  
 For simplicity most of the implemented algorithms only support continuous actions and non-image observations in the form of a numpy arrays. 
 
-> ✅ **Every environment can be used with the PPO PyTorch version.** The PyTorch implementation of PPO supports all currently used action space, observation space and data interface types.
+> ✅ **Every environment can be used with PPO.** The PyTorch implementation of PPO supports all currently used action space, observation space and data interface types besides the JAX data interface. For fully JIT-able JAX environments with continuous actions, use the ```flax_full_jit``` version of PPO or SAC.  

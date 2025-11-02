@@ -4,7 +4,6 @@
 - [READMEs](#readmes)
 - [Detailed Installation Guide](#detailed-installation-guide)
 - [Google Colab](#google-colab)
-- [Run custom MJX environment](#run-custom-mjx-environment)
 - [Asynchronous vectorized environments with skipping](#asynchronous-vectorized-environments-with-skipping)
 
 
@@ -28,6 +27,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/espo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/espo/README.md): Implementation details of the Early Stopping Policy Optimization (ESPO) algorithm
 - [```/rl_x/algorithms/mpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/mpo/README.md): Implementation details of the Maximum a Posteriori Policy Optimization (MPO) algorithm
 - [```/rl_x/algorithms/ppo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo/README.md): Implementation details of the Proximal Policy Optimization (PPO) algorithm
+- [```/rl_x/algorithms/ppo_dtrl/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl/README.md): Implementation details of Differentiable Trust Region Layers in combination with the Proximal Policy Optimization (PPO+DTRL) algorithm
 - [```/rl_x/algorithms/redq/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/redq/README.md): Implementation details of the Randomized Ensembled Double Q-Learning (REDQ) algorithm
 - [```/rl_x/algorithms/sac/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/sac/README.md): Implementation details of the Soft Actor Critic (SAC) algorithm
 - [```/rl_x/algorithms/td3/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/td3/README.md): Implementation details of the Twin Delayed Deep Deterministic Gradient (TD3) algorithm
@@ -93,13 +93,6 @@ For MacOS and Windows, JAX with GPU support is not supported out-of-the-box. How
 
 ## Google Colab
 To run experiments in Google Colab take a look ```experiments/colab_experiment.ipynb``` or directly open it here:  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb) 
-
-
-
-## Run custom MJX environment
-```
-python experiment.py --algorithm.name=ppo.flax --environment.name=custom_mujoco.ant_mjx --runner.track_console=True --environment.nr_envs=4000 --algorithm.nr_steps=10 --algorithm.minibatch_size=1000 --algorithm.nr_epochs=5 --algorithm.evaluation_frequency=-1
-```
 
 
 

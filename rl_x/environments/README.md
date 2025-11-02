@@ -73,10 +73,11 @@ Fast testing of a new environment with an already provided framework (Gymnasium 
 To add a completely new environment or permanently a new one from an already provided framework, create a new directory with the same structure as outlined above.
 
 Environments can be added and registered outside of RL-X by keeping the same directory structure as RL-X, e.g. ```mypackage/environments/unitree_a1``` and then adding ```mypackage``` to the ```implementation_package_names``` list when creating the Runner object in the experiment script, e.g. ```Runner(implementation_package_names=["rl_x", "mypackage"])```.
+An example for using RL-X in a different project can be found [here](https://github.com/nico-bohlinger/one_policy_to_run_them_all).
 
 For concrete implementations of provided frameworks, look into the ```rl_x/environments/gym``` and ```rl_x/environments/envpool``` directories.
 
-An example for a custom mujoco environment can be found in ```rl_x/environments/custom_mujoco```.
+Multiple examples for custom mujoco environments can be found in ```rl_x/environments/custom_mujoco```.
 
 A prototype for a custom environment interface with simple socket communication can be found in ```rl_x/environments/custom_interface```.
 
@@ -87,4 +88,4 @@ If the wrappers of an environment provide all data in the standard format, i.e. 
 Keep in mind the algorithm has to be able to handle the action space, observation space and data interface type of the environment.  
 For simplicity most of the implemented algorithms only support continuous actions and non-image observations in the form of a numpy arrays.
 
-> ✅ **Every environment can be used with the PPO PyTorch version.** The PyTorch implementation of PPO supports all currently used action space, observation space and data interface types.
+> ✅ **Every environment can be used with PPO.** The PyTorch implementation of PPO supports all currently used action space, observation space and data interface types besides the JAX data interface. For fully JIT-able JAX environments, use the ```flax_full_jit``` version of PPO.   

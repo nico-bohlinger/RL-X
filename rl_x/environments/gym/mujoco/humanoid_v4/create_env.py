@@ -8,7 +8,7 @@ from rl_x.environments.gym.mujoco.humanoid_v4.general_properties import GeneralP
 def create_env(config):
     def make_env(seed):
         def thunk():
-            env = gym.make("Humanoid-v4", render_mode="human" if config.environment.render else None)
+            env = gym.make(config.environment.type, render_mode="human" if config.environment.render else None)
             env = RecordEpisodeStatistics(env)
             env.action_space.seed(seed)
             env.observation_space.seed(seed)
