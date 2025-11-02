@@ -7,8 +7,6 @@ from jax import random
 from jax import core
 from jax._src import dtypes
 import flax.linen as nn
-from tensorflow_probability.substrates import jax as tfp
-tfd = tfp.distributions
 
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
@@ -54,9 +52,7 @@ class Policy(nn.Module):
         stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal"))(x)
         stddev = self.min_stddev + (jax.nn.softplus(stddev) * self.init_stddev / jax.nn.softplus(0.0))  # Cholesky factor from MPO paper, implemented like in https://github.com/deepmind/acme/blob/master/acme/jax/networks/distributional.py
 
-        dist = tfd.MultivariateNormalDiag(loc=mean, scale_diag=stddev)
-
-        return dist
+        return mean, stddev
 
 
 def get_processed_action_function(env_as_low, env_as_high):

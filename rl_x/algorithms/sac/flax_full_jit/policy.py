@@ -3,10 +3,6 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from tensorflow_probability.substrates import jax as tfp
-tfd = tfp.distributions
-
-from rl_x.algorithms.sac.flax_full_jit.tanh_transformed_distribution import TanhTransformedDistribution
 
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
@@ -41,9 +37,7 @@ class Policy(nn.Module):
         log_std = nn.Dense(np.prod(self.as_shape).item())(x)
         log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
 
-        dist = TanhTransformedDistribution(tfd.MultivariateNormalDiag(loc=mean, scale_diag=jnp.exp(log_std)))
-
-        return dist
+        return mean, log_std
 
 
 def get_processed_action_function(env_as_low, env_as_high):

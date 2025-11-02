@@ -59,6 +59,7 @@ class SAC:
         self.nr_eval_save_iterations = self.total_training_timesteps // self.evaluation_and_save_frequency
         self.nr_loggings_per_eval_save_iteration = self.evaluation_and_save_frequency // self.logging_frequency
         self.nr_updates_per_logging_iteration = self.logging_frequency // self.nr_envs
+        self.horizon = env.horizon
 
         if self.nr_parallel_seeds > 1:
             raise ValueError("Parallel seeds are not supported yet. This is mainly limited by not being able to log mutliple wandb runs at the same time.")
@@ -71,6 +72,8 @@ class SAC:
 
         self.env_as_low = env.single_action_space.low
         self.env_as_high = env.single_action_space.high
+        print(f"Action space low: {self.env_as_low}, high: {self.env_as_high}")
+        exit()
 
         self.policy, self.get_processed_action = get_policy(config, env)
         self.critic = get_critic(config, env)
@@ -152,7 +155,33 @@ class SAC:
             }
 
             # Fill replay buffer until learning_starts
-            ...
+            prefill_iterations = int(np.ceil(self.learning_starts / self.nr_envs)) if self.learning_starts > 0 else 0
+            if prefill_iterations > 0:
+                def fill_replay_buffer(carry, _):
+                    env_state, replay_buffer, key = carry
+                    key, subkey = jax.random.split(key)
+                    observation = env_state.next_observation
+                    random_action = jax.random.uniform(
+                        subkey,
+                        shape=(self.nr_envs, self.dummy_action.shape[1]),
+                        minval=-1.0,
+                        maxval=1.0,
+                    )
+                    processed_action = self.get_processed_action(random_action)
+                    env_state = self.env.step(env_state, processed_action)
+
+                    replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
+                    replay_buffer["next_states"] = replay_buffer["next_states"].at[replay_buffer["pos"]].set(env_state.actual_next_observation)
+                    replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(random_action)
+                    replay_buffer["rewards"] = replay_buffer["rewards"].at[replay_buffer["pos"]].set(env_state.reward)
+                    replay_buffer["terminations"] = replay_buffer["terminations"].at[replay_buffer["pos"]].set(env_state.terminated)
+                    replay_buffer["pos"] = (replay_buffer["pos"] + 1) % capacity
+                    replay_buffer["size"] = jnp.minimum(replay_buffer["size"] + 1, capacity)
+
+                    return (env_state, replay_buffer, key), None
+
+                (env_state, replay_buffer, key), _ = jax.lax.scan(fill_replay_buffer, (env_state, replay_buffer, key), jnp.arange(prefill_iterations))
+
 
             def eval_save_iteration(eval_save_iteration_carry, eval_save_iteration_step):
                 policy_state, critic_state, entropy_coefficient_state, replay_buffer, env_state, key = eval_save_iteration_carry
@@ -308,13 +337,43 @@ class SAC:
 
 
                 # Evaluating
-                ...
-                
+                if self.evaluation_active:
+                    def single_eval_rollout(carry, _):
+                        policy_state, eval_env_state = carry
+                        dist = self.policy.apply(policy_state.params, eval_env_state.next_observation)
+                        action = dist.mode()
+                        processed_action = self.get_processed_action(action)
+                        eval_env_state = self.env.step(eval_env_state, processed_action)
+                        return (policy_state, eval_env_state), None
+
+                    key, reset_key = jax.random.split(key)
+                    reset_keys = jax.random.split(reset_key, self.nr_envs)
+                    eval_env_state = self.env.reset(reset_keys)
+                    (policy_state, eval_env_state), _ = jax.lax.scan(single_eval_rollout, (policy_state, eval_env_state), jnp.arange(self.horizon))
+
+                    eval_metrics = {
+                        "eval/episode_return": jnp.mean(eval_env_state.info["rollout/episode_return"]),
+                        "eval/episode_length": jnp.mean(eval_env_state.info["rollout/episode_length"]),
+                    }
+
+                    def eval_callback(args):
+                        metrics, global_step = args
+                        global_step = int(global_step)
+                        self.start_logging(global_step)
+                        for key, value in metrics.items():
+                            self.log(f"{key}", np.asarray(value), global_step)
+                        self.end_logging()
+
+                    global_step = (eval_save_iteration_step + 1) * self.evaluation_and_save_frequency
+                    jax.debug.callback(eval_callback, (eval_metrics, global_step))
 
                 # Saving
-                ...
+                if self.save_model:
+                    def save_with_check(policy_state, critic_state, entropy_coefficient_state):
+                        self.save(policy_state, critic_state, entropy_coefficient_state)
+                    jax.debug.callback(save_with_check, policy_state, critic_state, entropy_coefficient_state)
 
-                
+
                 return (policy_state, critic_state, entropy_coefficient_state, replay_buffer, env_state, key), None
 
             jax.lax.scan(eval_save_iteration, (policy_state, critic_state, entropy_coefficient_state, replay_buffer, env_state, key), jnp.arange(self.nr_eval_save_iterations))
@@ -353,25 +412,76 @@ class SAC:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
 
-    def save(self, type):
-        ...
+    def save(self, policy_state, critic_state, entropy_coefficient_state):
+        checkpoint = {
+            "policy": policy_state,
+            "critic": critic_state,
+            "entropy_coefficient": entropy_coefficient_state,
+        }
+        save_args = orbax_utils.save_args_from_target(checkpoint)
+        self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
+        with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as f:
+            json.dump(self.config.algorithm.to_dict(), f)
+        shutil.make_archive(f"{self.save_path}/{self.latest_model_file_name}", "zip", f"{self.save_path}/tmp")
+        os.rename(f"{self.save_path}/{self.latest_model_file_name}.zip", f"{self.save_path}/{self.latest_model_file_name}")
+        shutil.rmtree(f"{self.save_path}/tmp")
+
+        if self.track_wandb:
+            wandb.save(f"{self.save_path}/{self.latest_model_file_name}", base_path=self.save_path)
 
 
     def load(config, env, run_path, writer, explicitly_set_algorithm_params):
-        ...
+        splitted_path = config.runner.load_model.split("/")
+        checkpoint_dir = os.path.abspath("/".join(splitted_path[:-1]))
+        checkpoint_file_name = splitted_path[-1]
+        shutil.unpack_archive(f"{checkpoint_dir}/{checkpoint_file_name}", f"{checkpoint_dir}/tmp", "zip")
+        checkpoint_dir = f"{checkpoint_dir}/tmp"
+
+        loaded_algorithm_config = json.load(open(f"{checkpoint_dir}/config_algorithm.json", "r"))
+        for key, value in loaded_algorithm_config.items():
+            if f"algorithm.{key}" not in explicitly_set_algorithm_params:
+                config.algorithm[key] = value
+        model = SAC(config, env, run_path, writer)
+
+        target = {
+            "policy": model.policy_state,
+            "critic": model.critic_state,
+            "entropy_coefficient": model.entropy_coefficient_state,
+        }
+        restore_args = orbax_utils.restore_args_from_target(target)
+        checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+        checkpoint = checkpointer.restore(checkpoint_dir, item=target, restore_args=restore_args)
+
+        model.policy_state = checkpoint["policy"]
+        model.critic_state = checkpoint["critic"]
+        model.entropy_coefficient_state = checkpoint["entropy_coefficient"]
+
+        shutil.rmtree(checkpoint_dir)
+
+        return model
     
 
     def test(self, episodes):
-        ...
+        rlx_logger.info("Testing runs infinitely. The episodes parameter is ignored.")
+
+        @jax.jit
+        def rollout(env_state, key):
+            dist = self.policy.apply(self.policy_state.params, env_state.next_observation)
+            action = dist.mode()
+            # subkey, key = jax.random.split(key)
+            # action = dist.sample(seed=subkey)
+            processed_action = self.get_processed_action(action)
+            env_state = self.env.step(env_state, processed_action)
+            return env_state, key
+
+        self.key, subkey = jax.random.split(self.key)
+        reset_keys = jax.random.split(subkey, self.nr_envs)
+        env_state = self.env.reset(reset_keys)
+        while True:
+            env_state, self.key = rollout(env_state, self.key)
+            if self.render:
+                env_state = self.env.render(env_state)
     
-
-    def set_train_mode(self):
-        ...
-
-
-    def set_eval_mode(self):
-        ...
-
 
     def general_properties():
         return GeneralProperties
