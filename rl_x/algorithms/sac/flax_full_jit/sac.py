@@ -72,8 +72,6 @@ class SAC:
 
         self.env_as_low = env.single_action_space.low
         self.env_as_high = env.single_action_space.high
-        print(f"Action space low: {self.env_as_low}, high: {self.env_as_high}")
-        exit()
 
         self.policy, self.get_processed_action = get_policy(config, env)
         self.critic = get_critic(config, env)
@@ -161,18 +159,13 @@ class SAC:
                     env_state, replay_buffer, key = carry
                     key, subkey = jax.random.split(key)
                     observation = env_state.next_observation
-                    random_action = jax.random.uniform(
-                        subkey,
-                        shape=(self.nr_envs, self.dummy_action.shape[1]),
-                        minval=-1.0,
-                        maxval=1.0,
-                    )
-                    processed_action = self.get_processed_action(random_action)
+                    processed_action = self.env.single_action_space.sample(subkey)
+                    action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
                     env_state = self.env.step(env_state, processed_action)
 
                     replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
                     replay_buffer["next_states"] = replay_buffer["next_states"].at[replay_buffer["pos"]].set(env_state.actual_next_observation)
-                    replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(random_action)
+                    replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(action)
                     replay_buffer["rewards"] = replay_buffer["rewards"].at[replay_buffer["pos"]].set(env_state.reward)
                     replay_buffer["terminations"] = replay_buffer["terminations"].at[replay_buffer["pos"]].set(env_state.terminated)
                     replay_buffer["pos"] = (replay_buffer["pos"] + 1) % capacity
@@ -195,7 +188,9 @@ class SAC:
                         # Acting
                         key, subkey = jax.random.split(key)
                         observation = env_state.next_observation
-                        action = self.policy.apply(policy_state.params, observation).sample(seed=subkey)
+                        action_mean, action_logstd = self.policy.apply(policy_state.params, observation)
+                        action_std = jnp.exp(action_logstd)
+                        action = jnp.tanh(action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape))
                         processed_action = self.get_processed_action(action)
                         env_state = self.env.step(env_state, processed_action)
 
@@ -218,9 +213,13 @@ class SAC:
                         # Optimizing
                         def loss_fn(policy_params, critic_params, entropy_coefficient_params, state, next_state, action, reward, terminated, key1, key2):
                             # Critic loss
-                            dist = stop_gradient(self.policy.apply(policy_params, next_state))
-                            next_action = dist.sample(seed=key1)
-                            next_log_prob = dist.log_prob(next_action)
+                            next_action_mean, next_action_logstd = self.policy.apply(stop_gradient(policy_params), next_state)
+                            next_action_std = jnp.exp(next_action_logstd)
+                            next_action_pretanh = next_action_mean + next_action_std * jax.random.normal(key1, shape=next_action_mean.shape)
+                            next_action = jnp.tanh(next_action_pretanh)
+                            next_log_prob = -0.5 * ((next_action_pretanh - next_action_mean) / next_action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - next_action_logstd
+                            next_log_prob -= jnp.log(1.0 - next_action ** 2 + 1e-6)
+                            next_log_prob = jnp.sum(next_log_prob, axis=-1)
 
                             alpha_with_grad = self.entropy_coefficient.apply(entropy_coefficient_params)
                             alpha = stop_gradient(alpha_with_grad)
@@ -234,9 +233,13 @@ class SAC:
                             q_loss = (q - y) ** 2
 
                             # Policy loss
-                            dist = self.policy.apply(policy_params, state)
-                            current_action = dist.sample(seed=key2)
-                            current_log_prob = dist.log_prob(current_action)
+                            current_action_mean, current_action_logstd = self.policy.apply(policy_params, state)
+                            current_action_std = jnp.exp(current_action_logstd)
+                            current_action_pretanh = current_action_mean + current_action_std * jax.random.normal(key2, shape=current_action_mean.shape)
+                            current_action = jnp.tanh(current_action_pretanh)
+                            current_log_prob = -0.5 * ((current_action_pretanh - current_action_mean) / current_action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - current_action_logstd
+                            current_log_prob -= jnp.log(1.0 - current_action ** 2 + 1e-6)
+                            current_log_prob = jnp.sum(current_log_prob, axis=-1)
                             entropy = stop_gradient(-current_log_prob)
 
                             q = self.critic.apply(stop_gradient(critic_params), state, current_action)
@@ -294,10 +297,9 @@ class SAC:
                         metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
                         metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
                         metrics["gradients/entropy_grad_norm"] = optax.global_norm(entropy_gradients)
-                        
 
                         return (policy_state, critic_state, entropy_coefficient_state, replay_buffer, env_state, key), (env_state.info, metrics)
-                        
+
                     key, subkey = jax.random.split(key)
                     learning_iteration_carry, info_and_optimization_metrics = jax.lax.scan(learning_iteration, (policy_state, critic_state, entropy_coefficient_state, replay_buffer, env_state, subkey), jnp.arange(self.nr_updates_per_logging_iteration))
                     policy_state, critic_state, entropy_coefficient_state, replay_buffer, env_state, key = learning_iteration_carry
@@ -340,8 +342,8 @@ class SAC:
                 if self.evaluation_active:
                     def single_eval_rollout(carry, _):
                         policy_state, eval_env_state = carry
-                        dist = self.policy.apply(policy_state.params, eval_env_state.next_observation)
-                        action = dist.mode()
+                        action_mean, _ = self.policy.apply(policy_state.params, eval_env_state.next_observation)
+                        action = jnp.tanh(action_mean)
                         processed_action = self.get_processed_action(action)
                         eval_env_state = self.env.step(eval_env_state, processed_action)
                         return (policy_state, eval_env_state), None
@@ -466,10 +468,11 @@ class SAC:
 
         @jax.jit
         def rollout(env_state, key):
-            dist = self.policy.apply(self.policy_state.params, env_state.next_observation)
-            action = dist.mode()
+            action_mean, action_logstd = self.policy.apply(self.policy_state.params, env_state.next_observation)
+            action = jnp.tanh(action_mean)
+            # action_std = jnp.exp(action_logstd)
             # subkey, key = jax.random.split(key)
-            # action = dist.sample(seed=subkey)
+            # action = jnp.tanh(action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape))
             processed_action = self.get_processed_action(action)
             env_state = self.env.step(env_state, processed_action)
             return env_state, key

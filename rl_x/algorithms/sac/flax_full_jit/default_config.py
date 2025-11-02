@@ -19,7 +19,7 @@ def get_config(algorithm_name):
     config.target_entropy = "auto"
     config.log_std_min = -20
     config.log_std_max = 2
-    config.logging_frequency = 1000
+    config.logging_frequency = 100000
     config.evaluation_and_save_frequency = 100000  # -1 to disable
     config.evaluation_active = True
     config.evaluation_episodes = 10
