@@ -16,8 +16,6 @@ from absl import logging as absl_logging
 import logging
 import logging.handlers
 from ml_collections import config_dict, config_flags
-import wandb
-import gymnasium as gym
 
 from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.default_config import get_config as get_runner_config
@@ -34,19 +32,56 @@ DEFAULT_RUNNER_MODE = "train"
 # Silence jax logging
 absl_logging.set_verbosity(absl_logging.ERROR)
 
-# Silences the box bound precision warning for cartpole
-gym.logger.set_level(40)
-
 rlx_logger = logging.getLogger("rl_x")
 
 
 class Runner:
     def __init__(self, implementation_package_names=["rl_x"]):
-        algorithm_name, environment_name, self._mode, jax_cache_dir = self.parse_arguments(implementation_package_names)
+        algorithm_name, environment_name, self._mode, jax_cache_dir = self.parse_arguments()
+
+        # Early importing of environment to start Isaac if needed
+        self.import_environment(environment_name, implementation_package_names)
+        environment_general_properties = get_environment_general_properties(environment_name)
+        self.environment_uses_isaac_lab = SimulationType.ISAAC_LAB == environment_general_properties.simulation_type
+
+        if self.environment_uses_isaac_lab:
+            import argparse
+            from isaaclab.app import AppLauncher
+
+            app_launcher_args = argparse.Namespace()
+
+            def get_env_config_value(arg_name):
+                arg_value = [arg for arg in sys.argv if arg.startswith(f"--environment.{arg_name}=")]
+                if arg_value:
+                    arg_value = arg_value[0].split("=")[1]
+                else:
+                    arg_value = getattr(get_environment_config(environment_name), arg_name, None)
+                return arg_value
+            
+            app_launcher_args.disable_fabric = get_env_config_value("disable_fabric")
+            app_launcher_args.num_envs = get_env_config_value("nr_envs")
+            app_launcher_args.task = get_env_config_value("name")
+            app_launcher_args.headless = True if get_env_config_value("render").lower() == "false" else False
+            app_launcher_args.livestream = get_env_config_value("livestream")
+            app_launcher_args.enable_cameras = get_env_config_value("enable_cameras")
+            app_launcher_args.xr = get_env_config_value("xr")
+            app_launcher_args.device = get_env_config_value("device")
+            app_launcher_args.cpu = get_env_config_value("cpu")
+            app_launcher_args.verbose = get_env_config_value("verbose")
+            app_launcher_args.info = get_env_config_value("info")
+            app_launcher_args.experience = get_env_config_value("experience")
+            app_launcher_args.rendering_mode = get_env_config_value("rendering_mode")
+            app_launcher_args.kit_args = get_env_config_value("kit_args")
+            app_launcher_args.anim_recording_enabled = get_env_config_value("anim_recording_enabled")
+            app_launcher_args.anim_recording_start_time = get_env_config_value("anim_recording_start_time")
+            app_launcher_args.anim_recording_stop_time = get_env_config_value("anim_recording_stop_time")
+
+            app_launcher = AppLauncher(app_launcher_args)
+            self.isaac_simulation_app = app_launcher.app
 
         # Compatibility check
+        self.import_algorithm(algorithm_name, implementation_package_names)
         algorithm_general_properties = get_algorithm_general_properties(algorithm_name)
-        environment_general_properties = get_environment_general_properties(environment_name)
         if environment_general_properties.action_space_type not in algorithm_general_properties.action_space_types:
             raise ValueError(f"Incompatible action space type. Environment: {environment_general_properties.action_space_type}, Algorithm: {algorithm_general_properties.action_space_types}")
         if environment_general_properties.observation_space_type not in algorithm_general_properties.observation_space_types:
@@ -58,6 +93,10 @@ class Runner:
         algorithm_uses_torch = DeepLearningFrameworkType.TORCH == algorithm_general_properties.deep_learning_framework_type
         algorithm_uses_jax = DeepLearningFrameworkType.JAX == algorithm_general_properties.deep_learning_framework_type
         environment_uses_jax = SimulationType.JAX_BASED == environment_general_properties.simulation_type
+
+        import gymnasium as gym
+        # Silences the box bound precision warning for cartpole
+        gym.logger.set_level(40)
 
         if algorithm_uses_torch:  
             # Avoids warning when TensorFloat32 is available
@@ -136,7 +175,7 @@ class Runner:
         sys.excepthook = handle_exception
 
 
-    def parse_arguments(self, implementation_package_names):
+    def parse_arguments(self):
         algorithm_name = [arg for arg in sys.argv if arg.startswith("--algorithm.name=")]
         environment_name = [arg for arg in sys.argv if arg.startswith("--environment.name=")]
         runner_mode = [arg for arg in sys.argv if arg.startswith("--runner.mode=")]
@@ -148,25 +187,11 @@ class Runner:
         else:
             algorithm_name = DEFAULT_ALGORITHM
         
-        for implementation_library_name in implementation_package_names:
-            try:
-                importlib.import_module(f"{implementation_library_name}.algorithms.{algorithm_name}")
-                break
-            except ModuleNotFoundError:
-                pass
-        
         if environment_name:
             environment_name = environment_name[0].split("=")[1]
             del sys.argv[sys.argv.index("--environment.name=" + environment_name)]
         else:
             environment_name = DEFAULT_ENVIRONMENT
-        
-        for implementation_library_name in implementation_package_names:
-            try:
-                importlib.import_module(f"{implementation_library_name}.environments.{environment_name}")
-                break
-            except ModuleNotFoundError:
-                pass
         
         if runner_mode:
             runner_mode = runner_mode[0].split("=")[1]
@@ -181,6 +206,24 @@ class Runner:
             jax_cache_dir = get_runner_config(None).jax_cache_dir
 
         return algorithm_name, environment_name, runner_mode, jax_cache_dir
+
+
+    def import_environment(self, environment_name, implementation_package_names):
+        for implementation_library_name in implementation_package_names:
+            try:
+                importlib.import_module(f"{implementation_library_name}.environments.{environment_name}")
+                break
+            except ModuleNotFoundError:
+                pass
+
+
+    def import_algorithm(self, algorithm_name, implementation_package_names):
+        for implementation_library_name in implementation_package_names:
+            try:
+                importlib.import_module(f"{implementation_library_name}.algorithms.{algorithm_name}")
+                break
+            except ModuleNotFoundError:
+                pass
 
 
     def run(self):
@@ -215,6 +258,7 @@ class Runner:
         self.init_config()
 
         if self._config.runner.track_wandb:
+            import wandb
             wandb.init(
                 entity=self._config.runner.wandb_entity,
                 project=self._config.runner.project_name,
@@ -255,6 +299,8 @@ class Runner:
                 writer.close()
             if self._config.runner.track_wandb:
                 wandb.finish()
+            if self.environment_uses_isaac_lab:
+                self.isaac_simulation_app.close()
 
 
     def _test(self, _):
@@ -282,3 +328,5 @@ class Runner:
             model.test(self._config.runner.nr_test_episodes)
         finally:
             env.close()
+            if self.environment_uses_isaac_lab:
+                self.isaac_simulation_app.close()

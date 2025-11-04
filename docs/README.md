@@ -33,6 +33,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/tqc/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/tqc/README.md): Implementation details of the Truncated Quantile Critics (TQC) algorithm
 - [```/rl_x/environments/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/README.md): Information on the folder structure of environments, how to add new environments and how to mix and match them with algorithms
 - [```/rl_x/environments/custom_interface/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_interface/README.md): Implementation details of the custom environment interface with simple socket communication
+- [```/rl_x/environments/custom_isaac_lab/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_isaac_lab/README.md): Implementation details of the custom Isaac Lab environment examples
 - [```/rl_x/environments/custom_mujoco/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_mujoco/README.md): Implementation details of the custom MuJoCo environment examples (with and without MJX)
 - [```/rl_x/environments/envpool/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/gym/README.md): Details of the EnvPool environments
 - [```/rl_x/environments/gym/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/gym/README.md): Details of the Gymnasium environments
@@ -78,7 +79,7 @@ pip uninstall $(pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
 ```
 Afterwards, PyTorch can be installed with the following command:
 ```
-pip install "torch>=2.6.0" --index-url https://download.pytorch.org/whl/cu118 --upgrade
+pip install "torch>=2.7.0" --index-url https://download.pytorch.org/whl/cu118 --upgrade
 ```
 
 ### 5. JAX
@@ -88,6 +89,36 @@ pip install -U "jax[cuda12]"
 ```
 For MacOS and Windows, JAX with GPU support is not supported out-of-the-box. However, it can be done with some extra effort (see [here](https://github.com/google/jax) for more information).
 
+
+### Optional: Isaac Lab
+Only needed when using Isaac Lab environments.
+For Linux systems with NVIDIA GPUs, Isaac Sim can be installed by following the instructions:
+```
+pip install "isaacsim[all,extscache]==5.1.0" --extra-index-url https://pypi.nvidia.com
+```
+Make sure to install the compatible version of torch alongside it:
+```
+pip install -U torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
+```
+Clone Isaac Lab into any directory:
+```
+git clone git@github.com:isaac-sim/IsaacLab.git
+```
+Install the Isaac Lab package:
+```
+./isaaclab.sh --install
+```
+Isaac Sim / Lab requires a newer version of gymnasium and an older version of numpy. The gymnasium version should be downgraded after installing Isaac Sim / Lab back to the RL-X compatible version:
+```
+pip install "gymnasium[mujoco,classic-control,atari,accept-rom-license,other]<=0.29.1"
+```
+Isaac Sim / Lab requires the specific numpy version it comes with. This causes a conflict with RL-X, which requires a newer numpy version to run the newest version of JAX.
+Furthermore, Isaac Sim / Lab builds on PyTorch using CUDA 12, while RL-X by default uses PyTorch with CUDA 11 to avoid conflicts with JAX.
+Therefore and in general, Isaac Lab environments should always be used with algorithms running on PyTorch.
+Make sure numpy is at the correct version:
+```
+pip install numpy==1.26.0
+```
 
 
 ## Google Colab
