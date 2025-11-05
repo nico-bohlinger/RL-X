@@ -107,32 +107,24 @@ class PQN:
             return action, key
         
 
-        #@jax.jit
+        @jax.jit
         def calculate_q_targets(critic_state: TrainState, next_states: np.ndarray, rewards: np.ndarray, terminations: np.ndarray):
-            # def compute_q_targets(carry, t):
-            #     previous_q_target = carry[0]
-            #     q_target = rewards[t] + self.gamma * (self.q_lambda * previous_q_target + (1 - self.q_lambda) * next_values[t]) * (1 - terminations[t])
-            #     return (q_target,), q_target
+            next_values = next_values = jax.vmap(self.critic.apply, in_axes=(None, 0))(critic_state.params, next_states).max(axis=-1)
+            last_target = rewards[-1] + self.gamma * next_values[-1] * (1.0 - terminations[-1])
 
-            # next_values = jax.vmap(self.critic.apply, in_axes=(None, 0))(critic_state.params, next_states).max(axis=-1)
-            # _, q_targets = jax.lax.scan(compute_q_targets, (next_values[-1],), jnp.arange(self.nr_steps - 1, -1, -1))
-
-            # return q_targets
-
-            returns = np.zeros_like(rewards)
-            for t in reversed(range(self.nr_steps)):
-                if t == self.nr_steps - 1:
-                    next_value = self.critic.apply(critic_state.params, next_states[t]).max(axis=-1)
-                    nextnonterminal = 1.0 - terminations[t]
-                    returns[t] = rewards[t] + self.gamma * next_value * nextnonterminal
-                else:
-                    nextnonterminal = 1.0 - terminations[t]
-                    next_value = self.critic.apply(critic_state.params, next_states[t]).max(axis=-1)
-                    returns[t] = rewards[t] + self.gamma * (
-                        self.q_lambda * returns[t + 1] + (1 - self.q_lambda) * next_value * nextnonterminal
-                    )
-
-            return returns
+            def compute_q_targets(carry_target, inputs):
+                reward_t, termination_t, next_q_t = inputs
+                mixed_bootstrap = self.q_lambda * carry_target + (1 - self.q_lambda) * next_q_t
+                q_target = reward_t + self.gamma * mixed_bootstrap * (1.0 - termination_t)
+                return q_target, q_target
+            
+            _, q_targets = jax.lax.scan(
+                compute_q_targets,
+                last_target,
+                (rewards, terminations, next_values),
+                reverse=True
+            )
+            return q_targets
 
 
         @jax.jit
