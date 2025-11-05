@@ -27,6 +27,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/mpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/mpo/README.md): Implementation details of the Maximum a Posteriori Policy Optimization (MPO) algorithm
 - [```/rl_x/algorithms/ppo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo/README.md): Implementation details of the Proximal Policy Optimization (PPO) algorithm
 - [```/rl_x/algorithms/ppo_dtrl/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl/README.md): Implementation details of Differentiable Trust Region Layers in combination with the Proximal Policy Optimization (PPO+DTRL) algorithm
+- [```/rl_x/algorithms/pqn/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/pqn/README.md): Implementation details of the Parallelized Q-Network (PQN) algorithm
 - [```/rl_x/algorithms/redq/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/redq/README.md): Implementation details of the Randomized Ensembled Double Q-Learning (REDQ) algorithm
 - [```/rl_x/algorithms/sac/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/sac/README.md): Implementation details of the Soft Actor Critic (SAC) algorithm
 - [```/rl_x/algorithms/td3/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/td3/README.md): Implementation details of the Twin Delayed Deep Deterministic Gradient (TD3) algorithm
