@@ -83,7 +83,7 @@ class PPO:
 
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
-        env_state = self.env.reset(reset_key)
+        env_state = self.env.reset(reset_key, False)
 
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
@@ -113,7 +113,7 @@ class PPO:
         def jitable_train_function(key, parallel_seed_id):
             key, reset_key = jax.random.split(key, 2)
             reset_keys = jax.random.split(reset_key, self.nr_envs)
-            env_state = self.env.reset(reset_keys)
+            env_state = self.env.reset(reset_keys, False)
 
             policy_state = self.policy_state
             critic_state = self.critic_state
@@ -305,7 +305,7 @@ class PPO:
 
                     key, reset_key = jax.random.split(key)
                     reset_keys = jax.random.split(reset_key, self.nr_envs)
-                    eval_env_state = self.env.reset(reset_keys)
+                    eval_env_state = self.env.reset(reset_keys, True)
                     single_eval_rollout_carry, _ = jax.lax.scan(single_eval_rollout, (policy_state, eval_env_state), jnp.arange(self.horizon))
                     _, eval_env_state = single_eval_rollout_carry
 
@@ -432,7 +432,7 @@ class PPO:
 
         self.key, subkey = jax.random.split(self.key)
         reset_keys = jax.random.split(subkey, self.nr_envs)
-        env_state = self.env.reset(reset_keys)
+        env_state = self.env.reset(reset_keys, True)
         while True:
             env_state, self.key = rollout(env_state, self.key)
             if self.render:
