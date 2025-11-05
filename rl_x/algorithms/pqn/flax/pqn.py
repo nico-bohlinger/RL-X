@@ -7,7 +7,6 @@ from collections import deque
 import tree
 import numpy as np
 import jax
-from jax.lax import stop_gradient
 import jax.numpy as jnp
 import flax
 from flax.training.train_state import TrainState
@@ -16,15 +15,14 @@ import orbax.checkpoint
 import optax
 import wandb
 
-from rl_x.algorithms.ddqn.flax.general_properties import GeneralProperties
-from rl_x.algorithms.ddqn.flax.critic import get_critic
-from rl_x.algorithms.ddqn.flax.replay_buffer import ReplayBuffer
-from rl_x.algorithms.ddqn.flax.rl_train_state import RLTrainState
+from rl_x.algorithms.pqn.flax.general_properties import GeneralProperties
+from rl_x.algorithms.pqn.flax.critic import get_critic
+from rl_x.algorithms.pqn.flax.batch import Batch
 
 rlx_logger = logging.getLogger("rl_x")
 
 
-class DDQN:
+class PQN:
     def __init__(self, config, env, run_path, writer):
         self.config = config
         self.env = env
@@ -38,21 +36,23 @@ class DDQN:
         self.seed = config.environment.seed
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
+        self.nr_epochs = config.algorithm.nr_epochs
+        self.nr_minibatches = config.algorithm.nr_minibatches
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
-        self.buffer_size = config.algorithm.buffer_size
-        self.learning_starts = config.algorithm.learning_starts
-        self.batch_size = config.algorithm.batch_size
+        self.nr_steps = config.algorithm.nr_steps
         self.gamma = config.algorithm.gamma
+        self.q_lambda = config.algorithm.q_lambda
         self.epsilon_start = config.algorithm.epsilon_start
         self.epsilon_end = config.algorithm.epsilon_end
-        self.epsilon_decay_steps = config.algorithm.epsilon_decay_steps
-        self.update_frequency = config.algorithm.update_frequency
-        self.target_update_frequency = config.algorithm.target_update_frequency
+        self.max_grad_norm = config.algorithm.max_grad_norm
         self.nr_hidden_units = config.algorithm.nr_hidden_units
-        self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.evaluation_episodes = config.algorithm.evaluation_episodes
+        self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
+        self.nr_updates = config.algorithm.total_timesteps // self.batch_size
+        self.minibatch_size = self.batch_size // self.nr_minibatches
+        self.epsilon_decay_steps = self.total_timesteps * config.algorithm.epsilon_decay_fraction
 
         rlx_logger.info(f"Using device: {jax.default_backend()}")
         
@@ -60,6 +60,7 @@ class DDQN:
         self.key = jax.random.PRNGKey(self.seed)
         self.key, critic_key = jax.random.split(self.key)
 
+        self.os_shape = env.single_observation_space.shape
         self.nr_available_actions = env.get_single_action_logit_size()
 
         self.critic = get_critic(config, env)
@@ -67,20 +68,20 @@ class DDQN:
         self.critic.apply = jax.jit(self.critic.apply)
 
         def linear_schedule(count):
-            step = (count * self.nr_envs) - self.learning_starts
-            total_steps = self.total_timesteps - self.learning_starts
-            fraction = 1.0 - (step / total_steps)
+            fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates
             return self.learning_rate * fraction
         
         self.critic_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
         state = jnp.array([self.env.single_observation_space.sample()])
 
-        self.critic_state = RLTrainState.create(
+        self.critic_state = TrainState.create(
             apply_fn=self.critic.apply,
             params=self.critic.init(critic_key, state),
-            target_params=self.critic.init(critic_key, state),
-            tx=optax.inject_hyperparams(optax.adam)(learning_rate=self.critic_learning_rate)
+            tx=optax.chain(
+                optax.clip_by_global_norm(self.max_grad_norm),
+                optax.inject_hyperparams(optax.radam)(learning_rate=self.critic_learning_rate),
+            )
         )
 
         if self.save_model:
@@ -104,23 +105,33 @@ class DDQN:
             )
 
             return action, key
+        
+
+        @jax.jit
+        def calculate_q_targets(critic_state: TrainState, next_states: np.ndarray, rewards: np.ndarray, terminations: np.ndarray):
+            next_values = next_values = jax.vmap(self.critic.apply, in_axes=(None, 0))(critic_state.params, next_states).max(axis=-1)
+            last_target = rewards[-1] + self.gamma * next_values[-1] * (1.0 - terminations[-1])
+
+            def compute_q_targets(carry_target, inputs):
+                reward_t, termination_t, next_q_t = inputs
+                mixed_bootstrap = self.q_lambda * carry_target + (1 - self.q_lambda) * next_q_t
+                q_target = reward_t + self.gamma * mixed_bootstrap * (1.0 - termination_t)
+                return q_target, q_target
+            
+            _, q_targets = jax.lax.scan(
+                compute_q_targets,
+                last_target,
+                (rewards, terminations, next_values),
+                reverse=True
+            )
+            return q_targets
 
 
         @jax.jit
-        def update(
-                critic_state: RLTrainState, current_step: int,
-                states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, terminations: np.ndarray
-            ):
-            def loss_fn(critic_params: flax.core.FrozenDict,
-                        state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray
-                ):
-                next_q_target = jnp.squeeze(self.critic.apply(critic_state.target_params, next_state))
-                next_action = jnp.argmax(self.critic.apply(stop_gradient(critic_params), next_state))
-
-                y = reward + self.gamma * (1 - terminated) * next_q_target[next_action]
-
-                q = jnp.squeeze(self.critic.apply(critic_params, state))[action]
-                q_loss = (q - y) ** 2
+        def update(critic_state: TrainState, states: np.ndarray, actions: np.ndarray, q_targets: np.ndarray, key: jax.random.PRNGKey):
+            def loss_fn(critic_params: flax.core.FrozenDict, state: np.ndarray, action: np.ndarray, q_target: np.ndarray):
+                q = jnp.squeeze(self.critic.apply(critic_params, jnp.expand_dims(state, 0)))[action]
+                q_loss = 0.5 * (q - q_target) ** 2
 
                 # Create metrics
                 metrics = {
@@ -131,27 +142,47 @@ class DDQN:
                 return q_loss, (metrics)
             
 
-            states = jnp.expand_dims(states, axis=1)
-            next_states = jnp.expand_dims(next_states, axis=1)
+            batch_states = states.reshape((-1,) + self.os_shape)
+            batch_actions = actions.reshape(-1)
+            batch_q_targets = q_targets.reshape(-1)
             
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0, 0, 0, 0, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0, 0, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0,), has_aux=True)
 
-            (loss, (metrics)), (critic_gradients,) = grad_loss_fn(
-                critic_state.params,
-                states, next_states, actions, rewards, terminations)
+            key, subkey = jax.random.split(key)
+            batch_indices = jnp.tile(jnp.arange(self.batch_size), (self.nr_epochs, 1))
+            batch_indices = jax.random.permutation(subkey, batch_indices, axis=1, independent=True)
+            batch_indices = batch_indices.reshape((self.nr_epochs * self.nr_minibatches, self.minibatch_size))
 
-            critic_state = critic_state.apply_gradients(grads=critic_gradients)
+            def minibatch_update(carry, minibatch_indices):
+                critic_state = carry[0]
 
-            # Update targets
-            critic_state = critic_state.replace(target_params=optax.periodic_update(critic_state.params, critic_state.target_params, current_step, self.target_update_frequency))
+                (loss, (metrics)), (critic_gradients,) = grad_loss_fn(
+                    critic_state.params,
+                    batch_states[minibatch_indices],
+                    batch_actions[minibatch_indices],
+                    batch_q_targets[minibatch_indices],
+                )
 
-            metrics["lr/learning_rate"] = critic_state.opt_state.hyperparams["learning_rate"]
-            metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
+                critic_state = critic_state.apply_gradients(grads=critic_gradients)
 
-            return critic_state, metrics
+                metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
+
+                carry = (critic_state,)
+
+                return carry, (metrics)
+            
+            init_carry = (critic_state,)
+            carry, (metrics) = jax.lax.scan(minibatch_update, init_carry, batch_indices)
+            critic_state = carry[0]
+
+            # Calculate mean metrics
+            mean_metrics = {key: jnp.mean(metrics[key]) for key in metrics}
+            mean_metrics["lr/learning_rate"] = critic_state.opt_state[1].hyperparams["learning_rate"]
+
+            return critic_state, mean_metrics, key
         
 
         @jax.jit
@@ -162,7 +193,14 @@ class DDQN:
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.single_observation_space.shape, self.env.single_action_space.shape, self.rng)
+        batch = Batch(
+            states=np.zeros((self.nr_steps, self.nr_envs) + self.os_shape),
+            next_states=np.zeros((self.nr_steps, self.nr_envs) + self.os_shape),
+            actions=np.zeros((self.nr_steps, self.nr_envs), dtype=np.int32),
+            rewards=np.zeros((self.nr_steps, self.nr_envs)),
+            terminations=np.zeros((self.nr_steps, self.nr_envs), dtype=bool),
+            q_targets=np.zeros((self.nr_steps, self.nr_envs)),
+        )
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
 
@@ -170,74 +208,67 @@ class DDQN:
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
-        time_metrics_collection = {}
-        step_info_collection = {}
-        optimization_metrics_collection = {}
-        evaluation_metrics_collection = {}
         steps_metrics = {}
         while global_step < self.total_timesteps:
             start_time = time.time()
+            time_metrics = {}
 
 
             # Acting
             dones_this_rollout = 0
-            if global_step < self.learning_starts:
-                action = np.array([self.env.single_action_space.sample() for _ in range(self.nr_envs)])
-            else:
-                epsilon = self.epsilon_start + (self.epsilon_end - self.epsilon_start) * min(1.0, (global_step - self.learning_starts) / self.epsilon_decay_steps)
+            step_info_collection = {}
+            for step in range(self.nr_steps):
+                epsilon = self.epsilon_start + (self.epsilon_end - self.epsilon_start) * min(1.0, global_step / self.epsilon_decay_steps)
                 action, self.key = get_action(self.critic_state, state, epsilon, self.key)
-                optimization_metrics_collection.setdefault("epsilon/epsilon", []).append(epsilon)
-            
-            next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(action))
-            done = terminated | truncated
-            actual_next_state = next_state.copy()
-            for i, single_done in enumerate(done):
-                if single_done:
-                    actual_next_state[i] = np.array(self.env.get_final_observation_at_index(info, i))
-                    saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                    dones_this_rollout += 1
-            for key, info_value in self.env.get_logging_info_dict(info).items():
-                step_info_collection.setdefault(key, []).extend(info_value)
-            
-            replay_buffer.add(state, actual_next_state, action, reward, terminated)
 
-            state = next_state
-            global_step += self.nr_envs
+                next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(action))
+                done = terminated | truncated
+                actual_next_state = next_state.copy()
+                for i, single_done in enumerate(done):
+                    if single_done:
+                        actual_next_state[i] = self.env.get_final_observation_at_index(info, i)
+                        saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                        dones_this_rollout += 1
+                for key, info_value in self.env.get_logging_info_dict(info).items():
+                    step_info_collection.setdefault(key, []).extend(info_value)
+
+                batch.states[step] = state
+                batch.next_states[step] = actual_next_state
+                batch.actions[step] = action
+                batch.rewards[step] = reward
+                batch.terminations[step] = terminated
+                state = next_state
+                global_step += self.nr_envs
             nr_episodes += dones_this_rollout
 
             acting_end_time = time.time()
-            time_metrics_collection.setdefault("time/acting_time", []).append(acting_end_time - start_time)
+            time_metrics["time/acting_time"] = acting_end_time - start_time
 
 
-            # What to do in this step after acting
-            should_learning_start = global_step > self.learning_starts
-            should_optimize = should_learning_start and global_step % self.update_frequency == 0
-            should_evaluate = global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1
-            should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
-            should_log = global_step % self.logging_frequency == 0
+            # Calculating Q targets
+            batch.q_targets = calculate_q_targets(self.critic_state, batch.next_states, batch.rewards, batch.terminations)
+            
+            calc_q_target_end_time = time.time()
+            time_metrics["time/calc_q_target_time"] = calc_q_target_end_time - acting_end_time
 
 
-            # Optimizing - Prepare batches
-            if should_optimize:
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size)
-
-
-            # Optimizing - Q-function
-            if should_optimize:
-                self.critic_state, optimization_metrics = update(self.critic_state, global_step, batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations)
-                for key, value in optimization_metrics.items():
-                    optimization_metrics_collection.setdefault(key, []).append(value)
-                nr_updates += 1
+            # Optimizing
+            self.critic_state, optimization_metrics, self.key = update(self.critic_state, batch.states, batch.actions, batch.q_targets, self.key)
+            optimization_metrics = {key: value.item() for key, value in optimization_metrics.items()}
+            optimization_metrics["epsilon/epsilon"] = epsilon
+            nr_updates += self.nr_epochs * self.nr_minibatches
             
             optimizing_end_time = time.time()
-            time_metrics_collection.setdefault("time/optimizing_time", []).append(optimizing_end_time - acting_end_time)
+            time_metrics["time/optimizing_time"] = optimizing_end_time - calc_q_target_end_time
 
 
             # Evaluating
-            if should_evaluate:
+            evaluation_metrics = {}
+            if global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1:
                 self.set_eval_mode()
                 state, _ = self.env.reset()
                 eval_nr_episodes = 0
+                evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
                 while True:
                     action = get_greedy_action(self.critic_state, state)
                     state, reward, terminated, truncated, info = self.env.step(jax.device_get(action))
@@ -245,64 +276,57 @@ class DDQN:
                     for i, single_done in enumerate(done):
                         if single_done:
                             eval_nr_episodes += 1
-                            evaluation_metrics_collection.setdefault("eval/episode_return", []).append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                            evaluation_metrics_collection.setdefault("eval/episode_length", []).append(self.env.get_final_info_value_at_index(info, "episode_length", i))
+                            evaluation_metrics["eval/episode_return"].append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                            evaluation_metrics["eval/episode_length"].append(self.env.get_final_info_value_at_index(info, "episode_length", i))
                             if eval_nr_episodes == self.evaluation_episodes:
                                 break
                     if eval_nr_episodes == self.evaluation_episodes:
                         break
+                evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
                 state, _ = self.env.reset()
                 self.set_train_mode()
             
             evaluating_end_time = time.time()
-            time_metrics_collection.setdefault("time/evaluating_time", []).append(evaluating_end_time - optimizing_end_time)
+            time_metrics["time/evaluating_time"] = evaluating_end_time - optimizing_end_time
 
 
             # Saving
-            if should_try_to_save:
+            # Also only save when there were finished episodes this update
+            if self.save_model and dones_this_rollout > 0:
                 mean_return = np.mean(saving_return_buffer)
                 if mean_return > self.best_mean_return:
                     self.best_mean_return = mean_return
                     self.save()
             
             saving_end_time = time.time()
-            time_metrics_collection.setdefault("time/saving_time", []).append(saving_end_time - evaluating_end_time)
+            time_metrics["time/saving_time"] = saving_end_time - evaluating_end_time
 
-            time_metrics_collection.setdefault("time/sps", []).append(self.nr_envs / (saving_end_time - start_time))
+            time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
 
 
             # Logging
-            if should_log:
-                self.start_logging(global_step)
+            self.start_logging(global_step)
 
-                steps_metrics["steps/nr_env_steps"] = global_step
-                steps_metrics["steps/nr_updates"] = nr_updates
-                steps_metrics["steps/nr_episodes"] = nr_episodes
+            steps_metrics["steps/nr_env_steps"] = global_step
+            steps_metrics["steps/nr_updates"] = nr_updates
+            steps_metrics["steps/nr_episodes"] = nr_episodes
 
-                rollout_info_metrics = {}
-                env_info_metrics = {}
-                if step_info_collection:
-                    info_names = list(step_info_collection.keys())
-                    for info_name in info_names:
-                        metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
-                        metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
-                        mean_value = np.mean(step_info_collection[info_name])
-                        if mean_value == mean_value:  # Check if mean_value is NaN
-                            metric_dict[f"{metric_group}/{info_name}"] = mean_value
-                
-                time_metrics = {key: np.mean(value) for key, value in time_metrics_collection.items()}
-                optimization_metrics = {key: np.mean(value) for key, value in optimization_metrics_collection.items()}
-                evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics_collection.items()}
-                combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
-                for key, value in combined_metrics.items():
-                    self.log(f"{key}", value, global_step)
+            rollout_info_metrics = {}
+            env_info_metrics = {}
+            if step_info_collection:
+                info_names = list(step_info_collection.keys())
+                for info_name in info_names:
+                    metric_group = "rollout" if info_name in ["episode_return", "episode_length"] else "env_info"
+                    metric_dict = rollout_info_metrics if metric_group == "rollout" else env_info_metrics
+                    mean_value = np.mean(step_info_collection[info_name])
+                    if mean_value == mean_value:  # Check if mean_value is NaN
+                        metric_dict[f"{metric_group}/{info_name}"] = mean_value
+            
+            combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
+            for key, value in combined_metrics.items():
+                self.log(f"{key}", value, global_step)
 
-                time_metrics_collection = {}
-                step_info_collection = {}
-                optimization_metrics_collection = {}
-                evaluation_metrics_collection = {}
-
-                self.end_logging()
+            self.end_logging()
 
 
     def log(self, name, value, step):
@@ -356,7 +380,7 @@ class DDQN:
         for key, value in loaded_algorithm_config.items():
             if f"algorithm.{key}" not in explicitly_set_algorithm_params:
                 config.algorithm[key] = value
-        model = DDQN(config, env, run_path, writer)
+        model = PQN(config, env, run_path, writer)
 
         target = {
             "critic": model.critic_state

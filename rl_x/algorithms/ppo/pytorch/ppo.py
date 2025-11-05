@@ -9,6 +9,7 @@ import torch.optim as optim
 import wandb
 
 from rl_x.environments.action_space_type import ActionSpaceType
+from rl_x.environments.data_interface_type import DataInterfaceType
 from rl_x.algorithms.ppo.pytorch.general_properties import GeneralProperties
 from rl_x.algorithms.ppo.pytorch.policy import get_policy
 from rl_x.algorithms.ppo.pytorch.critic import get_critic
@@ -72,6 +73,8 @@ class PPO:
         self.critic = torch.compile(get_critic(config, env).to(self.device), mode="default")
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate)
+
+        self.is_torch_data_interface = env.general_properties.data_interface_type == DataInterfaceType.TORCH
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -139,7 +142,8 @@ class PPO:
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
         
         state, _ = self.env.reset()
-        state = torch.tensor(state, dtype=torch.float32).to(self.device)
+        if not self.is_torch_data_interface:
+            state = torch.tensor(state, dtype=torch.float32).to(self.device)
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -150,46 +154,59 @@ class PPO:
         
 
             # Acting
-            dones_this_rollout = 0
-            step_info_collection = {}
-            for step in range(self.nr_steps):
-                with torch.no_grad():
+            with torch.inference_mode():
+                dones_this_rollout = 0
+                step_info_collection = {}
+                for step in range(self.nr_steps):
                     action, processed_action, log_prob = self.policy.get_action_logprob(state)
                     value = self.critic.get_value(state)
-                next_state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
-                done = terminated | truncated
-                next_state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
-                actual_next_state = next_state.clone()
-                for i, single_done in enumerate(done):
-                    if single_done:
-                        actual_next_state[i] = torch.tensor(np.array(self.env.get_final_observation_at_index(info, i), dtype=np.float32), dtype=torch.float32).to(self.device)
-                        saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                        dones_this_rollout += 1
-                for key, info_value in self.env.get_logging_info_dict(info).items():
-                    step_info_collection.setdefault(key, []).extend(info_value)
+                    if not self.is_torch_data_interface:
+                        processed_action = processed_action.cpu().numpy()
+                    next_state, reward, terminated, truncated, info = self.env.step(processed_action)
+                    done = terminated | truncated
+                    if not self.is_torch_data_interface:
+                        next_state = torch.tensor(next_state, dtype=torch.float32).to(self.device)
+                    if not self.is_torch_data_interface:
+                        actual_next_state = next_state.clone()
+                        for i, single_done in enumerate(done):
+                            if single_done:
+                                actual_next_state[i] = torch.tensor(np.array(self.env.get_final_observation_at_index(info, i), dtype=np.float32), dtype=torch.float32).to(self.device)
+                                saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                                dones_this_rollout += 1
+                    else:
+                        actual_next_state = next_state
+                        # TODO: Use the correct actual_next_state for the torch data interface
+                        dones_this_rollout += done.sum().item()
+                    for key, info_value in self.env.get_logging_info_dict(info).items():
+                        step_info_collection.setdefault(key, []).extend(info_value)
 
-                batch.states[step] = state
-                batch.next_states[step] = actual_next_state
-                batch.actions[step] = action
-                batch.rewards[step] = torch.tensor(reward, dtype=torch.float32).to(self.device)
-                batch.values[step] = value.reshape(-1)
-                batch.terminations[step]= torch.tensor(terminated, dtype=torch.float32).to(self.device)
-                batch.log_probs[step] = log_prob     
-                state = next_state
-                global_step += self.nr_envs
-            nr_episodes += dones_this_rollout
-            
-            acting_end_time = time.time()
-            time_metrics["time/acting_time"] = acting_end_time - start_time
+                    batch.states[step] = state
+                    batch.next_states[step] = actual_next_state
+                    batch.actions[step] = action
+                    if not self.is_torch_data_interface:
+                        batch.rewards[step] = torch.tensor(reward, dtype=torch.float32).to(self.device)
+                    else:
+                        batch.rewards[step] = reward
+                    batch.values[step] = value.reshape(-1)
+                    if not self.is_torch_data_interface:
+                        batch.terminations[step] = torch.tensor(terminated, dtype=torch.float32).to(self.device)
+                    else:
+                        batch.terminations[step] = terminated
+                    batch.log_probs[step] = log_prob
+                    state = next_state
+                    global_step += self.nr_envs
+                nr_episodes += dones_this_rollout
+                
+                acting_end_time = time.time()
+                time_metrics["time/acting_time"] = acting_end_time - start_time
 
 
-            # Calculating advantages and returns
-            with torch.no_grad():
+                # Calculating advantages and returns
                 next_values = self.critic.get_value(batch.next_states).squeeze(-1)
-            batch.advantages, batch.returns = calculate_gae_advantages_and_returns(batch.rewards, batch.terminations, batch.values, next_values, self.gamma, self.gae_lambda)
+                batch.advantages, batch.returns = calculate_gae_advantages_and_returns(batch.rewards, batch.terminations, batch.values, next_values, self.gamma, self.gae_lambda)
 
-            calc_adv_return_end_time = time.time()
-            time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
+                calc_adv_return_end_time = time.time()
+                time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
 
 
             # Optimizing
@@ -274,28 +291,32 @@ class PPO:
             # Evaluating
             evaluation_metrics = {}
             if global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1:
-                self.set_eval_mode()
-                state, _ = self.env.reset()
-                eval_nr_episodes = 0
-                evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
-                while True:
-                    with torch.no_grad():
-                        processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                    state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
-                    done = terminated | truncated
-                    for i, single_done in enumerate(done):
-                        if single_done:
-                            eval_nr_episodes += 1
-                            evaluation_metrics["eval/episode_return"].append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                            evaluation_metrics["eval/episode_length"].append(self.env.get_final_info_value_at_index(info, "episode_length", i))
-                            if eval_nr_episodes == self.evaluation_episodes:
-                                break
-                    if eval_nr_episodes == self.evaluation_episodes:
-                        break
-                evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
-                state, _ = self.env.reset()
-                state = torch.tensor(state, dtype=torch.float32).to(self.device)
-                self.set_train_mode()
+                with torch.inference_mode():
+                    self.set_eval_mode()
+                    state, _ = self.env.reset()
+                    eval_nr_episodes = 0
+                    evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
+                    while True:
+                        if not self.is_torch_data_interface:
+                            state = torch.tensor(state, dtype=torch.float32).to(self.device)
+                        processed_action = self.policy.get_deterministic_action(state)
+                        if not self.is_torch_data_interface:
+                            processed_action = processed_action.cpu().numpy()
+                        state, reward, terminated, truncated, info = self.env.step(processed_action)
+                        done = terminated | truncated
+                        for i, single_done in enumerate(done):
+                            if single_done:
+                                eval_nr_episodes += 1
+                                evaluation_metrics["eval/episode_return"].append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                                evaluation_metrics["eval/episode_length"].append(self.env.get_final_info_value_at_index(info, "episode_length", i))
+                                if eval_nr_episodes == self.evaluation_episodes:
+                                    break
+                        if eval_nr_episodes == self.evaluation_episodes:
+                            break
+                    evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
+                    state, _ = self.env.reset()
+                    state = torch.tensor(state, dtype=torch.float32).to(self.device)
+                    self.set_train_mode()
             
             evaluating_end_time = time.time()
             time_metrics["time/evaluating_time"] = evaluating_end_time - optimizing_end_time
@@ -393,18 +414,22 @@ class PPO:
 
 
     def test(self, episodes):
-        self.set_eval_mode()
-        for i in range(episodes):
-            done = False
-            episode_return = 0
-            state, _ = self.env.reset()
-            while not done:
-                with torch.no_grad():
-                    processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
-                done = terminated | truncated
-                episode_return += reward
-            rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
+        with torch.inference_mode():
+            self.set_eval_mode()
+            for i in range(episodes):
+                done = False
+                episode_return = 0
+                state, _ = self.env.reset()
+                while not done:
+                    if not self.is_torch_data_interface:
+                        state = torch.tensor(state, dtype=torch.float32).to(self.device)
+                    processed_action = self.policy.get_deterministic_action(state)
+                    if not self.is_torch_data_interface:
+                        processed_action = processed_action.cpu().numpy()
+                    state, reward, terminated, truncated, info = self.env.step(processed_action)
+                    done = terminated | truncated
+                    episode_return += reward
+                rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
 
 
     def set_train_mode(self):

@@ -18,8 +18,8 @@ A framework for Reinforcement Learning research.
 - ⚒️ **Known DL libraries**: Implementations in PyTorch and mainly JAX (Flax)
 - ⚡ **Maximum speed**: Just-In-Time (JIT) compilation and parallel environments
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
-- ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo or pure socket communication
-- 🚀​ **GPU environments**: MuJoCo XLA (MJX) supports running 4000 parallel environments on a GPU
+- ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo, Isaac Lab or pure socket communication
+- 🚀​ **GPU environments**: MuJoCo XLA (MJX) and Isaac Lab can run thousands of parallel environments
 - 📈 **Experiments**: Checkpoints, Evaluation, Console log, Tensorboard, Weights & Biases, SLURM, Docker
 
 
@@ -40,6 +40,7 @@ A framework for Reinforcement Learning research.
 - [Deep Q-Network with Histogram Loss using Gaussians (DQN HL-Gauss)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dqn_hl_gauss) in Flax
 - [Categorical Deep Q-Network (C51)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/c51) in Flax
 - [Double Deep Q-Network (DDQN)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ddqn) in Flax
+- [Parallelized Q-Network (PQN)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/pqn) in Flax
 
 
 ### Usable Environments
@@ -55,6 +56,8 @@ A framework for Reinforcement Learning research.
 - [Custom MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco)
     - Example of a custom MuJoCo environment
     - Example of a custom MuJoCo XLA (MJX) environment
+- [Custom Isaac Lab](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_isaac_lab)
+    - Example of a custom Isaac Lab environment
 - [Custom Interface](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_interface)
     - Prototype of a custom environment interface with socket communication
 
@@ -73,10 +76,11 @@ git clone git@github.com:nico-bohlinger/RL-X.git
 cd RL-X
 pip install -e .[all] --config-settings editable_mode=compat
 pip uninstall $(pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
-pip install "torch>=2.6.0" --index-url https://download.pytorch.org/whl/cu118 --upgrade
+pip install "torch>=2.7.0" --index-url https://download.pytorch.org/whl/cu118 --upgrade
 pip install -U "jax[cuda12]"
 ```
 For other configurations, see the [detailed installation guide](https://nico-bohlinger.github.io/RL-X/#detailed-installation-guide) in the documentation.
+As Isaac Lab needs to be installed separately, instructions can also be found there.
 
 
 ### Example

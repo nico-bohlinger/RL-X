@@ -97,7 +97,7 @@ class DQN:
             random_action = jax.random.randint(subkey1, (self.nr_envs,), 0, self.nr_available_actions)
             greedy_action = jnp.argmax(self.critic.apply(critic_state.params, state), axis=-1)
             action = jnp.where(
-                jax.random.uniform(subkey2) < epsilon,
+                jax.random.uniform(subkey2, (self.nr_envs,)) < epsilon,
                 random_action,
                 greedy_action,
             )

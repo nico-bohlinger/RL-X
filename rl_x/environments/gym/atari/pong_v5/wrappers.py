@@ -26,7 +26,7 @@ class RLXInfo(gym.Wrapper):
     
 
     def get_final_observation_at_index(self, info, index):
-        return info["final_observation"][index]
+        return info["final_observation"][index]._frames
     
 
     def get_final_info_value_at_index(self, info, key, index):

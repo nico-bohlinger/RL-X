@@ -7,6 +7,6 @@ from rl_x.algorithms.deep_learning_framework_type import DeepLearningFrameworkTy
 class GeneralProperties:
     observation_space_types = [ObservationSpaceType.FLAT_VALUES, ObservationSpaceType.IMAGES]
     action_space_types = [ActionSpaceType.CONTINUOUS, ActionSpaceType.DISCRETE]
-    data_interface_types = [DataInterfaceType.NUMPY]
+    data_interface_types = [DataInterfaceType.NUMPY, DataInterfaceType.TORCH]
 
     deep_learning_framework_type = DeepLearningFrameworkType.TORCH

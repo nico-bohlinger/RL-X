@@ -112,7 +112,7 @@ class DQN_HL_Gauss:
             greedy_action = jnp.argmax(q, axis=-1)
 
             action = jnp.where(
-                jax.random.uniform(subkey2) < epsilon,
+                jax.random.uniform(subkey2, (self.nr_envs,)) < epsilon,
                 random_action,
                 greedy_action,
             )
