@@ -30,6 +30,13 @@ class RLXInfo(gym.Wrapper):
 
     def get_final_info_value_at_index(self, info, key, index):
         return info["final_info"][index][key]
+    
+
+    def __getattr__(self, name):
+        if name == "policy_observation_indices" or name == "critic_observation_indices":
+            return self.call(name)[0]
+        
+        return super().__getattr__(name)
 
 
 class RecordEpisodeStatistics(gym.Wrapper):

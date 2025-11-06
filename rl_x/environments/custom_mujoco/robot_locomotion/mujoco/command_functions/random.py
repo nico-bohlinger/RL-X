@@ -26,3 +26,7 @@ class RandomCommands:
         goal_velocities = np.where(self.env.np_rng.uniform(size=(3,)) < self.single_zero_chance, 0.0, goal_velocities)
 
         self.env.internal_state["goal_velocities"] = goal_velocities
+
+        actuator_joint_keep_nominal = np.where(np.all(goal_velocities == 0.0), np.ones(self.env.nr_actuator_joints, dtype=bool), self.default_actuator_joint_keep_nominal)
+
+        self.env.internal_state["actuator_joint_keep_nominal"] = actuator_joint_keep_nominal

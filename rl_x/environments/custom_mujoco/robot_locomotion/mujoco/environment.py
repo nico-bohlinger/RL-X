@@ -7,6 +7,7 @@ import pygame
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.viewer import MujocoViewer
 from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.control_functions.handler import get_control_function
 from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.command_functions.handler import get_command_function
 from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.domain_randomization.initial_state_functions.handler import get_initial_state_function
@@ -199,6 +200,8 @@ class LocomotionEnv(gym.Env):
         self.reward_function.reward_and_info(np.zeros(self.nr_actuator_joints))
 
         if self.should_render:
+            self.viewer = MujocoViewer(self.initial_mj_model, self.dt)
+
             self.dir_arrow_id = mujoco.mj_name2id(self.initial_mj_model, mujoco.mjtObj.mjOBJ_SITE, "dir_arrow")
             self.uses_hfield = self.initial_mj_model.hfield_data.shape[0] != 0
             self.light_xdir = self.c_data.light_xdir
@@ -215,7 +218,8 @@ class LocomotionEnv(gym.Env):
 
     
     def render(self):
-        # TODO: Render hfield changed
+        if self.uses_hfield and self.internal_state["info_episode_store"]["episode_step"] == 1:
+            mujoco.mjr_uploadHField(self.internal_state["mj_model"], self.viewer.context, 0)
         
         if self.runner_mode == "test":
             explicit_velocity_commands = False
@@ -261,6 +265,8 @@ class LocomotionEnv(gym.Env):
             arrow_offset = -(0.1 - (magnitude * 0.1))
             self.internal_state["data"].site("dir_arrow").xpos += [arrow_offset * np.sin(np.pi/2 + desired_angle), -arrow_offset * np.cos(np.pi/2 + desired_angle), 0]
             self.internal_state["data"].site("dir_arrow_ball").xpos = self.internal_state["data"].body("dir_arrow").xpos + [-0.1 * np.sin(np.pi/2 + desired_angle), 0.1 * np.cos(np.pi/2 + desired_angle), 0]
+        
+        self.viewer.render(self.internal_state["data"])
 
 
     def reset(self, seed=None):
@@ -348,6 +354,9 @@ class LocomotionEnv(gym.Env):
         self.internal_state["info"]["rollout/episode_return"] = np.where(done, self.internal_state["info_episode_store"]["episode_return"], self.internal_state["info"]["rollout/episode_return"])
         self.internal_state["info"]["rollout/episode_length"] = np.where(done, self.internal_state["info_episode_store"]["episode_step"], self.internal_state["info"]["rollout/episode_length"])
         self.internal_state["info"]["env_curriculum/coefficient"] = self.internal_state["env_curriculum_coeff"]
+
+        if self.should_render:
+            self.render()
 
         return next_observation, reward, terminated, truncated, self.internal_state["info"]
 

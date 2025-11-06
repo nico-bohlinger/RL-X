@@ -13,6 +13,7 @@ import jax.numpy as jnp
 
 from rl_x.environments.custom_mujoco.robot_locomotion.mjx.state import State
 from rl_x.environments.custom_mujoco.robot_locomotion.mjx.box_space import BoxSpace
+from rl_x.environments.custom_mujoco.robot_locomotion.mjx.viewer import MujocoViewer
 from rl_x.environments.custom_mujoco.robot_locomotion.mjx.control_functions.handler import get_control_function
 from rl_x.environments.custom_mujoco.robot_locomotion.mjx.command_functions.handler import get_command_function
 from rl_x.environments.custom_mujoco.robot_locomotion.mjx.domain_randomization.initial_state_functions.handler import get_initial_state_function
@@ -45,6 +46,7 @@ class LocomotionEnv:
 
         # Remove all unnecessary assets, materials, meshes and geoms during training
         # This removes all geoms besides feet and floor, if the contacts for other geoms should be enabled this needs to be changed
+        # Also if you want to render the training, the lines can be commented out
         for texture in xml_handle.asset.find_all("texture"):
             texture.remove()
         for material in xml_handle.asset.find_all("material"):
@@ -174,6 +176,8 @@ class LocomotionEnv:
         self.observation_noise_function.init_attributes()
 
         if self.should_render:
+            self.viewer = MujocoViewer(self.initial_mj_model, self.dt)
+
             self.dir_arrow_id = mujoco.mj_name2id(self.initial_mj_model, mujoco.mjtObj.mjOBJ_SITE, "dir_arrow")
             self.uses_hfield = self.initial_mj_model.hfield_data.shape[0] != 0
             self.light_xdir = self.c_data.light_xdir

@@ -3,8 +3,8 @@ from pathlib import Path
 import gymnasium as gym
 
 from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.environment import LocomotionEnv
-from rl_x.environments.custom_mujoco.ant.mujoco.wrappers import RLXInfo, RecordEpisodeStatistics
-from rl_x.environments.custom_mujoco.ant.mujoco.async_vectorized_wrapper import AsyncVectorEnvWithSkipping
+from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.wrappers import RLXInfo, RecordEpisodeStatistics
+from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.async_vectorized_wrapper import AsyncVectorEnvWithSkipping
 from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.general_properties import GeneralProperties
 
 
