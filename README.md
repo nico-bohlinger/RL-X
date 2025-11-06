@@ -48,6 +48,7 @@ A framework for Reinforcement Learning research.
     - MuJoCo
     - Atari
     - Classic control
+    - DeepMind Control Suite
 - [EnvPool](https://github.com/sail-sg/envpool)
     - MuJoCo
     - Atari
