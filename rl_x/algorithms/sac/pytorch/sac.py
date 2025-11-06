@@ -366,7 +366,7 @@ class SAC:
         checkpoint = torch.load(config.runner.load_model)
         loaded_algorithm_config = checkpoint["config_algorithm"]
         for key, value in loaded_algorithm_config.items():
-            if f"algorithm.{key}" not in explicitly_set_algorithm_params:
+            if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
                 config.algorithm[key] = value
         model = SAC(config, env, run_path, writer)
         model.policy.load_state_dict(checkpoint["policy_state_dict"])
