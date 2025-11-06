@@ -12,7 +12,7 @@ def get_critic(config, env):
     critic_observation_indices = getattr(env, "critic_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return Critic(critic_observation_indices)
+        return Critic(config.algorithm.nr_hidden_units, critic_observation_indices)
 
 
 class Critic(nn.Module):

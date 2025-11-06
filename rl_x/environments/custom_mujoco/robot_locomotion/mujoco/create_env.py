@@ -12,7 +12,7 @@ def create_env(config):
     robot_config = importlib.import_module(f"rl_x.environments.custom_mujoco.robot_locomotion.robots.{config.environment.train_robot}.robot_config").robot_config
     robot_config["directory_path"] = Path(__file__).parent.parent / "robots" / config.environment.train_robot
     
-    def make_env(robot_config, seed):
+    def make_env(seed):
         def thunk():
             env = LocomotionEnv(
                 robot_config=robot_config,

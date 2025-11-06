@@ -357,9 +357,9 @@ class LocomotionEnv(gym.Env):
             self.internal_state["data"].qpos[self.actuator_joint_mask_qpos],
             self.internal_state["data"].qvel[self.actuator_joint_mask_qvel],
             action,
-            self.terrain_function.check_feet_floor_contact().reshape(self.nr_feet, 1),
-            self.internal_state["feet_time_on_ground"].reshape(self.nr_feet, 1),
-            self.internal_state["feet_time_in_air"].reshape(self.nr_feet, 1),
+            self.terrain_function.check_feet_floor_contact(),
+            self.internal_state["feet_time_on_ground"],
+            self.internal_state["feet_time_in_air"],
             self.internal_state["data"].sensordata[self.imu_linear_velocity_sensor_adr:self.imu_linear_velocity_sensor_adr + self.imu_linear_velocity_sensor_dim],
             self.internal_state["data"].sensordata[self.imu_angular_velocity_sensor_adr:self.imu_angular_velocity_sensor_adr + self.imu_angular_velocity_sensor_dim],
             self.internal_state["goal_velocities"],
@@ -414,29 +414,29 @@ class LocomotionEnv(gym.Env):
     def get_observation_space(self):
         current_observation_idx = 0
 
-        self.joint_positions_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_actuator_joints)])
+        self.joint_positions_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_actuator_joints)], dtype=int)
         current_observation_idx += self.nr_actuator_joints
-        self.joint_velocities_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_actuator_joints)])
+        self.joint_velocities_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_actuator_joints)], dtype=int)
         current_observation_idx += self.nr_actuator_joints
-        self.joint_previous_actions_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_actuator_joints)])
+        self.joint_previous_actions_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_actuator_joints)], dtype=int)
         current_observation_idx += self.nr_actuator_joints
-        self.feet_ground_contact_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_feet)])
+        self.feet_ground_contact_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_feet)], dtype=int)
         current_observation_idx += self.nr_feet
-        self.feet_time_on_ground_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_feet)])
+        self.feet_time_on_ground_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_feet)], dtype=int)
         current_observation_idx += self.nr_feet
-        self.feet_time_in_air_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_feet)])
+        self.feet_time_in_air_obs_idx = np.array([current_observation_idx + i for i in range(self.nr_feet)], dtype=int)
         current_observation_idx += self.nr_feet
-        self.imu_linear_vel_obs_idx = np.array([current_observation_idx + i for i in range(self.imu_linear_velocity_sensor_dim)])
+        self.imu_linear_vel_obs_idx = np.array([current_observation_idx + i for i in range(self.imu_linear_velocity_sensor_dim)], dtype=int)
         current_observation_idx += self.imu_linear_velocity_sensor_dim
-        self.imu_angular_vel_obs_idx = np.array([current_observation_idx + i for i in range(self.imu_angular_velocity_sensor_dim)])
+        self.imu_angular_vel_obs_idx = np.array([current_observation_idx + i for i in range(self.imu_angular_velocity_sensor_dim)], dtype=int)
         current_observation_idx += self.imu_angular_velocity_sensor_dim
-        self.goal_velocities_obs_idx = np.array([current_observation_idx + i for i in range(3)])
+        self.goal_velocities_obs_idx = np.array([current_observation_idx + i for i in range(3)], dtype=int)
         current_observation_idx += 3
-        self.gravity_vector_obs_idx = np.array([current_observation_idx + i for i in range(3)])
+        self.gravity_vector_obs_idx = np.array([current_observation_idx + i for i in range(3)], dtype=int)
         current_observation_idx += 3
-        self.policy_exteroception_obs_idx = np.array([current_observation_idx + i for i in range(self.policy_exteroceptive_observation_function.nr_exteroceptive_observations)])
+        self.policy_exteroception_obs_idx = np.array([current_observation_idx + i for i in range(self.policy_exteroceptive_observation_function.nr_exteroceptive_observations)], dtype=int)
         current_observation_idx += self.policy_exteroceptive_observation_function.nr_exteroceptive_observations
-        self.critic_exteroception_obs_idx = np.array([current_observation_idx + i for i in range(self.critic_exteroceptive_observation_function.nr_exteroceptive_observations)])
+        self.critic_exteroception_obs_idx = np.array([current_observation_idx + i for i in range(self.critic_exteroceptive_observation_function.nr_exteroceptive_observations)], dtype=int)
         current_observation_idx += self.critic_exteroceptive_observation_function.nr_exteroceptive_observations
 
         self.policy_observation_indices = np.concatenate([
