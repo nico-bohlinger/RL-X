@@ -18,8 +18,9 @@ A framework for Reinforcement Learning research.
 - ⚒️ **Known DL libraries**: Implementations in PyTorch and mainly JAX (Flax)
 - ⚡ **Maximum speed**: Just-In-Time (JIT) compilation and parallel environments
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
-- ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo, Isaac Lab or pure socket communication
+- ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo, Isaac or pure socket communication
 - 🚀​ **GPU environments**: MuJoCo XLA (MJX) and Isaac Lab can run thousands of parallel environments
+- 🤖​ **Robot learning**: Training and deployment code for a Unitree Go2 (quadruped) and G1 (humanoid) robot
 - 📈 **Experiments**: Checkpoints, Evaluation, Console log, Tensorboard, Weights & Biases, SLURM, Docker
 
 
@@ -55,6 +56,8 @@ A framework for Reinforcement Learning research.
 - [Custom MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco)
     - Example of a custom MuJoCo environment
     - Example of a custom MuJoCo XLA (MJX) environment
+- [Custom Robot Learning](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion)
+    - Example of a custom MuJoCo and MJX environment for quadruped and humanoid locomotion learning and real robot deployment
 - [Custom Isaac Lab](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_isaac_lab)
     - Example of a custom Isaac Lab environment
 - [Custom Interface](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_interface)

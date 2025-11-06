@@ -240,16 +240,6 @@ class LocomotionEnv:
                 state.internal_state["goal_velocities"] = jnp.tile(goal_velocities, (self.nr_envs, 1))
                 actuator_joint_keep_nominal = jnp.where(jnp.all(goal_velocities == 0.0), jnp.ones(self.nr_actuator_joints, dtype=bool), self.command_function.default_actuator_joint_keep_nominal)
                 state.internal_state["actuator_joint_keep_nominal"] = jnp.tile(actuator_joint_keep_nominal, (self.nr_envs, 1))
-            explicit_actuator_keep_nominal_commands = False
-            if Path(f"commands.txt").is_file():
-                with open(f"commands.txt", "r") as f:
-                    commands = f.readlines()
-                if len(commands) == self.nr_actuator_joints:
-                    actuator_keep_nominal_commands = [bool(int(command.replace("\n",""))) for command in commands]
-                    actuator_keep_nominal_commands = jnp.array(actuator_keep_nominal_commands)
-                    explicit_actuator_keep_nominal_commands = True
-            if explicit_actuator_keep_nominal_commands:
-                state.internal_state["actuator_joint_keep_nominal"] = jnp.tile(actuator_keep_nominal_commands, (self.nr_envs, 1))
 
         if self.add_goal_arrow:
             goal_velocities = state.internal_state["goal_velocities"][env_id]

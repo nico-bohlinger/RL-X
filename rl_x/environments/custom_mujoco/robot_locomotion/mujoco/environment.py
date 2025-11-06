@@ -229,8 +229,8 @@ class LocomotionEnv(gym.Env):
                 goal_y_velocity = -self.joystick.get_axis(0)
                 goal_yaw_velocity = -self.joystick.get_axis(3)
                 explicit_velocity_commands = True
-            elif Path("commands/trunk_velocity.txt").is_file():
-                with open("commands/trunk_velocity.txt", "r") as f:
+            elif Path("commands.txt").is_file():
+                with open("commands.txt", "r") as f:
                     commands = f.readlines()
                 if len(commands) == 3:
                     goal_x_velocity = float(commands[0])
@@ -242,16 +242,6 @@ class LocomotionEnv(gym.Env):
                 goal_velocities = np.where(np.abs(goal_velocities) < (self.command_function.zero_clip_threshold_percentage * self.internal_state["max_command_velocity"]), 0.0, goal_velocities)
                 self.internal_state["goal_velocities"] = np.clip(goal_velocities, -self.internal_state["max_command_velocity"], self.internal_state["max_command_velocity"])
                 actuator_keep_nominal_commands = np.where(np.all(goal_velocities == 0.0), np.ones(self.nr_actuator_joints, dtype=bool), self.command_function.default_actuator_joint_keep_nominal)
-                self.internal_state["actuator_joint_keep_nominal"] = actuator_keep_nominal_commands
-            explicit_actuator_keep_nominal_commands = False
-            if Path(f"commands.txt").is_file():
-                with open(f"commands.txt", "r") as f:
-                    commands = f.readlines()
-                if len(commands) == self.nr_actuator_joints:
-                    actuator_keep_nominal_commands = [bool(int(command.replace("\n",""))) for command in commands]
-                    actuator_keep_nominal_commands = np.array(actuator_keep_nominal_commands)
-                    explicit_actuator_keep_nominal_commands = True
-            if explicit_actuator_keep_nominal_commands:
                 self.internal_state["actuator_joint_keep_nominal"] = actuator_keep_nominal_commands
 
         if self.add_goal_arrow:
