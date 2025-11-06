@@ -11,9 +11,10 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 def get_policy(config, env):
     action_space_type = env.general_properties.action_space_type
     observation_space_type = env.general_properties.observation_space_type
+    policy_observation_indices = getattr(env, "policy_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return (Policy(env.single_action_space.shape, config.algorithm.log_std_min, config.algorithm.log_std_max),
+        return (Policy(env.single_action_space.shape, config.algorithm.log_std_min, config.algorithm.log_std_max, policy_observation_indices),
                 get_processed_action_function(jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high)))
 
 
@@ -22,9 +23,11 @@ class Policy(nn.Module):
     as_shape: Sequence[int]
     log_std_min: float
     log_std_max: float
+    policy_observation_indices: Sequence[int]
 
     @nn.compact
     def __call__(self, x):
+        x = x[..., self.policy_observation_indices]
         x = nn.Dense(512)(x)
         x = nn.LayerNorm()(x)
         x = nn.elu(x)

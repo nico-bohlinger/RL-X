@@ -439,7 +439,7 @@ class LocomotionEnv(gym.Env):
         self.critic_exteroception_obs_idx = np.array([current_observation_idx + i for i in range(self.critic_exteroceptive_observation_function.nr_exteroceptive_observations)])
         current_observation_idx += self.critic_exteroceptive_observation_function.nr_exteroceptive_observations
 
-        self.policy_obs_idx = np.concatenate([
+        self.policy_observation_indices = np.concatenate([
             self.joint_positions_obs_idx,
             self.joint_velocities_obs_idx,
             self.joint_previous_actions_obs_idx,
@@ -449,7 +449,7 @@ class LocomotionEnv(gym.Env):
             self.policy_exteroception_obs_idx,
         ], dtype=int)
 
-        self.critic_obs_idx = np.concatenate([
+        self.critic_observation_indices = np.concatenate([
             self.joint_positions_obs_idx,
             self.joint_velocities_obs_idx,
             self.joint_previous_actions_obs_idx,

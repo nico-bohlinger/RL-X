@@ -10,23 +10,25 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 def get_policy(config, env, device):
     action_space_type = env.general_properties.action_space_type
     observation_space_type = env.general_properties.observation_space_type
+    policy_observation_indices = getattr(env, "policy_observation_indices", np.arange(env.single_observation_space.shape[0]))
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return Policy(env, config.algorithm.log_std_min, config.algorithm.log_std_max, config.algorithm.nr_hidden_units, device)
+        return Policy(env, config.algorithm.log_std_min, config.algorithm.log_std_max, config.algorithm.nr_hidden_units, device, policy_observation_indices)
     
 
 class Policy(nn.Module):
-    def __init__(self, env, log_std_min, log_std_max, nr_hidden_units, device):
+    def __init__(self, env, log_std_min, log_std_max, nr_hidden_units, device, policy_observation_indices):
         super().__init__()
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
+        self.policy_observation_indices = policy_observation_indices
         self.env_as_low = torch.tensor(env.single_action_space.low, dtype=torch.float32).to(device)
         self.env_as_high = torch.tensor(env.single_action_space.high, dtype=torch.float32).to(device)
-        single_os_shape = env.single_observation_space.shape
         single_as_shape = env.single_action_space.shape
+        obs_input_dim = len(policy_observation_indices)
 
         self.torso = nn.Sequential(
-            nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units),
+            nn.Linear(obs_input_dim, nr_hidden_units),
             nn.ReLU(),
             nn.Linear(nr_hidden_units, nr_hidden_units),
             nn.ReLU(),
@@ -37,6 +39,7 @@ class Policy(nn.Module):
 
     @torch.compile(mode="default")
     def get_action(self, x):
+        x = x[..., self.policy_observation_indices]
         latent = self.torso(x)
         mean = self.mean(latent)
         log_std = self.log_std(latent)
@@ -60,6 +63,7 @@ class Policy(nn.Module):
     @torch.compile(mode="default")
     def get_deterministic_action(self, x):
         with torch.no_grad():
+            x = x[..., self.policy_observation_indices]
             latent = self.torso(x)
             mean = self.mean(latent)
             action_tanh = torch.tanh(mean)
