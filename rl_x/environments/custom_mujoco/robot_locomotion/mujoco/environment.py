@@ -381,7 +381,7 @@ class LocomotionEnv(gym.Env):
         self.observation_noise_function.modify_observation(observation)
 
         # Normalize and clip
-        observation[self.joint_positions_obs_idx] /= 3.14
+        observation[self.joint_positions_obs_idx] = (observation[self.joint_positions_obs_idx] - self.internal_state["actuator_joint_nominal_positions"]) / 3.14
         observation[self.joint_velocities_obs_idx] /= 100.0
         observation[self.joint_previous_actions_obs_idx] /= 10.0
         observation[self.feet_ground_contact_obs_idx] = (observation[self.feet_ground_contact_obs_idx] / 0.5) - 1.0

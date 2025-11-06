@@ -475,7 +475,7 @@ class LocomotionEnv:
         observation = self.observation_noise_function.modify_observation(internal_state, observation, key)
 
         # Normalize and clip
-        observation = observation.at[self.joint_positions_obs_idx].set(observation[self.joint_positions_obs_idx] / 3.14)
+        observation = observation.at[self.joint_positions_obs_idx].set((observation[self.joint_positions_obs_idx] - internal_state["actuator_joint_nominal_positions"]) / 3.14)
         observation = observation.at[self.joint_velocities_obs_idx].set(observation[self.joint_velocities_obs_idx] / 100.0)
         observation = observation.at[self.joint_previous_actions_obs_idx].set(observation[self.joint_previous_actions_obs_idx] / 10.0)
         observation = observation.at[self.feet_ground_contact_obs_idx].set((observation[self.feet_ground_contact_obs_idx] / 0.5) - 1.0)
