@@ -125,6 +125,13 @@ pip install numpy==1.26.0
 ```
 
 
+### Optional: ManiSkill
+It looks like ManiSkill doesn't work with the newest numpy version. Therefore, it might be necessary to downgrade numpy when using ManiSkill environments:
+```
+pip install numpy<2
+```
+
+
 ## Google Colab
 To run experiments in Google Colab take a look ```experiments/colab_experiment.ipynb``` or directly open it here:  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nico-bohlinger/RL-X/blob/master/experiments/colab_experiment.ipynb) 
 

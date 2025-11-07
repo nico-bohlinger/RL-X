@@ -86,6 +86,7 @@ pip install -U "jax[cuda12]"
 ```
 For other configurations, see the [detailed installation guide](https://nico-bohlinger.github.io/RL-X/#detailed-installation-guide) in the documentation.
 As Isaac Lab needs to be installed separately, instructions can also be found there.
+Similarly, ManiSkill might need additional steps, like downgrading numpy.
 
 
 ### Example
