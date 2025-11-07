@@ -18,7 +18,7 @@ A framework for Reinforcement Learning research.
 - ⚒️ **Known DL libraries**: Implementations in PyTorch and mainly JAX
 - ⚡ **Maximum speed**: Just-In-Time (JIT) compilation and parallel environments
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
-- ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo, Isaac or pure socket communication
+- ⛰️​ **Custom environments**: Examples for MuJoCo, Isaac Lab, ManiSkill or pure socket communication
 - 🚀​ **GPU environments**: MJX, Isaac Lab and ManiSkill can run thousands of parallel environments
 - 🤖​ **Robot learning**: Training and deployment for the Unitree Go2 (quadruped) and G1 (humanoid) robots
 - 📈 **Experiments**: Checkpoints, Evaluation, Console log, Tensorboard, Weights & Biases, SLURM, Docker
