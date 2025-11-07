@@ -18,7 +18,7 @@ def create_env(config):
                 task_name=task_name,
                 task_kwargs={"random": config.environment.seed},
             )
-            env = DmControlCompatibilityV0(env, render_mode="rgb_array")
+            env = DmControlCompatibilityV0(env, render_mode="human" if config.environment.render else None)
             if isinstance(env.observation_space, Dict):
                 env = FlattenObservation(env)
             env = RecordEpisodeStatistics(env)
