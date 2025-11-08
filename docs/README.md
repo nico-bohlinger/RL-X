@@ -104,12 +104,17 @@ Make sure to install the compatible version of torch alongside it:
 ```
 pip install -U torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 ```
-Clone Isaac Lab into any directory:
+Verify the Isaac Sim installation by running:
+```
+isaacsim
+```
+Clone Isaac Lab into any directory (outside of the RL-X repository):
 ```
 git clone git@github.com:isaac-sim/IsaacLab.git
 ```
 Install the Isaac Lab package:
 ```
+cd IsaacLab/
 ./isaaclab.sh --install
 ```
 Isaac Sim / Lab requires a newer version of gymnasium and an older version of numpy. The gymnasium version should be downgraded after installing Isaac Sim / Lab back to the RL-X compatible version:
@@ -123,12 +128,16 @@ Make sure numpy is at the correct version:
 ```
 pip install numpy==1.26.0
 ```
+Verify the Isaac Lab installation works by running:
+```
+python scripts/tutorials/00_sim/create_empty.py
+```
 
 
 ### Optional: ManiSkill
 It looks like ManiSkill doesn't work with the newest numpy version. Therefore, it might be necessary to downgrade numpy when using ManiSkill environments:
 ```
-pip install numpy<2
+pip install "numpy<2"
 ```
 
 

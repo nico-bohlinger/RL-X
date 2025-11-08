@@ -10,5 +10,6 @@ def get_config(environment_name):
     config.nr_envs = 1
     config.async_skip_percentage = 0.0
     config.render = False
+    config.device = "gpu"
 
     return config

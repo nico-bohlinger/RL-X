@@ -9,4 +9,4 @@ class GeneralProperties:
     action_space_type = ActionSpaceType.CONTINUOUS
     data_interface_type = DataInterfaceType.TORCH
 
-    simulation_type = SimulationType.DEFAULT
+    simulation_type = SimulationType.MANISKILL

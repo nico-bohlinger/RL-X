@@ -13,7 +13,7 @@ def get_config(environment_name):
     config.livestream = -1
     config.enable_cameras = False
     config.xr = False
-    config.device = "cuda:0"
+    config.device = "gpu"
     config.cpu = False
     config.verbose = False
     config.info = False

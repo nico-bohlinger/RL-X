@@ -65,7 +65,7 @@ class Runner:
             app_launcher_args.livestream = get_env_config_value("livestream")
             app_launcher_args.enable_cameras = get_env_config_value("enable_cameras")
             app_launcher_args.xr = get_env_config_value("xr")
-            app_launcher_args.device = get_env_config_value("device")
+            app_launcher_args.device = "cuda:0" if get_env_config_value("device") == "gpu" else get_env_config_value("device")
             app_launcher_args.cpu = get_env_config_value("cpu")
             app_launcher_args.verbose = get_env_config_value("verbose")
             app_launcher_args.info = get_env_config_value("info")
@@ -93,6 +93,7 @@ class Runner:
         algorithm_uses_torch = DeepLearningFrameworkType.TORCH == algorithm_general_properties.deep_learning_framework_type
         algorithm_uses_jax = DeepLearningFrameworkType.JAX == algorithm_general_properties.deep_learning_framework_type
         environment_uses_jax = SimulationType.JAX_BASED == environment_general_properties.simulation_type
+        environment_uses_torch = SimulationType.ISAAC_LAB == environment_general_properties.simulation_type or SimulationType.MANISKILL == environment_general_properties.simulation_type
 
         import gymnasium as gym
         # Silences the box bound precision warning for cartpole
@@ -105,6 +106,20 @@ class Runner:
             # Silence UserWarning https://github.com/pytorch/pytorch/issues/109842
             import warnings
             warnings.filterwarnings("ignore", category=UserWarning, message=".*is deprecated, please use.*")
+            # Check device
+            if algorithm_uses_torch and environment_uses_torch:
+                alg_device = [arg for arg in sys.argv if arg.startswith("--algorithm.device=")]
+                if alg_device:
+                    alg_device = alg_device[0].split("=")[1]
+                else:
+                    alg_device = getattr(get_algorithm_config(algorithm_name), "device", None)
+                env_device = [arg for arg in sys.argv if arg.startswith("--environment.device=")]
+                if env_device:
+                    env_device = env_device[0].split("=")[1]
+                else:
+                    env_device = getattr(get_environment_config(environment_name), "device", None)
+                if alg_device and env_device and alg_device != env_device:
+                    raise ValueError("Incompatible device types between algorithm and environment")
         elif algorithm_uses_jax or environment_uses_jax:
             # Guarantee enough memory for CUBLAS to initialize when using jax
             os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
