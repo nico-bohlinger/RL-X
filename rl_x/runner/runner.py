@@ -61,7 +61,10 @@ class Runner:
             app_launcher_args.disable_fabric = get_env_config_value("disable_fabric")
             app_launcher_args.num_envs = get_env_config_value("nr_envs")
             app_launcher_args.task = get_env_config_value("name")
-            app_launcher_args.headless = True if get_env_config_value("render").lower() == "false" else False
+            render = get_env_config_value("render")
+            if isinstance(render, str):
+                render = render.lower() == "true"
+            app_launcher_args.headless = not render
             app_launcher_args.livestream = get_env_config_value("livestream")
             app_launcher_args.enable_cameras = get_env_config_value("enable_cameras")
             app_launcher_args.xr = get_env_config_value("xr")
