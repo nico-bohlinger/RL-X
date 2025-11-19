@@ -55,6 +55,7 @@ class FastTD3:
         self.smoothing_epsilon = config.algorithm.smoothing_epsilon
         self.smoothing_clip_value = config.algorithm.smoothing_clip_value
         self.nr_critic_updates_per_step = config.algorithm.nr_critic_updates_per_step
+        self.clipped_double_q_learning = config.algorithm.clipped_double_q_learning
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
@@ -267,16 +268,22 @@ class FastTD3:
 
                             qf_next_target_value = jnp.sum(proj_dist * q_support, axis=1)  # shape (2,)
 
-                            qf_next_target_dist = jnp.where(
-                                qf_next_target_value[0] < qf_next_target_value[1],
-                                proj_dist[0],
-                                proj_dist[1]
-                            )  # shape (nr_atoms,)
+                            if self.clipped_double_q_learning:
+                                qf_next_target_dist = jnp.where(
+                                    qf_next_target_value[0] < qf_next_target_value[1],
+                                    proj_dist[0],
+                                    proj_dist[1]
+                                )  # shape (nr_atoms,)
+                                qf1_next_target_dist = qf_next_target_dist
+                                qf2_next_target_dist = qf_next_target_dist
+                            else:
+                                qf1_next_target_dist = proj_dist[0]
+                                qf2_next_target_dist = proj_dist[1]
 
                             current_q = self.critic.apply(critic_params, state, action)  # shape (2, nr_atoms)
                             
-                            q1_loss = -jnp.sum(qf_next_target_dist * jax.nn.log_softmax(current_q[0]), axis=-1)
-                            q2_loss = -jnp.sum(qf_next_target_dist * jax.nn.log_softmax(current_q[1]), axis=-1)
+                            q1_loss = -jnp.sum(qf1_next_target_dist * jax.nn.log_softmax(current_q[0]), axis=-1)
+                            q2_loss = -jnp.sum(qf2_next_target_dist * jax.nn.log_softmax(current_q[1]), axis=-1)
                             loss = q1_loss + q2_loss
 
                             # Create metrics
@@ -324,9 +331,12 @@ class FastTD3:
 
                             q_values = self.critic.apply(critic_params, state, action)
                             q_values = jnp.sum(jax.nn.softmax(q_values) * jnp.linspace(self.v_min, self.v_max, self.nr_atoms), axis=-1)
-                            min_q_value = jnp.min(q_values, axis=0)
+                            if self.clipped_double_q_learning:
+                                processed_q_value = jnp.min(q_values, axis=0)
+                            else:
+                                processed_q_value = jnp.mean(q_values, axis=0)
 
-                            loss = -jnp.mean(min_q_value)
+                            loss = -jnp.mean(processed_q_value)
 
                             metrics = {
                                 "loss/policy_loss": loss,
