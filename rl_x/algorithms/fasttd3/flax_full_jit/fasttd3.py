@@ -242,8 +242,9 @@ class FastTD3:
                             l = jnp.floor(b).astype(jnp.int32)
                             u = jnp.ceil(b).astype(jnp.int32)
 
-                            l_mask = (u > 0) & (l == u)
-                            u_mask = (l < self.nr_atoms - 1) & (l == u)
+                            is_int = (u == l)
+                            l_mask = is_int & (l > 0)
+                            u_mask = is_int & (l == 0)
 
                             l = jnp.where(l_mask, l - 1, l)
                             u = jnp.where(u_mask, u + 1, u)
@@ -313,7 +314,7 @@ class FastTD3:
 
                             critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
 
-                            critic_metrics["lr/learning_rate"] = policy_state.opt_state.hyperparams["learning_rate"]
+                            critic_metrics["lr/learning_rate"] = critic_state.opt_state.hyperparams["learning_rate"]
                             critic_metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
 
 
