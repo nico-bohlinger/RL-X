@@ -55,7 +55,7 @@ class FastTD3:
         self.smoothing_epsilon = config.algorithm.smoothing_epsilon
         self.smoothing_clip_value = config.algorithm.smoothing_clip_value
         self.nr_critic_updates_per_policy_update = config.algorithm.nr_critic_updates_per_policy_update
-        self.nr_update_rounds_per_step = config.algorithm.nr_update_rounds_per_step
+        self.nr_policy_updates_per_step = config.algorithm.nr_policy_updates_per_step
         self.clipped_double_q_learning = config.algorithm.clipped_double_q_learning
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.logging_frequency = config.algorithm.logging_frequency
@@ -66,6 +66,7 @@ class FastTD3:
         self.nr_eval_save_iterations = self.total_timesteps // self.evaluation_and_save_frequency
         self.nr_loggings_per_eval_save_iteration = self.evaluation_and_save_frequency // self.logging_frequency
         self.nr_updates_per_logging_iteration = self.logging_frequency // self.nr_envs
+        self.nr_critic_updates_per_step = self.nr_policy_updates_per_step * self.nr_critic_updates_per_policy_update
         self.os_shape = env.single_observation_space.shape
         self.as_shape = env.single_action_space.shape
         self.horizon = env.horizon
@@ -341,40 +342,50 @@ class FastTD3:
                         mean_vmapped_policy_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_policy_loss_fn(*a, **k))
                         grad_policy_loss_fn = jax.value_and_grad(mean_vmapped_policy_loss_fn, argnums=(0,), has_aux=True)
 
-                        ... 
+                        key, idx_key, noise_key = jax.random.split(key, 3)
+                        idx1 = jax.random.randint(idx_key, (self.nr_critic_updates_per_step, self.batch_size), 0, replay_buffer["size"])
+                        idx2 = jax.random.randint(idx_key, (self.nr_critic_updates_per_step, self.batch_size), 0, self.nr_envs)
+                        update_keys = jax.random.split(noise_key, self.nr_critic_updates_per_step * self.batch_size)
+                        update_keys = update_keys.reshape(self.nr_critic_updates_per_step, self.batch_size, -1)
 
-                        # for _ in range(self.nr_critic_updates_per_step):
-                        #     keys = jax.random.split(key, self.batch_size + 2)
-                        #     key, replay_buffer_key, update_keys = keys[0], keys[1], keys[2:]
+                        states_all = replay_buffer["states"][idx1, idx2]
+                        next_states_all = replay_buffer["next_states"][idx1, idx2]
+                        actions_all = replay_buffer["actions"][idx1, idx2]
+                        rewards_all = replay_buffer["rewards"][idx1, idx2]
+                        terminations_all = replay_buffer["terminations"][idx1, idx2]
 
-                        #     idx1 = jax.random.randint(replay_buffer_key, (self.batch_size,), 0, replay_buffer["size"])
-                        #     idx2 = jax.random.randint(replay_buffer_key, (self.batch_size,), 0, self.nr_envs)
-                        #     states = replay_buffer["states"][idx1, idx2]
-                        #     next_states = replay_buffer["next_states"][idx1, idx2]
-                        #     actions = replay_buffer["actions"][idx1, idx2]
-                        #     rewards = replay_buffer["rewards"][idx1, idx2]
-                        #     terminations = replay_buffer["terminations"][idx1, idx2]
+                        update_idx = 0
+                        for _ in range(self.nr_policy_updates_per_step):
+                            for _ in range(self.nr_critic_updates_per_policy_update):
+                                states = states_all[update_idx]
+                                next_states = next_states_all[update_idx]
+                                actions = actions_all[update_idx]
+                                rewards = rewards_all[update_idx]
+                                terminations = terminations_all[update_idx]
+                                keys_for_update = update_keys[update_idx]
 
-                        #     (loss, (critic_metrics)), (critic_gradients,) = grad_critic_loss_fn(
-                        #         policy_state.params, critic_state.params, critic_state.target_params,
-                        #         states, next_states, actions, rewards, terminations, update_keys)
+                                (loss, (critic_metrics)), (critic_gradients,) = grad_critic_loss_fn(
+                                    policy_state.params, critic_state.params, critic_state.target_params,
+                                    states, next_states, actions, rewards, terminations, keys_for_update)
 
-                        #     critic_state = critic_state.apply_gradients(grads=critic_gradients)
+                                critic_state = critic_state.apply_gradients(grads=critic_gradients)
 
-                        #     critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
+                                critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
 
-                        #     critic_metrics["lr/learning_rate"] = critic_state.opt_state.hyperparams["learning_rate"]
-                        #     critic_metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
-                        
-                        # (loss, (policy_metrics)), (policy_gradients,) = grad_policy_loss_fn(
-                        #     policy_state.params, critic_state.params, states)
-                        
-                        # policy_state = policy_state.apply_gradients(grads=policy_gradients)
+                                critic_metrics["lr/learning_rate"] = critic_state.opt_state.hyperparams["learning_rate"]
+                                critic_metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
 
-                        # policy_metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
+                                update_idx += 1
 
-                        # metrics = {**critic_metrics, **policy_metrics}
-                        
+                            states_for_policy = states
+
+                            (loss, (policy_metrics)), (policy_gradients,) = grad_policy_loss_fn(
+                                policy_state.params, critic_state.params, states_for_policy)
+
+                            policy_state = policy_state.apply_gradients(grads=policy_gradients)
+                            policy_metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
+
+                        metrics = {**critic_metrics, **policy_metrics}
 
                         return (policy_state, critic_state, replay_buffer, env_state, noise_scales, key), (env_state.info, metrics)
                         
@@ -390,8 +401,8 @@ class FastTD3:
                     nr_update_iteration = (eval_save_iteration_step * self.nr_loggings_per_eval_save_iteration * self.nr_updates_per_logging_iteration) + (logging_iteration_step+1) * self.nr_updates_per_logging_iteration
                     steps_metrics = {
                         "steps/nr_env_steps": nr_update_iteration * self.nr_envs,
-                        "steps/nr_policy_updates": nr_update_iteration * self.nr_update_rounds_per_step,
-                        "steps/nr_critic_updates": nr_update_iteration * self.nr_critic_updates_per_policy_update * self.nr_update_rounds_per_step,
+                        "steps/nr_policy_updates": nr_update_iteration * self.nr_policy_updates_per_step,
+                        "steps/nr_critic_updates": nr_update_iteration * self.nr_critic_updates_per_policy_update * self.nr_policy_updates_per_step,
                     }
 
                     combined_metrics = {**infos, **steps_metrics, **optimization_metrics}

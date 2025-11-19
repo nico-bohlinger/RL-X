@@ -25,7 +25,7 @@ def get_config(algorithm_name):
     config.smoothing_epsilon = 0.001
     config.smoothing_clip_value = 0.5
     config.nr_critic_updates_per_policy_update = 2
-    config.nr_update_rounds_per_step = 2
+    config.nr_policy_updates_per_step = 2
     config.clipped_double_q_learning = True
     config.max_grad_norm = 0.0
     config.logging_frequency = 40960
