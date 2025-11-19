@@ -10,7 +10,7 @@ def get_config(algorithm_name):
     config.nr_parallel_seeds = 1
     config.total_timesteps = 2000158720
     config.learning_rate = 3e-4
-    config.anneal_learning_rate = True
+    config.anneal_learning_rate = False
     config.weight_decay = 0.1
     config.batch_size = 32768
     config.buffer_size_per_env = 5120  # 1024 * 5
