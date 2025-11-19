@@ -1,5 +1,4 @@
 import os
-import subprocess
 import shutil
 import json
 from copy import deepcopy
@@ -50,6 +49,7 @@ class FastTD3:
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
         self.nr_atoms = config.algorithm.nr_atoms
+        self.n_steps = config.algorithm.n_steps
         self.noise_std_min = config.algorithm.noise_std_min
         self.noise_std_max = config.algorithm.noise_std_max
         self.smoothing_epsilon = config.algorithm.smoothing_epsilon
@@ -80,6 +80,9 @@ class FastTD3:
         if self.evaluation_and_save_frequency % self.logging_frequency != 0:
             raise ValueError("Evaluation and save frequency must be a multiple of logging frequency.")
         
+        if self.learning_starts < self.n_steps:
+            raise ValueError("The replay buffer must at least be filled with n_steps transitions before learning starts.")
+        
         if self.nr_parallel_seeds > 1:
             raise ValueError("Parallel seeds are not supported yet. This is mainly limited by not being able to log mutliple wandb runs at the same time.")
 
@@ -89,7 +92,7 @@ class FastTD3:
         self.key, policy_key, critic_key, reset_key = jax.random.split(self.key, 4)
         reset_key = jax.random.split(reset_key, self.nr_envs)
 
-        self.policy = get_policy(self.config, self.env)
+        self.policy, self.get_processed_action = get_policy(self.config, self.env)
         self.critic = get_critic(self.config, self.env)
 
         def linear_schedule(count):
@@ -155,12 +158,14 @@ class FastTD3:
             actions_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs, self.as_shape[0]), dtype=jnp.float32)
             rewards_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs), dtype=jnp.float32)
             terminations_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs), dtype=jnp.float32)
+            truncations_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs), dtype=jnp.float32)
             replay_buffer = {
                 "states": states_buffer,
                 "next_states": next_states_buffer,
                 "actions": actions_buffer,
                 "rewards": rewards_buffer,
                 "terminations": terminations_buffer,
+                "truncations": truncations_buffer,
                 "pos": jnp.zeros((), dtype=jnp.int32),
                 "size": jnp.zeros((), dtype=jnp.int32)
             }
@@ -174,7 +179,8 @@ class FastTD3:
                 observation = env_state.next_observation
                 action = self.policy.apply(policy_state.params, observation)
                 action += jax.random.normal(subkey, action.shape) * noise_scales
-                env_state = self.env.step(env_state, action)
+                processed_action = self.get_processed_action(action)
+                env_state = self.env.step(env_state, processed_action)
 
                 # Adding to replay buffer
                 replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
@@ -182,6 +188,7 @@ class FastTD3:
                 replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(action)
                 replay_buffer["rewards"] = replay_buffer["rewards"].at[replay_buffer["pos"]].set(env_state.reward)
                 replay_buffer["terminations"] = replay_buffer["terminations"].at[replay_buffer["pos"]].set(env_state.terminated)
+                replay_buffer["truncations"] = replay_buffer["truncations"].at[replay_buffer["pos"]].set(env_state.truncated)
                 replay_buffer["pos"] = (replay_buffer["pos"] + 1) % self.buffer_size_per_env
                 replay_buffer["size"] = jnp.minimum(replay_buffer["size"] + 1, self.buffer_size_per_env)
 
@@ -221,7 +228,8 @@ class FastTD3:
                         observation = env_state.next_observation
                         action = self.policy.apply(policy_state.params, observation)
                         action += jax.random.normal(subkey, action.shape) * noise_scales
-                        env_state = self.env.step(env_state, action)
+                        processed_action = self.get_processed_action(action)
+                        env_state = self.env.step(env_state, processed_action)
 
                         # Adding to replay buffer
                         replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
@@ -229,6 +237,7 @@ class FastTD3:
                         replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(action)
                         replay_buffer["rewards"] = replay_buffer["rewards"].at[replay_buffer["pos"]].set(env_state.reward)
                         replay_buffer["terminations"] = replay_buffer["terminations"].at[replay_buffer["pos"]].set(env_state.terminated)
+                        replay_buffer["truncations"] = replay_buffer["truncations"].at[replay_buffer["pos"]].set(env_state.truncated)
                         replay_buffer["pos"] = (replay_buffer["pos"] + 1) % self.buffer_size_per_env
                         replay_buffer["size"] = jnp.minimum(replay_buffer["size"] + 1, self.buffer_size_per_env)
 
@@ -248,14 +257,14 @@ class FastTD3:
 
 
                         # Optimizing - Critic and Policy
-                        def critic_loss_fn(policy_params, critic_params, critic_target_params, state, next_state, action, reward, terminated, key):
+                        def critic_loss_fn(policy_params, critic_params, critic_target_params, state, next_state, action, reward, terminated, effective_n_steps, key):
                             # Critic loss
                             clipped_noise = jnp.clip(jax.random.normal(key, action.shape) * self.smoothing_epsilon, -self.smoothing_clip_value, self.smoothing_clip_value)
                             next_action = jnp.clip(self.policy.apply(policy_params, next_state) + clipped_noise, -1.0, 1.0)
 
                             delta_z = (self.v_max - self.v_min) / (self.nr_atoms - 1)
                             q_support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
-                            target_z = jnp.clip(reward + (1.0 - terminated) * self.gamma * q_support, self.v_min, self.v_max)
+                            target_z = jnp.clip(reward + (1.0 - terminated) * (self.gamma ** effective_n_steps) * q_support, self.v_min, self.v_max)
                             b = (target_z - self.v_min) / delta_z
                             l = jnp.floor(b).astype(jnp.int32)
                             u = jnp.ceil(b).astype(jnp.int32)
@@ -267,9 +276,7 @@ class FastTD3:
                             l = jnp.where(l_mask, l - 1, l)
                             u = jnp.where(u_mask, u + 1, u)
 
-                            next_dist = jax.nn.softmax(
-                                self.critic.apply(critic_target_params, next_state, next_action)
-                            ) # shape (2, nr_atoms) for the 2 critics
+                            next_dist = jax.nn.softmax(self.critic.apply(critic_target_params, next_state, next_action)) # (2, nr_atoms) for the 2 critics
                             proj_dist = jnp.zeros_like(next_dist)
                             wt_l = (u.astype(jnp.float32) - b)
                             wt_u = (b - l.astype(jnp.float32))
@@ -283,21 +290,17 @@ class FastTD3:
                             proj_dist = proj_dist.at[(critic_idxs, l_idxs)].add(next_dist * wt_l)
                             proj_dist = proj_dist.at[(critic_idxs, u_idxs)].add(next_dist * wt_u)
 
-                            qf_next_target_value = jnp.sum(proj_dist * q_support, axis=1)  # shape (2,)
+                            qf_next_target_value = jnp.sum(proj_dist * q_support, axis=1)  # (2,)
 
                             if self.clipped_double_q_learning:
-                                qf_next_target_dist = jnp.where(
-                                    qf_next_target_value[0] < qf_next_target_value[1],
-                                    proj_dist[0],
-                                    proj_dist[1]
-                                )  # shape (nr_atoms,)
+                                qf_next_target_dist = jnp.where(qf_next_target_value[0] < qf_next_target_value[1], proj_dist[0], proj_dist[1])  # (nr_atoms,)
                                 qf1_next_target_dist = qf_next_target_dist
                                 qf2_next_target_dist = qf_next_target_dist
                             else:
                                 qf1_next_target_dist = proj_dist[0]
                                 qf2_next_target_dist = proj_dist[1]
 
-                            current_q = self.critic.apply(critic_params, state, action)  # shape (2, nr_atoms)
+                            current_q = self.critic.apply(critic_params, state, action)  # (2, nr_atoms)
                             
                             q1_loss = -jnp.sum(qf1_next_target_dist * jax.nn.log_softmax(current_q[0]), axis=-1)
                             q2_loss = -jnp.sum(qf2_next_target_dist * jax.nn.log_softmax(current_q[1]), axis=-1)
@@ -333,7 +336,7 @@ class FastTD3:
                             return loss, (metrics)
                         
 
-                        vmap_critic_loss_fn = jax.vmap(critic_loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0), out_axes=0)
+                        vmap_critic_loss_fn = jax.vmap(critic_loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
                         safe_mean = lambda x: jnp.mean(x) if x is not None else x
                         mean_vmapped_critic_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_critic_loss_fn(*a, **k))
                         grad_critic_loss_fn = jax.value_and_grad(mean_vmapped_critic_loss_fn, argnums=(1,), has_aux=True)
@@ -342,17 +345,60 @@ class FastTD3:
                         mean_vmapped_policy_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_policy_loss_fn(*a, **k))
                         grad_policy_loss_fn = jax.value_and_grad(mean_vmapped_policy_loss_fn, argnums=(0,), has_aux=True)
 
+                        # Sample batch from replay buffer and handling n-step returns
                         key, idx_key, noise_key = jax.random.split(key, 3)
-                        idx1 = jax.random.randint(idx_key, (self.nr_critic_updates_per_step, self.batch_size), 0, replay_buffer["size"])
+
+                        def full_case(_):
+                            last_idx = (replay_buffer["pos"] - 1) % self.buffer_size_per_env
+                            last_trunc_row = replay_buffer["truncations"][last_idx]
+                            last_done_row = replay_buffer["terminations"][last_idx]
+                            patched_last_trunc_row = jnp.where(last_done_row > 0.0, last_trunc_row, jnp.ones_like(last_trunc_row),)
+                            trunc_patched = replay_buffer["truncations"].at[last_idx].set(patched_last_trunc_row)
+                            return self.buffer_size_per_env, trunc_patched
+
+                        def not_full_case(_):
+                            max_start = jnp.maximum(1, replay_buffer["size"] - self.n_steps + 1)
+                            return max_start, replay_buffer["truncations"]
+
+                        max_start, truncations_for_sampling = jax.lax.cond(replay_buffer["size"] >= self.buffer_size_per_env, full_case,  not_full_case, operand=None)
+
+                        idx1 = jax.random.randint(idx_key, (self.nr_critic_updates_per_step, self.batch_size), 0, max_start)
                         idx2 = jax.random.randint(idx_key, (self.nr_critic_updates_per_step, self.batch_size), 0, self.nr_envs)
                         update_keys = jax.random.split(noise_key, self.nr_critic_updates_per_step * self.batch_size)
                         update_keys = update_keys.reshape(self.nr_critic_updates_per_step, self.batch_size, -1)
-
                         states_all = replay_buffer["states"][idx1, idx2]
-                        next_states_all = replay_buffer["next_states"][idx1, idx2]
                         actions_all = replay_buffer["actions"][idx1, idx2]
-                        rewards_all = replay_buffer["rewards"][idx1, idx2]
-                        terminations_all = replay_buffer["terminations"][idx1, idx2]
+
+                        steps = jnp.arange(self.n_steps)
+                        all_indices = (idx1[..., None] + steps) % self.buffer_size_per_env  # (nr_critic_updates_per_step, batch_size, n_steps)
+                        env_indices = jnp.broadcast_to(idx2[..., None], all_indices.shape)  # (nr_critic_updates_per_step, batch_size, n_steps)
+                        flat_t = all_indices.reshape(-1)
+                        flat_e = env_indices.reshape(-1)
+                        all_rewards = replay_buffer["rewards"][flat_t, flat_e].reshape(all_indices.shape)
+                        all_dones = replay_buffer["terminations"][flat_t, flat_e].reshape(all_indices.shape)
+                        all_truncations = truncations_for_sampling[flat_t, flat_e].reshape(all_indices.shape)
+
+                        zeros_first = jnp.zeros((*all_dones.shape[:-1], 1), dtype=all_dones.dtype)
+                        all_dones_shifted = jnp.concatenate([zeros_first, all_dones[..., :-1]], axis=-1)
+                        done_masks = jnp.cumprod(1 - all_dones_shifted.astype(jnp.float32), axis=-1)
+                        effective_n_steps_all = jnp.sum(done_masks, axis=-1)
+                        discounts = self.gamma ** jnp.arange(self.n_steps)
+                        rewards_all = jnp.sum(all_rewards * done_masks * discounts, axis=-1)
+
+                        all_dones_int = (all_dones > 0.0).astype(jnp.int32)
+                        all_trunc_int = (all_truncations > 0.0).astype(jnp.int32)
+                        first_done = jnp.argmax(all_dones_int, axis=-1)
+                        first_trunc = jnp.argmax(all_trunc_int, axis=-1)
+                        no_dones = jnp.sum(all_dones_int , axis=-1) == 0
+                        no_truncs = jnp.sum(all_trunc_int, axis=-1) == 0
+                        first_done = jnp.where(no_dones, self.n_steps - 1, first_done)
+                        first_trunc = jnp.where(no_truncs, self.n_steps - 1, first_trunc)
+                        final_offset = jnp.minimum(first_done, first_trunc)
+                        final_time_indices = jnp.take_along_axis(all_indices, final_offset[..., None], axis=-1).squeeze(-1)
+                        flat_t_final = final_time_indices.reshape(-1)
+                        flat_e_final = idx2.reshape(-1)
+                        next_states_all = replay_buffer["next_states"][flat_t_final, flat_e_final].reshape(idx1.shape + (self.os_shape[0],))
+                        terminations_all = replay_buffer["terminations"][flat_t_final, flat_e_final].reshape(idx1.shape)
 
                         update_idx = 0
                         for _ in range(self.nr_policy_updates_per_step):
@@ -362,11 +408,13 @@ class FastTD3:
                                 actions = actions_all[update_idx]
                                 rewards = rewards_all[update_idx]
                                 terminations = terminations_all[update_idx]
+                                effective_n_steps = effective_n_steps_all[update_idx]
                                 keys_for_update = update_keys[update_idx]
 
                                 (loss, (critic_metrics)), (critic_gradients,) = grad_critic_loss_fn(
                                     policy_state.params, critic_state.params, critic_state.target_params,
-                                    states, next_states, actions, rewards, terminations, keys_for_update)
+                                    states, next_states, actions, rewards, terminations, effective_n_steps,
+                                    keys_for_update)
 
                                 critic_state = critic_state.apply_gradients(grads=critic_gradients)
 
@@ -433,7 +481,8 @@ class FastTD3:
                     def single_eval_rollout(carry, _):
                         policy_state, eval_env_state = carry
                         action = self.policy.apply(policy_state.params, eval_env_state.next_observation)
-                        eval_env_state = self.env.step(eval_env_state, action)
+                        processed_action = self.get_processed_action(action)
+                        eval_env_state = self.env.step(eval_env_state, processed_action)
                         return (policy_state, eval_env_state), None
 
                     key, reset_key = jax.random.split(key)
@@ -557,7 +606,8 @@ class FastTD3:
             # key, std_dev_key = jax.random.split(key)
             observation = env_state.next_observation
             action = self.policy.apply(self.policy_state.params, observation)
-            env_state = self.env.step(env_state, action)
+            processed_action = self.get_processed_action(action)
+            env_state = self.env.step(env_state, processed_action)
             return env_state, key
 
         self.key, subkey = jax.random.split(self.key)
