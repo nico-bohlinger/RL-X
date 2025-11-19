@@ -96,7 +96,7 @@ class SAC:
         self.policy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
         self.entropy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
-        env_state = self.env.reset(reset_key)
+        env_state = self.env.reset(reset_key, False)
         self.dummy_state = env_state.next_observation
         self.dummy_action = jnp.array([self.env.single_action_space.sample(reset_key[0])])
 
@@ -129,7 +129,7 @@ class SAC:
         def jitable_train_function(key, parallel_seed_id):
             key, reset_key = jax.random.split(key, 2)
             reset_keys = jax.random.split(reset_key, self.nr_envs)
-            env_state = self.env.reset(reset_keys)
+            env_state = self.env.reset(reset_keys, False)
 
             policy_state = self.policy_state
             critic_state = self.critic_state
@@ -350,7 +350,7 @@ class SAC:
 
                     key, reset_key = jax.random.split(key)
                     reset_keys = jax.random.split(reset_key, self.nr_envs)
-                    eval_env_state = self.env.reset(reset_keys)
+                    eval_env_state = self.env.reset(reset_keys, True)
                     (policy_state, eval_env_state), _ = jax.lax.scan(single_eval_rollout, (policy_state, eval_env_state), jnp.arange(self.horizon))
 
                     eval_metrics = {
@@ -368,6 +368,7 @@ class SAC:
 
                     global_step = (eval_save_iteration_step + 1) * self.evaluation_and_save_frequency
                     jax.debug.callback(eval_callback, (eval_metrics, global_step))
+
 
                 # Saving
                 if self.save_model:
@@ -479,7 +480,7 @@ class SAC:
 
         self.key, subkey = jax.random.split(self.key)
         reset_keys = jax.random.split(subkey, self.nr_envs)
-        env_state = self.env.reset(reset_keys)
+        env_state = self.env.reset(reset_keys, True)
         while True:
             env_state, self.key = rollout(env_state, self.key)
             if self.render:
