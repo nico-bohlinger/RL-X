@@ -26,6 +26,7 @@ def get_config(algorithm_name):
     config.smoothing_clip_value = 0.5
     config.nr_critic_updates_per_step = 2
     config.clipped_double_q_learning = True
+    config.max_grad_norm = 0.0
     config.logging_frequency = 40960
     config.evaluation_and_save_frequency = 18350080  # -1 to disable
     config.evaluation_active = True

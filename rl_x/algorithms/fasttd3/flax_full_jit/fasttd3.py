@@ -56,6 +56,7 @@ class FastTD3:
         self.smoothing_clip_value = config.algorithm.smoothing_clip_value
         self.nr_critic_updates_per_step = config.algorithm.nr_critic_updates_per_step
         self.clipped_double_q_learning = config.algorithm.clipped_double_q_learning
+        self.max_grad_norm = config.algorithm.max_grad_norm
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
@@ -100,19 +101,33 @@ class FastTD3:
 
         env_state = self.env.reset(reset_key, False)
 
+        if self.max_grad_norm > 0.0:
+            policy_tx = optax.chain(
+                optax.clip_by_global_norm(self.max_grad_norm),
+                optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay),
+            )
+        else:
+            policy_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay)
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, env_state.next_observation),
-            tx=optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay)
+            tx=policy_tx
         )
 
         dummy_action = jnp.zeros((self.nr_envs,) + self.as_shape, dtype=jnp.float32)
 
+        if self.max_grad_norm > 0.0:
+            critic_tx = optax.chain(
+                optax.clip_by_global_norm(self.max_grad_norm),
+                optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay),
+            )
+        else:
+            critic_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay)
         self.critic_state = RLTrainState.create(
             apply_fn=self.critic.apply,
             params=self.critic.init(critic_key, env_state.next_observation, dummy_action),
             target_params=self.critic.init(critic_key, env_state.next_observation, dummy_action),
-            tx=optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay)
+            tx=critic_tx
         )
 
         if self.save_model:
