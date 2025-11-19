@@ -7,20 +7,22 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 
 def get_critic(config, env):
     observation_space_type = env.general_properties.observation_space_type
+    critic_observation_indices = getattr(env, "critic_observation_indices", np.arange(env.single_observation_space.shape[0]))
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return FlatValuesCritic(env, config.algorithm.nr_hidden_units)
+        return FlatValuesCritic(env, config.algorithm.nr_hidden_units, critic_observation_indices)
     elif observation_space_type == ObservationSpaceType.IMAGES:
         return ImagesCritic(env)
 
 
 class FlatValuesCritic(nn.Module):
-    def __init__(self, env, nr_hidden_units):
+    def __init__(self, env, nr_hidden_units, critic_observation_indices):
         super().__init__()
-        single_os_shape = env.single_observation_space.shape
+        self.critic_observation_indices = critic_observation_indices
+        obs_input_dim = len(critic_observation_indices)
 
         self.critic = nn.Sequential(
-            self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
+            self.layer_init(nn.Linear(obs_input_dim, nr_hidden_units)),
             nn.Tanh(),
             self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),
@@ -36,6 +38,7 @@ class FlatValuesCritic(nn.Module):
 
     @torch.compile(mode="default")
     def get_value(self, x):
+        x = x[..., self.critic_observation_indices]
         return self.critic(x)
 
 

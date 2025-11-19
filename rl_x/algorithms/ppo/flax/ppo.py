@@ -431,7 +431,7 @@ class PPO:
 
         loaded_algorithm_config = json.load(open(f"{checkpoint_dir}/config_algorithm.json", "r"))
         for key, value in loaded_algorithm_config.items():
-            if f"algorithm.{key}" not in explicitly_set_algorithm_params:
+            if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
                 config.algorithm[key] = value
         model = PPO(config, env, run_path, writer)
 

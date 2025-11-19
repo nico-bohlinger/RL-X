@@ -36,7 +36,10 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/environments/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/README.md): Information on the folder structure of environments, how to add new environments and how to mix and match them with algorithms
 - [```/rl_x/environments/custom_interface/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_interface/README.md): Implementation details of the custom environment interface with simple socket communication
 - [```/rl_x/environments/custom_isaac_lab/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_isaac_lab/README.md): Implementation details of the custom Isaac Lab environment examples
+- [```/rl_x/environments/custom_maniskill/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_maniskill/README.md): Implementation details of the custom ManiSkill environment examples
 - [```/rl_x/environments/custom_mujoco/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_mujoco/README.md): Implementation details of the custom MuJoCo environment examples (with and without MJX)
+- [```/rl_x/environments/custom_mujoco/robot_locomotion/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_mujoco/robot_locomotion/README.md): Details on the robot locomotion MuJoCo and MJX environments, to train a quadruped (Unitree Go2) or humanoid (Unitree G1) robot to walk
+- [```/rl_x/environments/custom_mujoco/robot_locomotion/deployment/unitree_go2/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_mujoco/robot_locomotion/deployment/unitree_go2/README.md): Instructions on how to use a trained policy to deploy it on a real Unitree Go2 robot
 - [```/rl_x/environments/envpool/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/gym/README.md): Details of the EnvPool environments
 - [```/rl_x/environments/gym/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/gym/README.md): Details of the Gymnasium environments
 - [```/rl_x/runner/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/runner/README.md): Information on the folder structure of the runner class and how to use it to run experiments
@@ -102,12 +105,17 @@ Make sure to install the compatible version of torch alongside it:
 ```
 pip install -U torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 ```
-Clone Isaac Lab into any directory:
+Verify the Isaac Sim installation by running:
+```
+isaacsim
+```
+Clone Isaac Lab into any directory (outside of the RL-X repository):
 ```
 git clone git@github.com:isaac-sim/IsaacLab.git
 ```
 Install the Isaac Lab package:
 ```
+cd IsaacLab/
 ./isaaclab.sh --install
 ```
 Isaac Sim / Lab requires a newer version of gymnasium and an older version of numpy. The gymnasium version should be downgraded after installing Isaac Sim / Lab back to the RL-X compatible version:
@@ -120,6 +128,17 @@ Therefore and in general, Isaac Lab environments should always be used with algo
 Make sure numpy is at the correct version:
 ```
 pip install numpy==1.26.0
+```
+Verify the Isaac Lab installation works by running:
+```
+python scripts/tutorials/00_sim/create_empty.py
+```
+
+
+### Optional: ManiSkill
+It looks like ManiSkill doesn't work with the newest numpy version. Therefore, it might be necessary to downgrade numpy when using ManiSkill environments:
+```
+pip install "numpy<2"
 ```
 
 

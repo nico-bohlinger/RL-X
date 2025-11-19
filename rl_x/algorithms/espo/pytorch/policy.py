@@ -10,24 +10,26 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 def get_policy(config, env, device):
     action_space_type = env.general_properties.action_space_type
     observation_space_type = env.general_properties.observation_space_type
+    policy_observation_indices = getattr(env, "policy_observation_indices", np.arange(env.single_observation_space.shape[0]))
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return Policy(env, config.algorithm.std_dev, config.algorithm.action_clipping_and_rescaling, config.algorithm.nr_hidden_units, device)
+        return Policy(env, config.algorithm.std_dev, config.algorithm.action_clipping_and_rescaling, config.algorithm.nr_hidden_units, device, policy_observation_indices)
 
 
 class Policy(nn.Module):
-    def __init__(self, env, std_dev, action_clipping_and_rescaling, nr_hidden_units, device):
+    def __init__(self, env, std_dev, action_clipping_and_rescaling, nr_hidden_units, device, policy_observation_indices):
         super().__init__()
         self.action_clipping_and_rescaling = action_clipping_and_rescaling
+        self.policy_observation_indices = policy_observation_indices
+        obs_input_dim = len(policy_observation_indices)
         self.policy_as_low = -1
         self.policy_as_high = 1
         self.env_as_low = torch.tensor(env.single_action_space.low, dtype=torch.float32).to(device)
         self.env_as_high = torch.tensor(env.single_action_space.high, dtype=torch.float32).to(device)
-        single_os_shape = env.single_observation_space.shape
         single_as_shape = env.single_action_space.shape
 
         self.policy_mean = nn.Sequential(
-            self.layer_init(nn.Linear(np.prod(single_os_shape, dtype=int).item(), nr_hidden_units)),
+            self.layer_init(nn.Linear(obs_input_dim, nr_hidden_units)),
             nn.Tanh(),
             self.layer_init(nn.Linear(nr_hidden_units, nr_hidden_units)),
             nn.Tanh(),
@@ -44,6 +46,7 @@ class Policy(nn.Module):
 
     @torch.compile(mode="default")
     def get_action_logprob(self, x):
+        x = x[..., self.policy_observation_indices]
         action_mean = self.policy_mean(x)
         action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
         action_std = torch.exp(action_logstd)
@@ -59,6 +62,7 @@ class Policy(nn.Module):
 
     @torch.compile(mode="default")
     def get_logprob_entropy(self, x, action):
+        x = x[..., self.policy_observation_indices]
         action_mean = self.policy_mean(x)
         action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
         action_std = torch.exp(action_logstd)
@@ -69,6 +73,7 @@ class Policy(nn.Module):
     @torch.compile(mode="default")
     def get_deterministic_action(self, x):
         with torch.no_grad():
+            x = x[..., self.policy_observation_indices]
             action = self.policy_mean(x)
         if self.action_clipping_and_rescaling:
             clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)

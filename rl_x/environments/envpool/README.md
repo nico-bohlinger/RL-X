@@ -2,6 +2,8 @@
 
 Contains the environments from [EnvPool](https://github.com/sail-sg/envpool).
 
+> ⚠️ **Warning**: EnvPool is not receiving active maintenance or updates. To keep using EnvPool, an older JAX version may be required.
+
 EnvPool is a collection of environments, including Atari, MuJoCo, DeepMind Control Suite, and more.  
 The environments provided by EnvPool are inherently vectorized and enable faster training than with the original implementations.  
 EnvPool also provides XLA support, which means the environment's step() function can be jitted with JAX. But this is not currently used in RL-X.

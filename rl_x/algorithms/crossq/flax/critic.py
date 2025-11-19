@@ -1,3 +1,4 @@
+from typing import Sequence
 import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
@@ -9,13 +10,15 @@ from rl_x.environments.observation_space_type import ObservationSpaceType
 
 def get_critic(config, env):
     observation_space_type = env.general_properties.observation_space_type
+    critic_observation_indices = getattr(env, "critic_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
         return VectorCritic(
             config.algorithm.batch_renorm_momentum,
             config.algorithm.batch_renorm_warmup_steps,
             config.algorithm.critic_nr_hidden_units,
-            config.algorithm.ensemble_size
+            config.algorithm.ensemble_size,
+            critic_observation_indices,
         )
 
 
@@ -23,9 +26,11 @@ class Critic(nn.Module):
     batch_renorm_momentum: float
     batch_renorm_warmup_steps: int
     nr_hidden_units: int
+    critic_observation_indices: Sequence[int]
 
     @nn.compact
     def __call__(self, x: np.ndarray, a: np.ndarray, train):
+        x = x[..., self.critic_observation_indices]
         x = jnp.concatenate([x, a], -1)
 
         x = BatchRenorm(
@@ -60,6 +65,7 @@ class VectorCritic(nn.Module):
     batch_renorm_warmup_steps: int
     nr_hidden_units: int
     nr_critics: int
+    critic_observation_indices: Sequence[int]
 
     @nn.compact
     def __call__(self, obs: np.ndarray, action: np.ndarray, train):
@@ -79,7 +85,8 @@ class VectorCritic(nn.Module):
         q_values = vmap_critic(
             batch_renorm_momentum=self.batch_renorm_momentum,
             batch_renorm_warmup_steps=self.batch_renorm_warmup_steps,
-            nr_hidden_units=self.nr_hidden_units
+            nr_hidden_units=self.nr_hidden_units,
+            critic_observation_indices=self.critic_observation_indices,
         )(obs, action, train)
 
         return q_values

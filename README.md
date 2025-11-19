@@ -15,11 +15,12 @@ A framework for Reinforcement Learning research.
 - 💡 **Perfect to understand and prototype algorithms**:
     - One algorithm = One directory -> No backtracking through  parent classes
     - Algorithms can be easily copied out of RL-X
-- ⚒️ **Known DL libraries**: Implementations in PyTorch and mainly JAX (Flax)
+- ⚒️ **Known DL libraries**: Implementations in PyTorch and mainly JAX
 - ⚡ **Maximum speed**: Just-In-Time (JIT) compilation and parallel environments
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
-- ⛰️​ **Custom environments**: Examples for custom environments with MuJoCo, Isaac Lab or pure socket communication
-- 🚀​ **GPU environments**: MuJoCo XLA (MJX) and Isaac Lab can run thousands of parallel environments
+- ⛰️​ **Custom environments**: Examples for MuJoCo, Isaac Lab, ManiSkill or pure socket communication
+- 🚀​ **GPU environments**: MJX, Isaac Lab and ManiSkill can run thousands of parallel environments
+- 🤖​ **Robot learning**: Training and deployment for the Unitree Go2 (quadruped) and G1 (humanoid) robots
 - 📈 **Experiments**: Checkpoints, Evaluation, Console log, Tensorboard, Weights & Biases, SLURM, Docker
 
 
@@ -48,6 +49,7 @@ A framework for Reinforcement Learning research.
     - MuJoCo
     - Atari
     - Classic control
+    - DeepMind Control Suite
 - [EnvPool](https://github.com/sail-sg/envpool)
     - MuJoCo
     - Atari
@@ -56,8 +58,12 @@ A framework for Reinforcement Learning research.
 - [Custom MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco)
     - Example of a custom MuJoCo environment
     - Example of a custom MuJoCo XLA (MJX) environment
+- [Custom Robot Learning](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion)
+    - Example of custom MuJoCo and MJX environments for quadruped and humanoid locomotion learning and real robot deployment
 - [Custom Isaac Lab](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_isaac_lab)
     - Example of a custom Isaac Lab environment
+- [Custom ManiSkill](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_maniskill)
+    - Example of a custom ManiSkill environment
 - [Custom Interface](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_interface)
     - Prototype of a custom environment interface with socket communication
 
@@ -81,6 +87,7 @@ pip install -U "jax[cuda12]"
 ```
 For other configurations, see the [detailed installation guide](https://nico-bohlinger.github.io/RL-X/#detailed-installation-guide) in the documentation.
 As Isaac Lab needs to be installed separately, instructions can also be found there.
+Similarly, ManiSkill might need additional steps, like downgrading numpy.
 
 
 ### Example

@@ -80,7 +80,7 @@ def environment_creator(config):
         )
 
         scene: InteractiveSceneCfg = InteractiveSceneCfg(
-            num_envs=4096, env_spacing=4.0, replicate_physics=True, clone_in_fabric=True
+            num_envs=config.environment.nr_envs, env_spacing=4.0, replicate_physics=True, clone_in_fabric=True
         )
 
         robot: ArticulationCfg = ANT_CFG.replace(prim_path="/World/envs/env_.*/Robot")

@@ -60,9 +60,9 @@ class Ant:
     
 
 
-    @partial(jax.vmap, in_axes=(None, 0))
-    @partial(jax.jit, static_argnums=(0,))
-    def reset(self, key):
+    @partial(jax.vmap, in_axes=(None, 0, None))
+    @partial(jax.jit, static_argnums=(0, 2))
+    def reset(self, key, eval_mode):
         data = self.mjx_data
 
         next_observation = jnp.zeros(self.single_observation_space.shape, dtype=jnp.float32)
