@@ -43,6 +43,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/environments/custom_mujoco/robot_locomotion/deployment/unitree_go2/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_mujoco/robot_locomotion/deployment/unitree_go2/README.md): Instructions on how to use a trained policy to deploy it on a real Unitree Go2 robot
 - [```/rl_x/environments/envpool/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/gym/README.md): Details of the EnvPool environments
 - [```/rl_x/environments/gym/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/gym/README.md): Details of the Gymnasium environments
+- [```/rl_x/environments/mujoco_playground/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/mujoco_playground/README.md): Details of the MuJoCo Playground environments
 - [```/rl_x/runner/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/runner/README.md): Information on the folder structure of the runner class and how to use it to run experiments
 
 

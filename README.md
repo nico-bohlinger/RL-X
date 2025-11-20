@@ -56,6 +56,8 @@ A framework for Reinforcement Learning research.
     - Atari
     - Classic control
     - DeepMind Control Suite
+- [MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground)
+    - Locomotion
 - [Custom MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco)
     - Example of a custom MuJoCo environment
     - Example of a custom MuJoCo XLA (MJX) environment
