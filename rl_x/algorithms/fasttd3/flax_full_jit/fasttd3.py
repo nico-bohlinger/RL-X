@@ -309,8 +309,8 @@ class FastTD3:
                             # Create metrics
                             metrics = {
                                 "loss/q_loss": loss,
-                                "q/q_max": jnp.mean(jnp.max(current_q, axis=-1)),
-                                "q/q_min": jnp.mean(jnp.min(current_q, axis=-1)),
+                                "q/q_max": jnp.max(qf_next_target_value),
+                                "q/q_min": jnp.min(qf_next_target_value),
                             }
 
                             return loss, (metrics)
