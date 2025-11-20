@@ -28,7 +28,7 @@ def get_config(algorithm_name):
     config.nr_critic_updates_per_policy_update = 2
     config.nr_policy_updates_per_step = 1
     config.clipped_double_q_learning = True
-    config.max_grad_norm = 0.0
+    config.max_grad_norm = 0.0  # 0.0 to disable
     config.action_clipping_and_rescaling = False
     config.logging_frequency = 40960
     config.evaluation_and_save_frequency = 18350080  # -1 to disable
