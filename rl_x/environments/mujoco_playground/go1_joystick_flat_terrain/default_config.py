@@ -9,7 +9,7 @@ def get_config(environment_name):
     config.type = "Go1JoystickFlatTerrain"
     config.seed = 1
     config.nr_envs = 1
-    config.async_skip_percentage = 0.0
+    config.use_domain_randomization = False
     config.render = False
 
     return config

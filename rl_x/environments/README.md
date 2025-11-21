@@ -68,7 +68,7 @@ gym
 
 
 ## Adding new environments
-Fast testing of a new environment with an already provided framework (Gymnasium or EnvPool) can be done by changing the environment name in the create_env.py file or even make it a variable and add it to the config file.
+Fast testing of a new environment with an already provided framework (Gymnasium, EnvPool or MuJoCo Playground) can be done by changing the environment type config, e.g. ```--environment.gym.atari.pong_v5.type="Breakout-v5"```.
 
 To add a completely new environment or permanently a new one from an already provided framework, create a new directory with the same structure as outlined above.
 

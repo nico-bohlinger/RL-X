@@ -1,25 +1,18 @@
-import jax
-from mujoco_playground import registry
+from mujoco_playground import registry, wrapper
 
-from rl_x.environments.gym.mujoco.humanoid_v4.general_properties import GeneralProperties
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.wrappers import RLXInfo
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.general_properties import GeneralProperties
 
 
 def create_env(config):
     mbp_env_config = registry.get_default_config(config.environment.type)
+    randomizer = (registry.get_domain_randomizer(config.environment.type) if config.environment.use_domain_randomization else None)
+
     env = registry.load(config.environment.type, config=mbp_env_config)
+    env = wrapper.wrap_for_brax_training(env, episode_length=mbp_env_config.episode_length, action_repeat=mbp_env_config.action_repeat, randomization_fn=randomizer)
 
-    env.reset = jax.jit(jax.vmap(env.reset))
-    env.step = jax.jit(jax.vmap(env.step))
-
-    key = jax.random.PRNGKey(1)
-    key, reset_key = jax.random.split(key, 2)
-    nr_envs = 2
-    reset_key = jax.random.split(reset_key, nr_envs)
-    env_state = env.reset(reset_key)
-    key, action_key = jax.random.split(key, 2)
-    env_state = env.step(env_state, jax.random.uniform(action_key, (nr_envs, 12), minval=-1.0, maxval=1.0))
-    print("loaded")
-    exit()
+    env = RLXInfo(env, config.environment.nr_envs)
+    env.horizon = mbp_env_config.episode_length
 
     env.general_properties = GeneralProperties
 
