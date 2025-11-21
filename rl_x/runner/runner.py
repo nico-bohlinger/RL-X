@@ -37,7 +37,7 @@ rlx_logger = logging.getLogger("rl_x")
 
 class Runner:
     def __init__(self, implementation_package_names=["rl_x"]):
-        algorithm_name, environment_name, self._mode, jax_cache_dir = self.parse_arguments()
+        algorithm_name, environment_name, self._mode = self.parse_arguments()
 
         # Early importing of environment to start Isaac if needed
         self.import_environment(environment_name, implementation_package_names)
@@ -127,10 +127,22 @@ class Runner:
             # Guarantee enough memory for CUBLAS to initialize when using jax
             os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
             import jax
+            runner_default_config = get_runner_config(self._mode)
+            def get_runner_config_value(arg_name):
+                arg_value = [arg for arg in sys.argv if arg.startswith(f"--runner.{arg_name}=")]
+                if arg_value:
+                    arg_value = arg_value[0].split("=")[1]
+                else:
+                    arg_value = getattr(runner_default_config, arg_name, None)
+                return arg_value
+            # Change default precision for matmul
+            jax_default_matmul_precision = get_runner_config_value("jax_default_matmul_precision")
+            jax.config.update("jax_default_matmul_precision", jax_default_matmul_precision)
             # Spent most possible time to optimize execution time and memory usage
             jax.config.update("jax_exec_time_optimization_effort", 1.0)
             jax.config.update("jax_memory_fitting_effort", 1.0)
             # Enable jax cache
+            jax_cache_dir = get_runner_config_value("jax_cache_dir")
             jax.config.update("jax_compilation_cache_dir", jax_cache_dir)
             jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
             jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
@@ -163,7 +175,6 @@ class Runner:
         self._model_class = get_algorithm_model_class(algorithm_name)
         self._create_env = get_environment_create_env(environment_name)
         
-        runner_default_config = get_runner_config(self._mode)
         algorithm_default_config = get_algorithm_config(algorithm_name)
         environment_default_config = get_environment_config(environment_name)
         self._runner_config_flag = config_flags.DEFINE_config_dict("runner", runner_default_config)
@@ -197,7 +208,6 @@ class Runner:
         algorithm_name = [arg for arg in sys.argv if arg.startswith("--algorithm.name=")]
         environment_name = [arg for arg in sys.argv if arg.startswith("--environment.name=")]
         runner_mode = [arg for arg in sys.argv if arg.startswith("--runner.mode=")]
-        jax_cache_dir = [arg for arg in sys.argv if arg.startswith("--runner.jax_cache_dir=")]
 
         if algorithm_name:
             algorithm_name = algorithm_name[0].split("=")[1]
@@ -216,14 +226,8 @@ class Runner:
             del sys.argv[sys.argv.index("--runner.mode=" + runner_mode)]
         else:
             runner_mode = DEFAULT_RUNNER_MODE
-
-        if jax_cache_dir:
-            jax_cache_dir = jax_cache_dir[0].split("=")[1]
-            del sys.argv[sys.argv.index("--runner.jax_cache_dir=" + jax_cache_dir)]
-        else:
-            jax_cache_dir = get_runner_config(None).jax_cache_dir
-
-        return algorithm_name, environment_name, runner_mode, jax_cache_dir
+        
+        return algorithm_name, environment_name, runner_mode
 
 
     def import_environment(self, environment_name, implementation_package_names):
