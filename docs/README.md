@@ -92,7 +92,7 @@ pip install "torch>=2.7.0" --index-url https://download.pytorch.org/whl/cu118 --
 ### 5. JAX
 For Linux, JAX with GPU support can be installed with the following command:
 ```
-pip install -U "jax[cuda12]"
+pip install "jax[cuda12]"
 ```
 For MacOS and Windows, JAX with GPU support is not supported out-of-the-box. However, it can be done with some extra effort (see [here](https://github.com/google/jax) for more information).
 
