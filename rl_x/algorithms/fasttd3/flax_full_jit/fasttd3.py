@@ -157,14 +157,14 @@ class FastTD3:
             next_states_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs, self.os_shape[0]), dtype=jnp.float32)
             actions_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs, self.as_shape[0]), dtype=jnp.float32)
             rewards_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs), dtype=jnp.float32)
-            terminations_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs), dtype=jnp.float32)
+            dones_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs), dtype=jnp.float32)
             truncations_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs), dtype=jnp.float32)
             replay_buffer = {
                 "states": states_buffer,
                 "next_states": next_states_buffer,
                 "actions": actions_buffer,
                 "rewards": rewards_buffer,
-                "terminations": terminations_buffer,
+                "dones": dones_buffer,
                 "truncations": truncations_buffer,
                 "pos": jnp.zeros((), dtype=jnp.int32),
                 "size": jnp.zeros((), dtype=jnp.int32)
@@ -181,19 +181,19 @@ class FastTD3:
                 action += jax.random.normal(subkey, action.shape) * noise_scales
                 processed_action = self.get_processed_action(action)
                 env_state = self.env.step(env_state, processed_action)
+                dones = env_state.terminated | env_state.truncated
 
                 # Adding to replay buffer
                 replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
                 replay_buffer["next_states"] = replay_buffer["next_states"].at[replay_buffer["pos"]].set(env_state.actual_next_observation)
                 replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(action)
                 replay_buffer["rewards"] = replay_buffer["rewards"].at[replay_buffer["pos"]].set(env_state.reward)
-                replay_buffer["terminations"] = replay_buffer["terminations"].at[replay_buffer["pos"]].set(env_state.terminated)
+                replay_buffer["dones"] = replay_buffer["dones"].at[replay_buffer["pos"]].set(dones)
                 replay_buffer["truncations"] = replay_buffer["truncations"].at[replay_buffer["pos"]].set(env_state.truncated)
                 replay_buffer["pos"] = (replay_buffer["pos"] + 1) % self.buffer_size_per_env
                 replay_buffer["size"] = jnp.minimum(replay_buffer["size"] + 1, self.buffer_size_per_env)
 
                 # Generate new noise scales for environments that are done
-                dones = env_state.terminated | env_state.truncated
                 noise_scales = jnp.where(
                     dones[:, None],
                     jax.random.uniform(key, (self.nr_envs, 1), minval=self.noise_std_min, maxval=self.noise_std_max),
@@ -230,19 +230,19 @@ class FastTD3:
                         action += jax.random.normal(subkey, action.shape) * noise_scales
                         processed_action = self.get_processed_action(action)
                         env_state = self.env.step(env_state, processed_action)
+                        dones = env_state.terminated | env_state.truncated
 
                         # Adding to replay buffer
                         replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
                         replay_buffer["next_states"] = replay_buffer["next_states"].at[replay_buffer["pos"]].set(env_state.actual_next_observation)
                         replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(action)
                         replay_buffer["rewards"] = replay_buffer["rewards"].at[replay_buffer["pos"]].set(env_state.reward)
-                        replay_buffer["terminations"] = replay_buffer["terminations"].at[replay_buffer["pos"]].set(env_state.terminated)
+                        replay_buffer["dones"] = replay_buffer["dones"].at[replay_buffer["pos"]].set(dones)
                         replay_buffer["truncations"] = replay_buffer["truncations"].at[replay_buffer["pos"]].set(env_state.truncated)
                         replay_buffer["pos"] = (replay_buffer["pos"] + 1) % self.buffer_size_per_env
                         replay_buffer["size"] = jnp.minimum(replay_buffer["size"] + 1, self.buffer_size_per_env)
 
                         # Generate new noise scales for environments that are done
-                        dones = env_state.terminated | env_state.truncated
                         noise_scales = jnp.where(
                             dones[:, None],
                             jax.random.uniform(key, (self.nr_envs, 1), minval=self.noise_std_min, maxval=self.noise_std_max),
@@ -257,14 +257,16 @@ class FastTD3:
 
 
                         # Optimizing - Critic and Policy
-                        def critic_loss_fn(policy_params, critic_params, critic_target_params, state, next_state, action, reward, terminated, effective_n_steps, key):
+                        def critic_loss_fn(policy_params, critic_params, critic_target_params, state, next_state, action, reward, done, truncated, effective_n_steps, key):
                             # Critic loss
                             clipped_noise = jnp.clip(jax.random.normal(key, action.shape) * self.smoothing_epsilon, -self.smoothing_clip_value, self.smoothing_clip_value)
                             next_action = jnp.clip(self.policy.apply(policy_params, next_state) + clipped_noise, -1.0, 1.0)
 
                             delta_z = (self.v_max - self.v_min) / (self.nr_atoms - 1)
                             q_support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
-                            target_z = jnp.clip(reward + (1.0 - terminated) * (self.gamma ** effective_n_steps) * q_support, self.v_min, self.v_max)
+                            bootstrap = 1.0 - (done * (1.0 - truncated))
+                            discount = (self.gamma ** effective_n_steps) * bootstrap
+                            target_z = jnp.clip(reward + discount * q_support, self.v_min, self.v_max)
                             b = (target_z - self.v_min) / delta_z
                             l = jnp.floor(b).astype(jnp.int32)
                             u = jnp.ceil(b).astype(jnp.int32)
@@ -336,7 +338,7 @@ class FastTD3:
                             return loss, (metrics)
                         
 
-                        vmap_critic_loss_fn = jax.vmap(critic_loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
+                        vmap_critic_loss_fn = jax.vmap(critic_loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
                         safe_mean = lambda x: jnp.mean(x) if x is not None else x
                         mean_vmapped_critic_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_critic_loss_fn(*a, **k))
                         grad_critic_loss_fn = jax.value_and_grad(mean_vmapped_critic_loss_fn, argnums=(1,), has_aux=True)
@@ -351,7 +353,7 @@ class FastTD3:
                         def full_case(_):
                             last_idx = (replay_buffer["pos"] - 1) % self.buffer_size_per_env
                             last_trunc_row = replay_buffer["truncations"][last_idx]
-                            last_done_row = replay_buffer["terminations"][last_idx]
+                            last_done_row = replay_buffer["dones"][last_idx]
                             patched_last_trunc_row = jnp.where(last_done_row > 0.0, last_trunc_row, jnp.ones_like(last_trunc_row),)
                             trunc_patched = replay_buffer["truncations"].at[last_idx].set(patched_last_trunc_row)
                             return self.buffer_size_per_env, trunc_patched
@@ -375,7 +377,7 @@ class FastTD3:
                         flat_t = all_indices.reshape(-1)
                         flat_e = env_indices.reshape(-1)
                         all_rewards = replay_buffer["rewards"][flat_t, flat_e].reshape(all_indices.shape)
-                        all_dones = replay_buffer["terminations"][flat_t, flat_e].reshape(all_indices.shape)
+                        all_dones = replay_buffer["dones"][flat_t, flat_e].reshape(all_indices.shape)
                         all_truncations = truncations_for_sampling[flat_t, flat_e].reshape(all_indices.shape)
 
                         zeros_first = jnp.zeros((*all_dones.shape[:-1], 1), dtype=all_dones.dtype)
@@ -398,7 +400,8 @@ class FastTD3:
                         flat_t_final = final_time_indices.reshape(-1)
                         flat_e_final = idx2.reshape(-1)
                         next_states_all = replay_buffer["next_states"][flat_t_final, flat_e_final].reshape(idx1.shape + (self.os_shape[0],))
-                        terminations_all = replay_buffer["terminations"][flat_t_final, flat_e_final].reshape(idx1.shape)
+                        dones_all = replay_buffer["dones"][flat_t_final, flat_e_final].reshape(idx1.shape)
+                        truncations_all = truncations_for_sampling[flat_t_final, flat_e_final].reshape(idx1.shape)
 
                         update_idx = 0
                         for _ in range(self.nr_policy_updates_per_step):
@@ -407,13 +410,14 @@ class FastTD3:
                                 next_states = next_states_all[update_idx]
                                 actions = actions_all[update_idx]
                                 rewards = rewards_all[update_idx]
-                                terminations = terminations_all[update_idx]
+                                dones = dones_all[update_idx]
+                                truncations = truncations_all[update_idx]
                                 effective_n_steps = effective_n_steps_all[update_idx]
                                 keys_for_update = update_keys[update_idx]
 
                                 (loss, (critic_metrics)), (critic_gradients,) = grad_critic_loss_fn(
                                     policy_state.params, critic_state.params, critic_state.target_params,
-                                    states, next_states, actions, rewards, terminations, effective_n_steps,
+                                    states, next_states, actions, rewards, dones, truncations, effective_n_steps,
                                     keys_for_update)
 
                                 critic_state = critic_state.apply_gradients(grads=critic_gradients)
