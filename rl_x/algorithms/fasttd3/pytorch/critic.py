@@ -15,11 +15,9 @@ def get_critic(config, env, device):
 class Critic(nn.Module):
     def __init__(self, config, env, device):
         super().__init__()
-        self.gamma = config.algorithm.gamma
-
-        self.q1 = torch.compile(get_q_network(config, env).to(device), mode="default")
-        self.q2 = torch.compile(get_q_network(config, env).to(device), mode="default")
-        self.q1_target = torch.compile(get_q_network(config, env).to(device), mode="default")
-        self.q2_target = torch.compile(get_q_network(config, env).to(device), mode="default")
+        self.q1 = get_q_network(config, env, device)
+        self.q2 = get_q_network(config, env, device)
+        self.q1_target = get_q_network(config, env, device)
+        self.q2_target = get_q_network(config, env, device)
         self.q1_target.load_state_dict(self.q1.state_dict())
         self.q2_target.load_state_dict(self.q2.state_dict())
