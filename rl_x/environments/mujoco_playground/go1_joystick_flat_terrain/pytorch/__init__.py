@@ -4,5 +4,5 @@ from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.pytorch.defau
 from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.pytorch.general_properties import GeneralProperties
 
 
-MUJOCO_PLAYGROUND_GO1_JOYSTICK_FLAT_TERRAIN = extract_environment_name_from_file(__file__)
-register_environment(MUJOCO_PLAYGROUND_GO1_JOYSTICK_FLAT_TERRAIN, get_config, create_env, GeneralProperties)
+MUJOCO_PLAYGROUND_GO1_JOYSTICK_FLAT_TERRAIN_PYTORCH = extract_environment_name_from_file(__file__)
+register_environment(MUJOCO_PLAYGROUND_GO1_JOYSTICK_FLAT_TERRAIN_PYTORCH, get_config, create_env, GeneralProperties)

@@ -2,6 +2,8 @@
 
 Contains the environments from [MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground).
 
+Keep in mind the PyTorch wrapper of MuJoCo Playground clips the actions to be between -1 and 1, while the pure MJX version does not clip the actions.
+
 The reference implementation contains the following environments:
 | Version | Observation space | Action space | Data interface |
 | ----------- | ----------- | ----------- | ----------- |

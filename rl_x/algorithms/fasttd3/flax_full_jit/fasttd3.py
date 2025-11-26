@@ -354,7 +354,7 @@ class FastTD3:
                             last_idx = (replay_buffer["pos"] - 1) % self.buffer_size_per_env
                             last_trunc_row = replay_buffer["truncations"][last_idx]
                             last_done_row = replay_buffer["dones"][last_idx]
-                            patched_last_trunc_row = jnp.where(last_done_row > 0.0, last_trunc_row, jnp.ones_like(last_trunc_row),)
+                            patched_last_trunc_row = jnp.where(last_done_row > 0.0, last_trunc_row, jnp.ones_like(last_trunc_row))
                             trunc_patched = replay_buffer["truncations"].at[last_idx].set(patched_last_trunc_row)
                             return self.buffer_size_per_env, trunc_patched
 

@@ -31,7 +31,6 @@ def get_config(algorithm_name):
     config.max_grad_norm = 0.0  # 0.0 to disable
     config.action_clipping_and_rescaling = False
     config.logging_frequency = 40960
-    config.evaluation_and_save_frequency = 18350080  # -1 to disable
-    config.evaluation_active = True
+    config.evaluation_frequency = -1  # -1 to disable
 
     return config

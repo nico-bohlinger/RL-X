@@ -1,83 +1,52 @@
-from functools import partial
 import gymnasium as gym
-import jax
-import jax.numpy as jnp
-
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.pytorch.box_space import BoxSpace
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.pytorch.wrapper_state import WrapperState
+import numpy as np
+import torch
 
 
 class RLXInfo(gym.Wrapper):
     def __init__(self, env, nr_envs):
         super(RLXInfo, self).__init__(env)
         self.nr_envs = nr_envs
-        
-        self.single_action_space = BoxSpace(low=-jnp.inf, high=jnp.inf, shape=(env.action_size,), dtype=jnp.float32)
-        self.single_observation_space = BoxSpace(low=-jnp.inf, high=jnp.inf, shape=env.observation_size["privileged_state"], dtype=jnp.float32)
+
+        self.single_action_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(env.num_actions,), dtype=np.float32)
+        self.single_observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=env.num_privileged_obs, dtype=np.float32)
 
         # This works because the policy observations are contained at the start of the privileged observations
-        self.policy_observation_indices = jnp.arange(env.observation_size["state"][0])
-        self.critic_observation_indices = jnp.arange(env.observation_size["privileged_state"][0])
+        self.policy_observation_indices = np.arange(env.num_obs[0])
+        self.critic_observation_indices = np.arange(env.num_privileged_obs[0])
 
 
-    @partial(jax.jit, static_argnums=(0, 2))
-    def reset(self, key, eval_mode):
-        env_state = self.env.reset(key)
-        info = {
-            "rollout/episode_return": jnp.zeros(self.nr_envs),
-            "rollout/episode_length": jnp.zeros(self.nr_envs),
-            **env_state.metrics
-        }
-        info_episode_store = {
-            "episode_return": jnp.zeros(self.nr_envs),
-            "episode_length": jnp.zeros(self.nr_envs),
-        }
-        wrapper_state = WrapperState(
-            env_state=env_state,
-            next_observation=env_state.obs["privileged_state"], 
-            actual_next_observation=env_state.obs["privileged_state"],
-            reward=env_state.reward,
-            terminated=jnp.zeros(self.nr_envs, dtype=jnp.bool),
-            truncated=jnp.zeros(self.nr_envs, dtype=jnp.bool),
-            info=info,
-            info_episode_store=info_episode_store
-        )
-        return wrapper_state
+    def reset(self):
+        observation = self.env.reset()
+        info = {}
+        return observation, info
     
 
-    @partial(jax.jit, static_argnums=(0,))
-    def step(self, wrapper_state, action):
-        env_state = self.env.step(wrapper_state.env_state, action)
-        done = env_state.done.astype(jnp.bool)
-        episode_return = wrapper_state.info_episode_store["episode_return"] + env_state.reward
-        episode_length = wrapper_state.info_episode_store["episode_length"] + 1.0
-        info = {
-            "rollout/episode_return": jnp.where(done, episode_return, wrapper_state.info["rollout/episode_return"]),
-            "rollout/episode_length": jnp.where(done, episode_length, wrapper_state.info["rollout/episode_length"]),
-            **env_state.metrics
-        }
-        info_episode_store = {
-            "episode_return": jnp.where(done, jnp.zeros(self.nr_envs), episode_return),
-            "episode_length": jnp.where(done, jnp.zeros(self.nr_envs), episode_length),
-        }
-        truncated = env_state.info["truncation"].astype(jnp.bool)
+    def step(self, action):
+        observation, reward, done, info = self.env.step(action)
+        done = done > 0.5
+        truncated = info["time_outs"] > 0.5
         terminated = done & (~truncated)
-        wrapper_state = WrapperState(
-            env_state=env_state, 
-            next_observation=env_state.obs["privileged_state"], 
-            actual_next_observation=env_state.obs["privileged_state"],
-            reward=env_state.reward,
-            terminated=terminated,
-            truncated=truncated,
-            info=info,
-            info_episode_store=info_episode_store
-        )
-        return wrapper_state
+        return observation, reward, terminated, truncated, info
     
 
-    def render(self, wrapper_state):
-        self.env.render(wrapper_state.env_state)
-        return wrapper_state
+    def get_logging_info_dict(self, info):
+        print(info)
+        exit()
+        keys_to_remove = ["final_observation", "_final_observation", "final_info", "_final_info", "elapsed_steps", "_elapsed_steps", "reconfigure", "fail", "episode"]
+
+        if "final_info" in info:
+            for key in info["final_info"].keys():
+                if key not in keys_to_remove:
+                    info[key] = torch.where(info["_final_info"].unsqueeze(1), info["final_info"][key], info[key])
+            info["episode_return"] = info["final_info"]["episode"]["return"]
+            info["episode_length"] = info["final_info"]["episode"]["episode_len"]
+
+        logging_info = {
+            key: info[key].tolist() for key in list(info.keys()) if key not in keys_to_remove
+        }
+
+        return logging_info
     
 
     def close(self):

@@ -1,7 +1,6 @@
 import os
 import logging
 import time
-from collections import deque
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -11,7 +10,6 @@ import wandb
 from rl_x.algorithms.fasttd3.pytorch.general_properties import GeneralProperties
 from rl_x.algorithms.fasttd3.pytorch.policy import get_policy
 from rl_x.algorithms.fasttd3.pytorch.critic import get_critic
-from rl_x.algorithms.fasttd3.pytorch.entropy_coefficient import EntropyCoefficient
 from rl_x.algorithms.fasttd3.pytorch.replay_buffer import ReplayBuffer
 
 rlx_logger = logging.getLogger("rl_x")
@@ -29,20 +27,35 @@ class FastTD3:
         self.track_tb = config.runner.track_tb
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
+        self.compile_mode = config.algorithm.compile_mode
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
-        self.buffer_size = config.algorithm.buffer_size
-        self.learning_starts = config.algorithm.learning_starts
+        self.weight_decay = config.algorithm.weight_decay
         self.batch_size = config.algorithm.batch_size
+        self.buffer_size_per_env = config.algorithm.buffer_size_per_env
+        self.learning_starts = config.algorithm.learning_starts
+        self.v_min = config.algorithm.v_min
+        self.v_max = config.algorithm.v_max
+        self.nr_atoms = config.algorithm.nr_atoms
+        self.n_steps = config.algorithm.n_steps
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
-        self.target_entropy = config.algorithm.target_entropy
-        self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.noise_std_min = config.algorithm.noise_std_min
+        self.noise_std_max = config.algorithm.noise_std_max
+        self.smoothing_epsilon = config.algorithm.smoothing_epsilon
+        self.smoothing_clip_value = config.algorithm.smoothing_clip_value
+        self.nr_critic_updates_per_policy_update = config.algorithm.nr_critic_updates_per_policy_update
+        self.nr_policy_updates_per_step = config.algorithm.nr_policy_updates_per_step
+        self.clipped_double_q_learning = config.algorithm.clipped_double_q_learning
+        self.max_grad_norm = config.algorithm.max_grad_norm
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
-        self.evaluation_episodes = config.algorithm.evaluation_episodes
+        self.horizon = env.horizon
+
+        if self.evaluation_frequency != -1:
+            raise NotImplementedError("Evaluation is not supported yet.")
 
         if config.algorithm.device == "gpu" and torch.cuda.is_available():
             device_name = "cuda"
@@ -57,26 +70,18 @@ class FastTD3:
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
 
-        self.env_as_low = env.single_action_space.low
-        self.env_as_high = env.single_action_space.high
+        self.policy = get_policy(config, env, self.device)
+        self.critic = get_critic(config, env, self.device)
 
-        self.policy = torch.compile(get_policy(config, env, self.device).to(self.device), mode="default")
-        self.critic = torch.compile(get_critic(config, env, self.device).to(self.device), mode="default")
-
-        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
-        self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate)
-
-        self.entropy_coefficient = torch.compile(EntropyCoefficient(config, env, self.device).to(self.device), mode="default")
-        self.alpha = self.entropy_coefficient()
-        self.entropy_optimizer = optim.Adam([self.entropy_coefficient.log_alpha], lr=self.learning_rate)
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+        self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay)
 
         if self.save_model:
             os.makedirs(self.save_path)
-            self.best_mean_return = -np.inf
 
     
     def train(self):
-        @torch.compile(mode="default")
+        @torch.compile(mode=self.compile_mode)
         def policy_loss_fn(current_log_probs, q1, q2, alpha):
             min_q = torch.minimum(q1, q2)
             policy_loss = (alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
@@ -84,7 +89,7 @@ class FastTD3:
             return policy_loss, min_q
         
 
-        @torch.compile(mode="default")
+        @torch.compile(mode=self.compile_mode)
         def critic_loss_fn(critic, states, next_states, actions, next_actions, next_log_probs, rewards, dones, alpha):
             with torch.no_grad():
                 next_q1_target = critic.q1_target(next_states, next_actions)
@@ -103,11 +108,18 @@ class FastTD3:
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.single_observation_space.shape, self.env.single_action_space.shape, self.rng, self.device)
-
-        saving_return_buffer = deque(maxlen=100 * self.nr_envs)
+        replay_buffer = ReplayBuffer(
+            self.buffer_size_per_env,
+            self.nr_envs,
+            self.env.single_observation_space.shape,
+            self.env.single_action_space.shape,
+            self.n_steps,
+            self.gamma,
+            self.device
+        )
 
         state, _ = self.env.reset()
+        noise_scales = torch.rand(self.nr_envs, 1, device=self.device) * (self.noise_std_max - self.noise_std_min) + self.noise_std_min
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -122,28 +134,22 @@ class FastTD3:
 
             # Acting
             dones_this_rollout = 0
-            if global_step < self.learning_starts:
-                processed_action = np.array([self.env.single_action_space.sample() for _ in range(self.nr_envs)])
-                action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
-            else:
-                action, processed_action, _ = self.policy.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                action = action.detach().cpu().numpy()
-                processed_action = processed_action.detach().cpu().numpy()
-            
-            next_state, reward, terminated, truncated, info = self.env.step(processed_action)
+            action, processed_action = self.policy.get_action(state, noise_scales)
+            state, reward, terminated, truncated, info = self.env.step(processed_action)
             done = terminated | truncated
-            actual_next_state = next_state.copy()
-            for i, single_done in enumerate(done):
-                if single_done:
-                    actual_next_state[i] = np.array(self.env.get_final_observation_at_index(info, i))
-                    saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                    dones_this_rollout += 1
+            actual_next_state = state  # TODO: Use the correct actual_next_state
+            dones_this_rollout += done.sum().item()
             for key, info_value in self.env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
             
-            replay_buffer.add(state, actual_next_state, action, reward, terminated)
+            replay_buffer.add(state, actual_next_state, action, reward, done, truncated)
 
-            state = next_state
+            noise_scales = torch.where(
+                done[:, None],
+                torch.rand(self.nr_envs, 1, device=self.device) * (self.noise_std_max - self.noise_std_min) + self.noise_std_min,
+                noise_scales
+            )
+
             global_step += self.nr_envs
             nr_episodes += dones_this_rollout
 
@@ -152,7 +158,7 @@ class FastTD3:
 
 
             # What to do in this step after acting
-            should_learning_start = global_step > self.learning_starts
+            should_learning_start = global_step > self.learning_starts * self.nr_envs
             should_optimize = should_learning_start
             should_evaluate = global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1
             should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
@@ -171,6 +177,8 @@ class FastTD3:
             
             # Optimizing - Prepare batches
             if should_optimize:
+                print("hey")
+                exit()
                 batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size)
 
 
@@ -249,23 +257,7 @@ class FastTD3:
             # Evaluating
             if should_evaluate:
                 self.set_eval_mode()
-                state, _ = self.env.reset()
-                eval_nr_episodes = 0
-                while True:
-                    with torch.no_grad():
-                        processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                    state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
-                    done = terminated | truncated
-                    for i, single_done in enumerate(done):
-                        if single_done:
-                            eval_nr_episodes += 1
-                            evaluation_metrics_collection.setdefault("eval/episode_return", []).append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                            evaluation_metrics_collection.setdefault("eval/episode_length", []).append(self.env.get_final_info_value_at_index(info, "episode_length", i))
-                            if eval_nr_episodes == self.evaluation_episodes:
-                                break
-                    if eval_nr_episodes == self.evaluation_episodes:
-                        break
-                state, _ = self.env.reset()
+                # TODO
                 self.set_train_mode()
             
             evaluating_end_time = time.time()
@@ -274,10 +266,7 @@ class FastTD3:
 
             # Saving
             if should_try_to_save:
-                mean_return = np.mean(saving_return_buffer)
-                if mean_return > self.best_mean_return:
-                    self.best_mean_return = mean_return
-                    self.save()
+                self.save()
             
             saving_end_time = time.time()
             time_metrics_collection.setdefault("time/saving_time", []).append(saving_end_time - evaluating_end_time)
@@ -344,7 +333,7 @@ class FastTD3:
 
 
     def save(self):
-        file_path = self.save_path + "/model_best.pt"
+        file_path = self.save_path + "/latest.model"
         save_dict = {
             "config_algorithm": self.config.algorithm,
             "policy_state_dict": self.policy.state_dict(),
@@ -352,10 +341,8 @@ class FastTD3:
             "q2_state_dict": self.critic.q2.state_dict(),
             "q1_target_state_dict": self.critic.q1_target.state_dict(),
             "q2_target_state_dict": self.critic.q2_target.state_dict(),
-            "log_alpha": self.entropy_coefficient.log_alpha,
             "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
             "q_optimizer_state_dict": self.q_optimizer.state_dict(),
-            "entropy_optimizer_state_dict": self.entropy_optimizer.state_dict(),
         }
         torch.save(save_dict, file_path)
         if self.track_wandb:
@@ -374,26 +361,20 @@ class FastTD3:
         model.critic.q2.load_state_dict(checkpoint["q2_state_dict"])
         model.critic.q1_target.load_state_dict(checkpoint["q1_target_state_dict"])
         model.critic.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
-        model.entropy_coefficient.log_alpha = checkpoint["log_alpha"]
         model.policy_optimizer.load_state_dict(checkpoint["policy_optimizer_state_dict"])
         model.q_optimizer.load_state_dict(checkpoint["q_optimizer_state_dict"])
-        model.entropy_optimizer.load_state_dict(checkpoint["entropy_optimizer_state_dict"])
         return model
 
     
-    def test(self, episodes):
+    def test(self):
+        rlx_logger.info("Testing runs infinitely. The episodes parameter is ignored.")
+
         self.set_eval_mode()
-        for i in range(episodes):
-            done = False
-            episode_return = 0
-            state, _ = self.env.reset()
-            while not done:
-                with torch.no_grad():
-                    processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
-                done = terminated | truncated
-                episode_return += reward
-            rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
+        state, _ = self.env.reset()
+        while True:
+            with torch.no_grad():
+                _, processed_action = self.policy.get_action(state)
+            self.env.step(processed_action)
 
 
     def set_train_mode(self):

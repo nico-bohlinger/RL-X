@@ -48,7 +48,7 @@ class Policy(nn.Module):
         return action
 
 
-    def get_action(self, x, noise_scales):
+    def get_action(self, x, noise_scales=None):
         with torch.no_grad():
             action = self.forward(x)
             if noise_scales is not None:

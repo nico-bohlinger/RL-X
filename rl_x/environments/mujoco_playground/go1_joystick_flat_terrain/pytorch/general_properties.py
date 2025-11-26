@@ -7,6 +7,6 @@ from rl_x.environments.simulation_type import SimulationType
 class GeneralProperties:
     observation_space_type = ObservationSpaceType.FLAT_VALUES
     action_space_type = ActionSpaceType.CONTINUOUS
-    data_interface_type = DataInterfaceType.JAX
+    data_interface_type = DataInterfaceType.TORCH
 
     simulation_type = SimulationType.JAX_BASED
