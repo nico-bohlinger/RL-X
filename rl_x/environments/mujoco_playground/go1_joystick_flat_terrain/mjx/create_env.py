@@ -1,10 +1,13 @@
 from mujoco_playground import registry, wrapper
 
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.wrappers import RLXInfo
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.general_properties import GeneralProperties
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.mjx.wrappers import RLXInfo
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.mjx.general_properties import GeneralProperties
 
 
 def create_env(config):
+    if config.environment.render:
+        raise NotImplementedError("Rendering is not supported yet.")
+
     mbp_env_config = registry.get_default_config(config.environment.type)
     randomizer = (registry.get_domain_randomizer(config.environment.type) if config.environment.use_domain_randomization else None)
 

@@ -386,7 +386,7 @@ class PPO:
 
 
     def save(self):
-        file_path = self.save_path + "/model_best.pt"
+        file_path = self.save_path + "/best.model"
         torch.save({
             "config_algorithm": self.config.algorithm,
             "policy_state_dict": self.policy.state_dict(),

@@ -92,6 +92,11 @@ class Runner:
         if environment_general_properties.data_interface_type not in algorithm_general_properties.data_interface_types:
             raise ValueError(f"Incompatible data interface type. Environment: {environment_general_properties.data_interface_type}, Algorithm: {algorithm_general_properties.data_interface_types}")
 
+        # Default settings
+        runner_default_config = get_runner_config(self._mode)
+        algorithm_default_config = get_algorithm_config(algorithm_name)
+        environment_default_config = get_environment_config(environment_name)
+
         # General Deep Learning framework settings
         algorithm_uses_torch = DeepLearningFrameworkType.TORCH == algorithm_general_properties.deep_learning_framework_type
         algorithm_uses_jax = DeepLearningFrameworkType.JAX == algorithm_general_properties.deep_learning_framework_type
@@ -127,7 +132,6 @@ class Runner:
             # Guarantee enough memory for CUBLAS to initialize when using jax
             os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
             import jax
-            runner_default_config = get_runner_config(self._mode)
             def get_runner_config_value(arg_name):
                 arg_value = [arg for arg in sys.argv if arg.startswith(f"--runner.{arg_name}=")]
                 if arg_value:
@@ -175,8 +179,6 @@ class Runner:
         self._model_class = get_algorithm_model_class(algorithm_name)
         self._create_env = get_environment_create_env(environment_name)
         
-        algorithm_default_config = get_algorithm_config(algorithm_name)
-        environment_default_config = get_environment_config(environment_name)
         self._runner_config_flag = config_flags.DEFINE_config_dict("runner", runner_default_config)
         self._algorithm_config_flag = config_flags.DEFINE_config_dict("algorithm", algorithm_default_config)
         self._environment_config_flag = config_flags.DEFINE_config_dict("environment", environment_default_config)

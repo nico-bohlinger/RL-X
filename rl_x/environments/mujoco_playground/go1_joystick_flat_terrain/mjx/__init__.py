@@ -1,0 +1,8 @@
+from rl_x.environments.environment_manager import extract_environment_name_from_file, register_environment
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.mjx.create_env import create_env
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.mjx.default_config import get_config
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.mjx.general_properties import GeneralProperties
+
+
+MUJOCO_PLAYGROUND_GO1_JOYSTICK_FLAT_TERRAIN_MJX = extract_environment_name_from_file(__file__)
+register_environment(MUJOCO_PLAYGROUND_GO1_JOYSTICK_FLAT_TERRAIN_MJX, get_config, create_env, GeneralProperties)
