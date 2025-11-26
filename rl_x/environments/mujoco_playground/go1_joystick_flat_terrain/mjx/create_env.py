@@ -1,7 +1,7 @@
 from mujoco_playground import registry, wrapper
 
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.wrappers import RLXInfo
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.general_properties import GeneralProperties
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.mjx.wrappers import RLXInfo
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.mjx.general_properties import GeneralProperties
 
 
 def create_env(config):
