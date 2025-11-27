@@ -209,7 +209,7 @@ class FastTD3:
             action, processed_action = self.policy.get_action(state, noise_scales)
             state, reward, terminated, truncated, info = self.env.step(processed_action)
             done = terminated | truncated
-            actual_next_state = state  # We will not implement this for now!
+            actual_next_state = state  # TODO: Handle this properly
             dones_this_rollout += done.sum().item()
             for key, info_value in self.env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
@@ -315,7 +315,7 @@ class FastTD3:
             # Evaluating
             if should_evaluate:
                 self.set_eval_mode()
-                # We will not implement this for now!
+                # TODO: Implement evaluation logic
                 self.set_train_mode()
             
             evaluating_end_time = time.time()
