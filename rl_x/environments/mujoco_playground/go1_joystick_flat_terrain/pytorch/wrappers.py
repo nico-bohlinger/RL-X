@@ -19,6 +19,10 @@ class RLXInfo(gym.Wrapper):
     def reset(self):
         _, observation = self.env.reset_with_critic_obs()
         info = {}
+
+        self.episode_returns = np.zeros(self.nr_envs, dtype=np.float32)
+        self.episode_lengths = np.zeros(self.nr_envs, dtype=np.float32)
+
         return observation, info
     
 
@@ -28,6 +32,16 @@ class RLXInfo(gym.Wrapper):
         done = done > 0.5
         truncated = info["time_outs"] > 0.5
         terminated = done & (~truncated)
+
+        self.episode_returns += reward.cpu().detach().numpy()
+        self.episode_lengths += 1.0
+        done_np = done.cpu().detach().numpy()
+        if done.any():
+            info["log"]["episode_return"] = self.episode_returns[done_np].mean()
+            info["log"]["episode_length"] = self.episode_lengths[done_np].mean()
+        self.episode_returns = np.where(done_np, 0.0, self.episode_returns)
+        self.episode_lengths = np.where(done_np, 0.0, self.episode_lengths)
+
         return observation, reward, terminated, truncated, info
     
 
