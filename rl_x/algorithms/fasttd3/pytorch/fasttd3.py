@@ -103,7 +103,7 @@ class FastTD3:
             return loss
         
 
-        #@torch.compile(mode=self.compile_mode)
+        @torch.compile(mode=self.compile_mode)
         def critic_loss_fn(states, next_states, actions, rewards, dones, truncations, effective_n_steps):
             with torch.no_grad():
                 noise = torch.clamp(torch.randn_like(actions) * self.smoothing_epsilon, -self.smoothing_clip_value, self.smoothing_clip_value)
