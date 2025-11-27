@@ -17,13 +17,14 @@ class RLXInfo(gym.Wrapper):
 
 
     def reset(self):
-        observation = self.env.reset()
+        _, observation = self.env.reset_with_critic_obs()
         info = {}
         return observation, info
     
 
     def step(self, action):
-        observation, reward, done, info = self.env.step(action)
+        _, reward, done, info = self.env.step(action)
+        observation = info["observations"]["critic"]
         done = done > 0.5
         truncated = info["time_outs"] > 0.5
         terminated = done & (~truncated)
@@ -31,19 +32,8 @@ class RLXInfo(gym.Wrapper):
     
 
     def get_logging_info_dict(self, info):
-        print(info)
-        exit()
-        keys_to_remove = ["final_observation", "_final_observation", "final_info", "_final_info", "elapsed_steps", "_elapsed_steps", "reconfigure", "fail", "episode"]
-
-        if "final_info" in info:
-            for key in info["final_info"].keys():
-                if key not in keys_to_remove:
-                    info[key] = torch.where(info["_final_info"].unsqueeze(1), info["final_info"][key], info[key])
-            info["episode_return"] = info["final_info"]["episode"]["return"]
-            info["episode_length"] = info["final_info"]["episode"]["episode_len"]
-
         logging_info = {
-            key: info[key].tolist() for key in list(info.keys()) if key not in keys_to_remove
+            key: [info["log"][key],] for key in list(info["log"].keys())
         }
 
         return logging_info

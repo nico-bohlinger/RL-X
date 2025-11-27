@@ -75,6 +75,8 @@ class FastTD3:
 
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay)
+        
+        self.q_support = torch.linspace(self.v_min, self.v_max, self.nr_atoms, device=self.device)
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -82,28 +84,98 @@ class FastTD3:
     
     def train(self):
         @torch.compile(mode=self.compile_mode)
-        def policy_loss_fn(current_log_probs, q1, q2, alpha):
-            min_q = torch.minimum(q1, q2)
-            policy_loss = (alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+        def policy_loss_fn(states):
+            actions = self.policy(states)
 
-            return policy_loss, min_q
+            q1_dist = F.softmax(self.critic.q1(states, actions), dim=1)
+            q2_dist = F.softmax(self.critic.q2(states, actions), dim=1)
+
+            q1_value = torch.sum(q1_dist * self.q_support.unsqueeze(0), dim=1)
+            q2_value = torch.sum(q2_dist * self.q_support.unsqueeze(0), dim=1)
+
+            if self.clipped_double_q_learning:
+                q_value = torch.minimum(q1_value, q2_value)
+            else:
+                q_value = (q1_value + q2_value) / 2.0
+
+            loss = -q_value.mean()
+
+            return loss
         
 
-        @torch.compile(mode=self.compile_mode)
-        def critic_loss_fn(critic, states, next_states, actions, next_actions, next_log_probs, rewards, dones, alpha):
+        #@torch.compile(mode=self.compile_mode)
+        def critic_loss_fn(states, next_states, actions, rewards, dones, truncations, effective_n_steps):
             with torch.no_grad():
-                next_q1_target = critic.q1_target(next_states, next_actions)
-                next_q2_target = critic.q2_target(next_states, next_actions)
-                min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
-                y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (min_next_q_target - alpha.detach() * next_log_probs)
+                noise = torch.clamp(torch.randn_like(actions) * self.smoothing_epsilon, -self.smoothing_clip_value, self.smoothing_clip_value)
+                next_actions = torch.clamp(self.policy(next_states) + noise, -1.0, 1.0)
 
-            q1 = critic.q1(states, actions)
-            q2 = critic.q2(states, actions)
-            q1_loss = F.mse_loss(q1, y)
-            q2_loss = F.mse_loss(q2, y)
-            q_loss = (q1_loss + q2_loss) / 2
+                delta_z = (self.v_max - self.v_min) / (self.nr_atoms - 1)
+                bootstrap = 1.0 - (dones * (1.0 - truncations))
+                discount = (self.gamma ** effective_n_steps) * bootstrap
+                target_z = torch.clamp(rewards.unsqueeze(1) + discount.unsqueeze(1) * self.q_support.unsqueeze(0), self.v_min, self.v_max)
+                b = (target_z - self.v_min) / delta_z
+                l = torch.floor(b).long()
+                u = torch.ceil(b).long()
 
-            return q_loss
+                is_int = (l == u)
+                l_mask = torch.logical_and(is_int, l > 0)
+                u_mask = torch.logical_and(is_int, l == 0)
+
+                l = torch.where(l_mask, l - 1, l)
+                u = torch.where(u_mask, u + 1, u)
+
+                q1_next_dist = F.softmax(self.critic.q1_target(next_states, next_actions), dim=1)
+                q2_next_dist = F.softmax(self.critic.q2_target(next_states, next_actions), dim=1)
+
+                batch_size = states.shape[0]
+                offset = (
+                    torch.linspace(0, (batch_size - 1) * self.nr_atoms, batch_size, device=self.device)
+                    .long()
+                    .unsqueeze(1)
+                    .expand(batch_size, self.nr_atoms)
+                )
+                proj_dist1 = torch.zeros_like(q1_next_dist)
+                proj_dist2 = torch.zeros_like(q2_next_dist)
+                wt_l = (u.float() - b)
+                wt_u = (b - l.float())
+
+                proj_dist1.view(-1).index_add_(
+                    0, (l + offset).view(-1), (q1_next_dist * wt_l).view(-1)
+                )
+                proj_dist1.view(-1).index_add_(
+                    0, (u + offset).view(-1), (q1_next_dist * wt_u).view(-1)
+                )
+                proj_dist2.view(-1).index_add_(
+                    0, (l + offset).view(-1), (q2_next_dist * wt_l).view(-1)
+                )
+                proj_dist2.view(-1).index_add_(
+                    0, (u + offset).view(-1), (q2_next_dist * wt_u).view(-1)
+                )
+
+                q1_next_value = torch.sum(proj_dist1 * self.q_support.unsqueeze(0), dim=1)
+                q2_next_value = torch.sum(proj_dist2 * self.q_support.unsqueeze(0), dim=1)
+
+                if self.clipped_double_q_learning:
+                    qf_next_target_dist = torch.where(q1_next_value.unsqueeze(1) < q2_next_value.unsqueeze(1), proj_dist1, proj_dist2)
+                    qf1_next_target_dist = qf_next_target_dist
+                    qf2_next_target_dist = qf_next_target_dist
+                else:
+                    qf1_next_target_dist = proj_dist1
+                    qf2_next_target_dist = proj_dist2
+                    
+            current_q1 = self.critic.q1(states, actions)
+            current_q2 = self.critic.q2(states, actions)
+
+            q1_loss = -torch.sum(qf1_next_target_dist * F.log_softmax(current_q1, dim=1), dim=1).mean()
+            q2_loss = -torch.sum(qf2_next_target_dist * F.log_softmax(current_q2, dim=1), dim=1).mean()
+            
+            q_loss = q1_loss + q2_loss
+            
+            # Metrics
+            q_min = q1_next_value.min()
+            q_max = q1_next_value.max()
+            
+            return q_loss, q_min, q_max
 
 
         self.set_train_mode()
@@ -137,7 +209,7 @@ class FastTD3:
             action, processed_action = self.policy.get_action(state, noise_scales)
             state, reward, terminated, truncated, info = self.env.step(processed_action)
             done = terminated | truncated
-            actual_next_state = state  # TODO: Use the correct actual_next_state
+            actual_next_state = state  # We will not implement this for now!
             dones_this_rollout += done.sum().item()
             for key, info_value in self.env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
@@ -170,85 +242,71 @@ class FastTD3:
             if self.anneal_learning_rate:
                 fraction = 1 - (global_step / self.total_timesteps)
                 learning_rate = fraction * self.learning_rate
-                param_groups = self.policy_optimizer.param_groups + self.q_optimizer.param_groups + self.entropy_optimizer.param_groups
+                param_groups = self.policy_optimizer.param_groups + self.q_optimizer.param_groups
                 for param_group in param_groups:
                     param_group["lr"] = learning_rate
 
             
-            # Optimizing - Prepare batches
+            # Optimizing
             if should_optimize:
-                print("hey")
-                exit()
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size)
+                for _ in range(self.nr_policy_updates_per_step):
+                    critic_grad_norm = 0.0
+                    policy_grad_norm = 0.0
 
+                    for _ in range(self.nr_critic_updates_per_policy_update):
+                        batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncations, batch_effective_n_steps = replay_buffer.sample(self.batch_size)
+                        q_loss, q_min, q_max = critic_loss_fn(batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncations, batch_effective_n_steps)
+                        
+                        self.q_optimizer.zero_grad()
+                        q_loss.backward()
+                        
+                        if self.max_grad_norm > 0.0:
+                            critic_grad_norm = torch.nn.utils.clip_grad_norm_(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), self.max_grad_norm).item()
+                        else:
+                            critic_grad_norm_val = 0.0
+                            for p in list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()):
+                                if p.grad is not None:
+                                    critic_grad_norm_val += p.grad.detach().data.norm(2).item() ** 2
+                            critic_grad_norm = critic_grad_norm_val ** 0.5
+                        
+                        self.q_optimizer.step()
 
-            # Optimizing - Q-functions, policy and entropy coefficient
-            if should_optimize:
-                # Critic loss
-                with torch.no_grad():
-                    next_actions, _, next_log_probs = self.policy.get_action(batch_next_states)
-                
-                q_loss = critic_loss_fn(self.critic, batch_states, batch_next_states, batch_actions, next_actions, next_log_probs, batch_rewards, batch_terminations, self.alpha)
+                        with torch.no_grad():
+                            for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
+                                target_param.data.mul_(1.0 - self.tau).add_(param.data, alpha=self.tau)
+                            for param, target_param in zip(self.critic.q2.parameters(), self.critic.q2_target.parameters()):
+                                target_param.data.mul_(1.0 - self.tau).add_(param.data, alpha=self.tau)
 
-                self.q_optimizer.zero_grad()
-                q_loss.backward()
-                q1_grad_norm = 0.0
-                q2_grad_norm = 0.0
-                for param in self.critic.q1.parameters():
-                    q1_grad_norm += param.grad.detach().data.norm(2).item() ** 2
-                for param in self.critic.q2.parameters():
-                    q2_grad_norm += param.grad.detach().data.norm(2).item() ** 2
-                critic_grad_norm = q1_grad_norm ** 0.5 + q2_grad_norm ** 0.5
-                self.q_optimizer.step()
+                        nr_updates += 1
+                    
+                    policy_loss = policy_loss_fn(batch_states)
 
-                # Update critic targets
-                for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
-                    target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-                for param, target_param in zip(self.critic.q2.parameters(), self.critic.q2_target.parameters()):
-                    target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+                    self.policy_optimizer.zero_grad()
+                    policy_loss.backward()
 
-                # Policy loss
-                current_actions, _, current_log_probs = self.policy.get_action(batch_states)
-                q1 = self.critic.q1(batch_states, current_actions)
-                q2 = self.critic.q2(batch_states, current_actions)
-                policy_loss, min_q = policy_loss_fn(current_log_probs, q1, q2, self.alpha)
+                    if self.max_grad_norm > 0.0:
+                        policy_grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm).item()
+                    else:
+                        policy_grad_norm_val = 0.0
+                        for p in self.policy.parameters():
+                            if p.grad is not None:
+                                policy_grad_norm_val += p.grad.detach().data.norm(2).item() ** 2
+                        policy_grad_norm = policy_grad_norm_val ** 0.5
+                    
+                    self.policy_optimizer.step()
 
-                self.policy_optimizer.zero_grad()
-                policy_loss.backward()
-                policy_grad_norm = 0.0
-                for param in self.policy.parameters():
-                    policy_grad_norm += param.grad.detach().data.norm(2).item() ** 2
-                policy_grad_norm = policy_grad_norm ** 0.5
-                self.policy_optimizer.step()
+                    optimization_metrics = {
+                        "gradients/policy_grad_norm": policy_grad_norm,
+                        "gradients/critic_grad_norm": critic_grad_norm,
+                        "loss/q_loss": q_loss.item(),
+                        "loss/policy_loss": policy_loss.item(),
+                        "lr/learning_rate": learning_rate,
+                        "q/q_max": q_max.item(),
+                        "q/q_min": q_min.item()
+                    }
 
-                # Entropy loss
-                entropy = -current_log_probs.detach().mean()
-                entropy_loss = self.entropy_coefficient.loss(entropy)
-
-                self.entropy_optimizer.zero_grad()
-                entropy_loss.backward()
-                entropy_grad_norm = self.entropy_coefficient.log_alpha.grad.detach().data.norm(2).item() ** 2
-                self.entropy_optimizer.step()
-
-                self.alpha = self.entropy_coefficient()
-
-                # Create metrics
-                optimization_metrics = {
-                    "entropy/alpha": self.alpha.item(),
-                    "entropy/entropy": entropy.item(),
-                    "gradients/policy_grad_norm": policy_grad_norm,
-                    "gradients/critic_grad_norm": critic_grad_norm,
-                    "gradients/entropy_grad_norm": entropy_grad_norm,
-                    "loss/q_loss": q_loss.item(),
-                    "loss/policy_loss": policy_loss.item(),
-                    "loss/entropy_loss": entropy_loss.item(),
-                    "lr/learning_rate": learning_rate,
-                    "q_value/q_value": min_q.mean().item(),
-                }
-
-                for key, value in optimization_metrics.items():
-                    optimization_metrics_collection.setdefault(key, []).append(value)
-                nr_updates += 1
+                    for key, value in optimization_metrics.items():
+                        optimization_metrics_collection.setdefault(key, []).append(value)
             
             optimizing_end_time = time.time()
             time_metrics_collection.setdefault("time/optimizing_time", []).append(optimizing_end_time - acting_end_time)
@@ -257,7 +315,7 @@ class FastTD3:
             # Evaluating
             if should_evaluate:
                 self.set_eval_mode()
-                # TODO
+                # We will not implement this for now!
                 self.set_train_mode()
             
             evaluating_end_time = time.time()
@@ -279,7 +337,8 @@ class FastTD3:
                 self.start_logging(global_step)
 
                 steps_metrics["steps/nr_env_steps"] = global_step
-                steps_metrics["steps/nr_updates"] = nr_updates
+                steps_metrics["steps/nr_critic_updates"] = nr_updates
+                steps_metrics["steps/nr_policy_updates"] = nr_updates // self.nr_critic_updates_per_policy_update
                 steps_metrics["steps/nr_episodes"] = nr_episodes
 
                 rollout_info_metrics = {}
