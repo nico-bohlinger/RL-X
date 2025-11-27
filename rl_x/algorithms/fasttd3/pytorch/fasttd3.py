@@ -73,8 +73,8 @@ class FastTD3:
         self.policy = get_policy(config, env, self.device)
         self.critic = get_critic(config, env, self.device)
 
-        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
-        self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay)
+        self.policy_optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+        self.q_optimizer = optim.AdamW(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay)
         
         self.q_support = torch.linspace(self.v_min, self.v_max, self.nr_atoms, device=self.device)
 
