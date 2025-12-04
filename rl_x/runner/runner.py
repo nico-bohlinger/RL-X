@@ -128,7 +128,8 @@ class Runner:
                     env_device = getattr(get_environment_config(environment_name), "device", None)
                 if alg_device and env_device and alg_device != env_device:
                     raise ValueError("Incompatible device types between algorithm and environment")
-        elif algorithm_uses_jax or environment_uses_jax:
+        
+        if algorithm_uses_jax or environment_uses_jax:
             # Guarantee enough memory for CUBLAS to initialize when using jax
             os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
             import jax
@@ -140,14 +141,12 @@ class Runner:
                     arg_value = getattr(runner_default_config, arg_name, None)
                 return arg_value
             # Change default precision for matmul
-            jax_default_matmul_precision = get_runner_config_value("jax_default_matmul_precision")
-            jax.config.update("jax_default_matmul_precision", jax_default_matmul_precision)
+            jax.config.update("jax_default_matmul_precision", get_runner_config_value("jax_default_matmul_precision"))
             # Spent most possible time to optimize execution time and memory usage
-            jax.config.update("jax_exec_time_optimization_effort", 1.0)
-            jax.config.update("jax_memory_fitting_effort", 1.0)
+            jax.config.update("jax_exec_time_optimization_effort", float(get_runner_config_value("jax_exec_time_optimization_effort")))
+            jax.config.update("jax_memory_fitting_effort", float(get_runner_config_value("jax_memory_fitting_effort")))
             # Enable jax cache
-            jax_cache_dir = get_runner_config_value("jax_cache_dir")
-            jax.config.update("jax_compilation_cache_dir", jax_cache_dir)
+            jax.config.update("jax_compilation_cache_dir", get_runner_config_value("jax_cache_dir"))
             jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
             jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
             jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
