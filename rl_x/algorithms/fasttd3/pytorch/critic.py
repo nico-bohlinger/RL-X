@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 
 from rl_x.environments.observation_space_type import ObservationSpaceType
