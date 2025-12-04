@@ -22,7 +22,7 @@ def get_config(runner_mode):
     config.nr_test_episodes = 10  # if runner mode = test
 
     config.jax_cache_dir = "/tmp/jax_cache"
-    config.jax_default_matmul_precision = "default"
+    config.jax_default_matmul_precision = "bfloat16"
     config.jax_exec_time_optimization_effort = 0.0
     config.jax_memory_fitting_effort = 1.0
 
