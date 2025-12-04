@@ -47,6 +47,7 @@ class RLXInfo(gym.Wrapper):
 
     @partial(jax.jit, static_argnums=(0,))
     def step(self, wrapper_state, action):
+        action = jnp.clip(action, -1, 1)
         env_state = self.env.step(wrapper_state.env_state, action)
         done = env_state.done.astype(jnp.bool)
         episode_return = wrapper_state.info_episode_store["episode_return"] + env_state.reward
