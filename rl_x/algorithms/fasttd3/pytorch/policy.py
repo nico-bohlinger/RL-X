@@ -23,7 +23,7 @@ class Policy(nn.Module):
     def __init__(self, env, action_clipping_and_rescaling, device, policy_observation_indices):
         super().__init__()
         self.action_clipping_and_rescaling = action_clipping_and_rescaling
-        self.policy_observation_indices = policy_observation_indices
+        self.policy_observation_indices = torch.tensor(policy_observation_indices, dtype=torch.long, device=device)
         self.env_as_low = torch.tensor(env.single_action_space.low, dtype=torch.float32, device=device)
         self.env_as_high = torch.tensor(env.single_action_space.high, dtype=torch.float32, device=device)
 
@@ -37,9 +37,15 @@ class Policy(nn.Module):
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(128, nr_actions),
+            self.layer_init(nn.Linear(128, nr_actions), std=0.01),
             nn.Tanh()
         )
+
+
+    def layer_init(self, layer, std, bias_const=(0.0)):
+        nn.init.normal_(layer.weight, 0.0, std)
+        nn.init.constant_(layer.bias, bias_const)
+        return layer
 
 
     def forward(self, x):

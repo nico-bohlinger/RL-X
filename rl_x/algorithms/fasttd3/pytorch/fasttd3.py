@@ -52,10 +52,17 @@ class FastTD3:
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
+        self.save_frequency = config.algorithm.save_frequency
         self.horizon = env.horizon
 
         if self.evaluation_frequency != -1:
             raise NotImplementedError("Evaluation is not supported yet.")
+        
+        if self.logging_frequency % self.nr_envs != 0:
+            raise ValueError("The logging frequency must be a multiple of the number of environments.")
+        
+        if self.save_frequency != -1 and self.save_frequency % self.nr_envs != 0:
+            raise ValueError("The save frequency must be a multiple of the number of environments.")
 
         if config.algorithm.device == "gpu" and torch.cuda.is_available():
             device_name = "cuda"
@@ -208,8 +215,9 @@ class FastTD3:
             dones_this_rollout = 0
             action, processed_action = self.policy.get_action(state, noise_scales)
             state, reward, terminated, truncated, info = self.env.step(processed_action)
+            next_state, reward, terminated, truncated, info = self.env.step(processed_action)
             done = terminated | truncated
-            actual_next_state = state  # TODO: Handle this properly
+            actual_next_state = next_state  # TODO: Handle this properly
             dones_this_rollout += done.sum().item()
             for key, info_value in self.env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
@@ -222,6 +230,7 @@ class FastTD3:
                 noise_scales
             )
 
+            state = next_state
             global_step += self.nr_envs
             nr_episodes += dones_this_rollout
 
@@ -233,7 +242,7 @@ class FastTD3:
             should_learning_start = global_step > self.learning_starts * self.nr_envs
             should_optimize = should_learning_start
             should_evaluate = global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1
-            should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
+            should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0 and global_step % self.save_frequency == 0
             should_log = global_step % self.logging_frequency == 0
 
 

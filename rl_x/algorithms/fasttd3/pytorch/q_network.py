@@ -11,15 +11,15 @@ def get_q_network(config, env, device):
     compile_mode = config.algorithm.compile_mode
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        q_network = torch.compile(QNetwork(env, config.algorithm.nr_atoms, critic_observation_indices).to(device), mode=compile_mode)
+        q_network = torch.compile(QNetwork(env, config.algorithm.nr_atoms, device, critic_observation_indices).to(device), mode=compile_mode)
         q_network.forward = torch.compile(q_network.forward, mode=compile_mode)
         return q_network
 
 
 class QNetwork(nn.Module):
-    def __init__(self, env, nr_atoms, critic_observation_indices):
+    def __init__(self, env, nr_atoms, device, critic_observation_indices):
         super().__init__()
-        self.critic_observation_indices = critic_observation_indices
+        self.critic_observation_indices = torch.tensor(critic_observation_indices, dtype=torch.long, device=device)
 
         nr_observations = len(critic_observation_indices)
         nr_actions = np.prod(env.single_action_space.shape, dtype=int).item()

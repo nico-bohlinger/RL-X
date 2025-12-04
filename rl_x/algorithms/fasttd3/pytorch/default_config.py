@@ -7,7 +7,7 @@ def get_config(algorithm_name):
     config.name = algorithm_name
 
     config.device = "gpu"  # cpu, gpu, mps
-    config.compile_mode = "default"  # default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs
+    config.compile_mode = "reduce-overhead"  # default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs
     config.total_timesteps = 2000158720
     config.learning_rate = 3e-4
     config.anneal_learning_rate = False
@@ -32,5 +32,6 @@ def get_config(algorithm_name):
     config.action_clipping_and_rescaling = False
     config.logging_frequency = 40960
     config.evaluation_frequency = -1  # -1 to disable
+    config.save_frequency = 4096000  # -1 to disable
 
     return config
