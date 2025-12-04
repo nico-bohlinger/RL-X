@@ -348,7 +348,7 @@ class FastTD3:
                         grad_policy_loss_fn = jax.value_and_grad(mean_vmapped_policy_loss_fn, argnums=(0,), has_aux=True)
 
                         # Sample batch from replay buffer and handling n-step returns
-                        key, idx_key, noise_key = jax.random.split(key, 3)
+                        key, idx_key_t, idx_key_e, noise_key = jax.random.split(key, 4)
 
                         def full_case(_):
                             last_idx = (replay_buffer["pos"] - 1) % self.buffer_size_per_env
@@ -364,8 +364,8 @@ class FastTD3:
 
                         max_start, truncations_for_sampling = jax.lax.cond(replay_buffer["size"] >= self.buffer_size_per_env, full_case,  not_full_case, operand=None)
 
-                        idx1 = jax.random.randint(idx_key, (self.nr_critic_updates_per_step, self.batch_size), 0, max_start)
-                        idx2 = jax.random.randint(idx_key, (self.nr_critic_updates_per_step, self.batch_size), 0, self.nr_envs)
+                        idx1 = jax.random.randint(idx_key_t, (self.nr_critic_updates_per_step, self.batch_size), 0, max_start)
+                        idx2 = jax.random.randint(idx_key_e, (self.nr_critic_updates_per_step, self.batch_size), 0, self.nr_envs)
                         update_keys = jax.random.split(noise_key, self.nr_critic_updates_per_step * self.batch_size)
                         update_keys = update_keys.reshape(self.nr_critic_updates_per_step, self.batch_size, -1)
                         states_all = replay_buffer["states"][idx1, idx2]
