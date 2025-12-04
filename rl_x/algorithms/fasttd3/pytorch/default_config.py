@@ -8,6 +8,7 @@ def get_config(algorithm_name):
 
     config.device = "gpu"  # cpu, gpu, mps
     config.compile_mode = "reduce-overhead"  # default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs
+    config.bf16_mixed_precision_training = True
     config.total_timesteps = 2000158720
     config.learning_rate = 3e-4
     config.anneal_learning_rate = False

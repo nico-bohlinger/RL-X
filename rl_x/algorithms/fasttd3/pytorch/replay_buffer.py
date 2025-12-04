@@ -1,7 +1,7 @@
 import torch
 
 
-class ReplayBuffer():
+class ReplayBuffer:
     def __init__(self, buffer_size_per_env, nr_envs, os_shape, as_shape, n_steps, gamma, device):
         self.os_shape = os_shape
         self.as_shape = as_shape

@@ -55,13 +55,12 @@ class Policy(nn.Module):
 
 
     def get_action(self, x, noise_scales=None):
-        with torch.no_grad():
-            action = self.forward(x)
-            if noise_scales is not None:
-                noise = torch.randn_like(action) * noise_scales
-                action = action + noise
-            processed_action = action
-            if self.action_clipping_and_rescaling:
-                clipped_action = torch.clamp(action, -1.0, 1.0)
-                processed_action = self.env_as_low + 0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low)
-            return action, processed_action
+        action = self.forward(x)
+        if noise_scales is not None:
+            noise = torch.randn_like(action) * noise_scales
+            action = action + noise
+        processed_action = action
+        if self.action_clipping_and_rescaling:
+            clipped_action = torch.clamp(action, -1.0, 1.0)
+            processed_action = self.env_as_low + 0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low)
+        return action, processed_action
