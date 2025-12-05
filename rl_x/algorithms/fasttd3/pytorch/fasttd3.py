@@ -57,9 +57,6 @@ class FastTD3:
         self.save_frequency = config.algorithm.save_frequency
         self.horizon = env.horizon
 
-        if self.evaluation_frequency != -1:
-            raise NotImplementedError("Evaluation is not supported yet.")
-        
         if self.logging_frequency % self.nr_envs != 0:
             raise ValueError("The logging frequency must be a multiple of the number of environments.")
         
@@ -311,7 +308,7 @@ class FastTD3:
                         "gradients/critic_grad_norm": critic_grad_norm.item(),
                         "loss/q_loss": q_loss.item(),
                         "loss/policy_loss": policy_loss.item(),
-                        "lr/learning_rate": self.policy_scheduler.get_last_lr()[0],
+                        "lr/learning_rate": self.learning_rate if not self.anneal_learning_rate else self.q_scheduler.get_last_lr()[0],
                         "q/q_max": q_max.item(),
                         "q/q_min": q_min.item()
                     }
@@ -330,7 +327,19 @@ class FastTD3:
             # Evaluating
             if should_evaluate:
                 self.set_eval_mode()
-                # TODO: Implement evaluation logic
+                eval_state, _ = self.env.reset()
+                for _ in range(self.horizon):
+                    with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
+                        _, eval_processed_action = self.policy.get_action(eval_state)
+                    if self.bf16_mixed_precision_training:
+                        eval_processed_action = eval_processed_action.to(torch.float32)
+                    eval_state, _, _, _, eval_info = self.env.step(eval_processed_action)
+                    eval_logging_info = self.env.get_logging_info_dict(eval_info)
+                    if "episode_return" in eval_logging_info:
+                        evaluation_metrics_collection.setdefault("eval/episode_return", []).extend(eval_logging_info["episode_return"])
+                    if "episode_length" in eval_logging_info:
+                        evaluation_metrics_collection.setdefault("eval/episode_length", []).extend(eval_logging_info["episode_length"])
+                noise_scales = torch.rand(self.nr_envs, 1, device=self.device) * (self.noise_std_max - self.noise_std_min) + self.noise_std_min
                 self.set_train_mode()
             
             evaluating_end_time = time.time()
@@ -446,7 +455,7 @@ class FastTD3:
         self.set_eval_mode()
         state, _ = self.env.reset()
         while True:
-            with torch.no_grad():
+            with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 _, processed_action = self.policy.get_action(state)
             self.env.step(processed_action)
 
