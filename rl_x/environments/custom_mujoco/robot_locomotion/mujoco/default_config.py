@@ -7,6 +7,7 @@ def get_config(environment_name):
         "nr_envs": 1,
         "seed": 1,
         "render": False,
+        "copy_train_env_for_eval": True,
         "train_robot": "unitree_go2",
         "control_type": "pd",
         "command": {

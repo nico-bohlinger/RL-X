@@ -8,7 +8,7 @@ from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.async_vectorized_wr
 from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.general_properties import GeneralProperties
 
 
-def create_env(config):
+def create_train_and_eval_env(config):
     robot_config = importlib.import_module(f"rl_x.environments.custom_mujoco.robot_locomotion.robots.{config.environment.train_robot}.robot_config").robot_config
     robot_config["directory_path"] = Path(__file__).parent.parent / "robots" / config.environment.train_robot
     
@@ -29,11 +29,22 @@ def create_env(config):
         return thunk
 
     make_env_functions = [make_env(config.environment.seed + i) for i in range(config.environment.nr_envs)]
+    
     if config.environment.nr_envs == 1:
-        env = gym.vector.SyncVectorEnv(make_env_functions)
+        train_env = gym.vector.SyncVectorEnv(make_env_functions)
     else:
-        env = AsyncVectorEnvWithSkipping(make_env_functions, config.environment.async_skip_percentage)
-    env = RLXInfo(env)
-    env.general_properties = GeneralProperties
+        train_env = AsyncVectorEnvWithSkipping(make_env_functions, config.environment.async_skip_percentage)
+    train_env = RLXInfo(train_env)
+    train_env.general_properties = GeneralProperties
 
-    return env
+    if config.environment.copy_train_env_for_eval:
+        return train_env, train_env
+    
+    if config.environment.nr_envs == 1:
+        eval_env = gym.vector.SyncVectorEnv(make_env_functions)
+    else:
+        eval_env = AsyncVectorEnvWithSkipping(make_env_functions, config.environment.async_skip_percentage)
+    eval_env = RLXInfo(eval_env)
+    eval_env.general_properties = GeneralProperties
+
+    return train_env, eval_env

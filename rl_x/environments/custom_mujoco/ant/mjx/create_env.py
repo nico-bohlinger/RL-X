@@ -2,9 +2,14 @@ from rl_x.environments.custom_mujoco.ant.mjx.environment import Ant
 from rl_x.environments.custom_mujoco.ant.mjx.general_properties import GeneralProperties
 
 
-def create_env(config):
-    env = Ant(config.environment.render)
+def create_train_and_eval_env(config):
+    train_env = Ant(config.environment.render)
+    train_env.general_properties = GeneralProperties
 
-    env.general_properties = GeneralProperties
+    if config.environment.copy_train_env_for_eval:
+        return train_env, train_env
+    
+    eval_env = Ant(config.environment.render)
+    eval_env.general_properties = GeneralProperties
 
-    return env
+    return train_env, eval_env

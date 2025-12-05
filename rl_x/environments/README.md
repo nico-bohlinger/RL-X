@@ -32,7 +32,7 @@ gym
 └───mujoco
 │   └───humanoid_v4
 │   │   │   __init__.py
-│   │   │   create_env.py
+│   │   │   create_train_and_eval_env.py
 │   │   │   default_config.py
 │   │   │   general_properties.py
 │   │   │   wrappers.py
@@ -40,13 +40,13 @@ gym
 
 **\_\_init__.py**
 - Registers the environment with the environment manager
-- Needs to import create_env(), get_config() and GeneralProperties for the registration
+- Needs to import create_train_and_eval_env(), get_config() and GeneralProperties for the registration
 - Creates a constant for the environment name which can be imported for running an experiment. The name is extracted from the environment's directory structure.
     - Example: ```--environment.name=gym.mujoco.humanoid_v4```
     - See: ```experiments/start_experiment.py```
 
 **create_env.py**
-- Defines the create_env() function for the registration
+- Defines the create_train_and_eval_env() function for the registration
 - Uses wrappers from wrappers.py
 
 **default_config.py**

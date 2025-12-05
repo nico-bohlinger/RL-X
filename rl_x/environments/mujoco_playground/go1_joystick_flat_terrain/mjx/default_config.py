@@ -11,5 +11,6 @@ def get_config(environment_name):
     config.nr_envs = 4096
     config.use_domain_randomization = False
     config.render = False
+    config.copy_train_env_for_eval = True
 
     return config

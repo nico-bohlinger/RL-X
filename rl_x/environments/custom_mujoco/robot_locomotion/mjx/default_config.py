@@ -8,6 +8,7 @@ def get_config(environment_name):
         "seed": 1,
         "render": False,
         "device": "gpu",
+        "copy_train_env_for_eval": True,
         "train_robot": "unitree_go2",
         "control_type": "pd",
         "command": {

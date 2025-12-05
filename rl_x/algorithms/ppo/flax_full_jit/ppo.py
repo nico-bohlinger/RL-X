@@ -22,9 +22,10 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class PPO:
-    def __init__(self, config, env, run_path, writer):
+    def __init__(self, config, train_env, eval_env, run_path, writer):
         self.config = config
-        self.env = env
+        self.train_env = train_env
+        self.eval_env = eval_env
         self.writer = writer
 
         self.save_model = config.runner.save_model
@@ -58,9 +59,9 @@ class PPO:
             self.evaluation_and_save_frequency = self.batch_size * (self.total_timesteps // self.batch_size)
         self.nr_multi_learning_and_eval_save_iterations = self.total_timesteps // self.evaluation_and_save_frequency
         self.nr_updates_per_multi_learning_iteration = self.evaluation_and_save_frequency // self.batch_size
-        self.os_shape = env.single_observation_space.shape
-        self.as_shape = env.single_action_space.shape
-        self.horizon = env.horizon
+        self.os_shape = self.train_env.single_observation_space.shape
+        self.as_shape = self.train_env.single_action_space.shape
+        self.horizon = self.train_env.horizon
 
         if self.evaluation_and_save_frequency % self.batch_size != 0:
             raise ValueError("Evaluation and save frequency must be a multiple of batch size")
@@ -83,7 +84,7 @@ class PPO:
 
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
-        env_state = self.env.reset(reset_key, False)
+        env_state = self.train_env.reset(reset_key, False)
 
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
@@ -113,7 +114,7 @@ class PPO:
         def jitable_train_function(key, parallel_seed_id):
             key, reset_key = jax.random.split(key, 2)
             reset_keys = jax.random.split(reset_key, self.nr_envs)
-            env_state = self.env.reset(reset_keys, False)
+            env_state = self.train_env.reset(reset_keys, False)
 
             policy_state = self.policy_state
             critic_state = self.critic_state
@@ -137,12 +138,12 @@ class PPO:
                         processed_action = self.get_processed_action(action)
                         value = self.critic.apply(critic_state.params, observation).squeeze(-1)
 
-                        env_state = self.env.step(env_state, processed_action)
+                        env_state = self.train_env.step(env_state, processed_action)
                         transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, env_state.terminated, log_prob, env_state.info)
 
                         if self.render:
                             def render(env_state):
-                                return self.env.render(env_state)
+                                return self.train_env.render(env_state)
                             
                             env_state = jax.experimental.io_callback(render, env_state, env_state)
 
@@ -296,16 +297,16 @@ class PPO:
                     def single_eval_rollout(single_eval_rollout_carry, _):
                         policy_state, eval_env_state = single_eval_rollout_carry
 
-                        action_mean, _ = self.policy.apply(policy_state.params, eval_env_state.next_observation)
-                        action = action_mean
-                        processed_action = self.get_processed_action(action)
-                        eval_env_state = self.env.step(eval_env_state, processed_action)
+                        eval_action_mean, _ = self.policy.apply(policy_state.params, eval_env_state.next_observation)
+                        eval_action = eval_action_mean
+                        eval_processed_action = self.get_processed_action(eval_action)
+                        eval_env_state = self.eval_env.step(eval_env_state, eval_processed_action)
 
                         return (policy_state, eval_env_state), None
 
                     key, reset_key = jax.random.split(key)
                     reset_keys = jax.random.split(reset_key, self.nr_envs)
-                    eval_env_state = self.env.reset(reset_keys, True)
+                    eval_env_state = self.eval_env.reset(reset_keys, True)
                     single_eval_rollout_carry, _ = jax.lax.scan(single_eval_rollout, (policy_state, eval_env_state), jnp.arange(self.horizon))
                     _, eval_env_state = single_eval_rollout_carry
 
@@ -427,16 +428,16 @@ class PPO:
             # action_std = jnp.exp(action_logstd)
             action = action_mean # + action_std * jax.random.normal(subkey, shape=action_mean.shape)
             processed_action = self.get_processed_action(action)
-            env_state = self.env.step(env_state, processed_action)
+            env_state = self.train_env.step(env_state, processed_action)
             return env_state, key
 
         self.key, subkey = jax.random.split(self.key)
         reset_keys = jax.random.split(subkey, self.nr_envs)
-        env_state = self.env.reset(reset_keys, True)
+        env_state = self.train_env.reset(reset_keys, True)
         while True:
             env_state, self.key = rollout(env_state, self.key)
             if self.render:
-                env_state = self.env.render(env_state)
+                env_state = self.train_env.render(env_state)
 
 
     def general_properties():

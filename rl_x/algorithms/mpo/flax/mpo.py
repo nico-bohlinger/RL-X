@@ -28,9 +28,10 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class MPO():
-    def __init__(self, config, env, run_path, writer) -> None:
+    def __init__(self, config, train_env, eval_env, run_path, writer):
         self.config = config
-        self.env = env
+        self.train_env = train_env
+        self.eval_env = eval_env
         self.writer = writer
 
         self.save_model = config.runner.save_model
@@ -82,11 +83,11 @@ class MPO():
         self.key = jax.random.PRNGKey(self.seed)
         self.key, policy_key, critic_key = jax.random.split(self.key, 3)
 
-        self.env_as_low = env.single_action_space.low
-        self.env_as_high = env.single_action_space.high
+        self.env_as_low = self.train_env.single_action_space.low
+        self.env_as_high = self.train_env.single_action_space.high
 
-        self.policy, self.get_processed_action = get_policy(config, env)
-        self.critic = get_critic(config, env)
+        self.policy, self.get_processed_action = get_policy(config, self.train_env)
+        self.critic = get_critic(config, self.train_env)
 
         self.policy.apply = jax.jit(self.policy.apply)
         self.critic.apply = jax.jit(self.critic.apply)
@@ -113,15 +114,15 @@ class MPO():
             optax.inject_hyperparams(optax.adam)(learning_rate=dual_learning_rate),
         )
 
-        state = jnp.array([self.env.single_observation_space.sample()])
-        action = jnp.array([self.env.single_action_space.sample()])
+        state = jnp.array([self.train_env.single_observation_space.sample()])
+        action = jnp.array([self.train_env.single_action_space.sample()])
 
         agent_params = AgentParams(
             policy_params=self.policy.init(policy_key, state),
             critic_params=self.critic.init(critic_key, state, action)
         )
         
-        dual_variable_shape = [np.prod(env.single_action_space.shape).item()]
+        dual_variable_shape = [np.prod(self.train_env.single_action_space.shape).item()]
 
         # The Lagrange multiplieres
         dual_params = DualParams(
@@ -390,17 +391,17 @@ class MPO():
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.trace_length, self.env.single_observation_space.shape, self.env.single_action_space.shape, self.rng)
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.trace_length, self.train_env.single_observation_space.shape, self.train_env.single_action_space.shape, self.rng)
 
-        state_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.single_observation_space.shape, dtype=np.float32)
-        action_stack = np.zeros((self.nr_envs, self.trace_length) + self.env.single_action_space.shape, dtype=np.float32)
+        state_stack = np.zeros((self.nr_envs, self.trace_length) + self.train_env.single_observation_space.shape, dtype=np.float32)
+        action_stack = np.zeros((self.nr_envs, self.trace_length) + self.train_env.single_action_space.shape, dtype=np.float32)
         reward_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
         terminated_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
         log_prob_stack = np.zeros((self.nr_envs, self.trace_length), dtype=np.float32)
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
 
-        state, _ = self.env.reset()
+        state, _ = self.train_env.reset()
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -416,20 +417,20 @@ class MPO():
             # Acting
             dones_this_rollout = 0
             if global_step < self.learning_starts:
-                processed_action = np.array([self.env.single_action_space.sample() for _ in range(self.nr_envs)])
+                processed_action = np.array([self.train_env.single_action_space.sample() for _ in range(self.nr_envs)])
                 action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
                 log_prob = get_log_prob(self.train_state.agent_target_params.policy_params, state, action)
             else:
                 action, log_prob, self.key = get_action_and_log_prob(self.train_state.agent_target_params.policy_params, state, self.key)
                 processed_action = self.get_processed_action(action)
             
-            next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+            next_state, reward, terminated, truncated, info = self.train_env.step(jax.device_get(processed_action))
             done = terminated | truncated
             for i, single_done in enumerate(done):
                 if single_done:
-                    saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                    saving_return_buffer.append(self.train_env.get_final_info_value_at_index(info, "episode_return", i))
                     dones_this_rollout += 1
-            for key, info_value in self.env.get_logging_info_dict(info).items():
+            for key, info_value in self.train_env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
             
             nr_episodes += dones_this_rollout
@@ -484,22 +485,21 @@ class MPO():
             # Evaluating
             if should_evaluate:
                 self.set_eval_mode()
-                state, _ = self.env.reset()
+                eval_state, _ = self.eval_env.reset()
                 eval_nr_episodes = 0
                 while True:
-                    processed_action = get_deterministic_action(self.train_state.agent_target_params.policy_params, state)
-                    state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
-                    done = terminated | truncated
-                    for i, single_done in enumerate(done):
+                    eval_processed_action = get_deterministic_action(self.train_state.agent_target_params.policy_params, eval_state)
+                    eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(jax.device_get(eval_processed_action))
+                    eval_done = eval_terminated | eval_truncated
+                    for i, single_done in enumerate(eval_done):
                         if single_done:
                             eval_nr_episodes += 1
-                            evaluation_metrics_collection.setdefault("eval/episode_return", []).append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                            evaluation_metrics_collection.setdefault("eval/episode_length", []).append(self.env.get_final_info_value_at_index(info, "episode_length", i))
+                            evaluation_metrics_collection.setdefault("eval/episode_return", []).append(self.eval_env.get_final_info_value_at_index(eval_info, "episode_return", i))
+                            evaluation_metrics_collection.setdefault("eval/episode_length", []).append(self.eval_env.get_final_info_value_at_index(eval_info, "episode_length", i))
                             if eval_nr_episodes == self.evaluation_episodes:
                                 break
                     if eval_nr_episodes == self.evaluation_episodes:
                         break
-                state, _ = self.env.reset()
                 self.set_train_mode()
             
             evaluating_end_time = time.time()
@@ -638,10 +638,10 @@ class MPO():
         for i in range(episodes):
             done = False
             episode_return = 0
-            state, _ = self.env.reset()
+            state, _ = self.eval_env.reset()
             while not done:
                 processed_action = get_action(self.train_state.agent_params.policy_params, state)
-                state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                state, reward, terminated, truncated, info = self.eval_env.step(jax.device_get(processed_action))
                 done = terminated | truncated
                 episode_return += reward
             rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")

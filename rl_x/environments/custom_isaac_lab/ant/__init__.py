@@ -1,8 +1,8 @@
 from rl_x.environments.environment_manager import extract_environment_name_from_file, register_environment
-from rl_x.environments.custom_isaac_lab.ant.create_env import create_env
+from rl_x.environments.custom_isaac_lab.ant.create_env import create_train_and_eval_env
 from rl_x.environments.custom_isaac_lab.ant.default_config import get_config
 from rl_x.environments.custom_isaac_lab.ant.general_properties import GeneralProperties
 
 
 CUSTOM_ISAAC_LAB_ANT = extract_environment_name_from_file(__file__)
-register_environment(CUSTOM_ISAAC_LAB_ANT, get_config, create_env, GeneralProperties)
+register_environment(CUSTOM_ISAAC_LAB_ANT, get_config, create_train_and_eval_env, GeneralProperties)

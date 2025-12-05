@@ -11,5 +11,6 @@ def get_config(environment_name):
     config.async_skip_percentage = 0.0
     config.render = False
     config.device = "gpu"
+    config.copy_train_env_for_eval = True
 
     return config

@@ -17,9 +17,10 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class FastTD3:
-    def __init__(self, config, env, run_path, writer) -> None:
+    def __init__(self, config, train_env, eval_env, run_path, writer):
         self.config = config
-        self.env = env
+        self.train_env = train_env
+        self.eval_env = eval_env
         self.writer = writer
 
         self.save_model = config.runner.save_model
@@ -55,7 +56,7 @@ class FastTD3:
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.save_frequency = config.algorithm.save_frequency
-        self.horizon = env.horizon
+        self.horizon = self.train_env.horizon
 
         if self.logging_frequency % self.nr_envs != 0:
             raise ValueError("The logging frequency must be a multiple of the number of environments.")
@@ -79,8 +80,8 @@ class FastTD3:
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
 
-        self.policy = get_policy(config, env, self.device)
-        self.critic = get_critic(config, env, self.device)
+        self.policy = get_policy(config, self.train_env, self.device)
+        self.critic = get_critic(config, self.train_env, self.device)
 
         self.policy_optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         self.q_optimizer = optim.AdamW(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay)
@@ -225,14 +226,14 @@ class FastTD3:
         replay_buffer = ReplayBuffer(
             self.buffer_size_per_env,
             self.nr_envs,
-            self.env.single_observation_space.shape,
-            self.env.single_action_space.shape,
+            self.train_env.single_observation_space.shape,
+            self.train_env.single_action_space.shape,
             self.n_steps,
             self.gamma,
             self.device
         )
 
-        state, _ = self.env.reset()
+        state, _ = self.train_env.reset()
         noise_scales = torch.rand(self.nr_envs, 1, device=self.device) * (self.noise_std_max - self.noise_std_min) + self.noise_std_min
         global_step = 0
         nr_updates = 0
@@ -251,11 +252,11 @@ class FastTD3:
             dones_this_rollout = 0
             with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 action, processed_action = self.policy.get_action(state, noise_scales)
-            next_state, reward, terminated, truncated, info = self.env.step(processed_action)
+            next_state, reward, terminated, truncated, info = self.train_env.step(processed_action)
             done = terminated | truncated
             actual_next_state = next_state  # TODO: Handle this properly
             dones_this_rollout += done.sum().item()
-            for key, info_value in self.env.get_logging_info_dict(info).items():
+            for key, info_value in self.train_env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
             
             replay_buffer.add(state, actual_next_state, action, reward, done, truncated)
@@ -327,19 +328,18 @@ class FastTD3:
             # Evaluating
             if should_evaluate:
                 self.set_eval_mode()
-                eval_state, _ = self.env.reset()
+                eval_state, _ = self.eval_env.reset()
                 for _ in range(self.horizon):
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                         _, eval_processed_action = self.policy.get_action(eval_state)
                     if self.bf16_mixed_precision_training:
                         eval_processed_action = eval_processed_action.to(torch.float32)
-                    eval_state, _, _, _, eval_info = self.env.step(eval_processed_action)
-                    eval_logging_info = self.env.get_logging_info_dict(eval_info)
+                    eval_state, _, _, _, eval_info = self.eval_env.step(eval_processed_action)
+                    eval_logging_info = self.eval_env.get_logging_info_dict(eval_info)
                     if "episode_return" in eval_logging_info:
                         evaluation_metrics_collection.setdefault("eval/episode_return", []).extend(eval_logging_info["episode_return"])
                     if "episode_length" in eval_logging_info:
                         evaluation_metrics_collection.setdefault("eval/episode_length", []).extend(eval_logging_info["episode_length"])
-                noise_scales = torch.rand(self.nr_envs, 1, device=self.device) * (self.noise_std_max - self.noise_std_min) + self.noise_std_min
                 self.set_train_mode()
             
             evaluating_end_time = time.time()
@@ -453,11 +453,11 @@ class FastTD3:
         rlx_logger.info("Testing runs infinitely. The episodes parameter is ignored.")
 
         self.set_eval_mode()
-        state, _ = self.env.reset()
+        state, _ = self.eval_env.reset()
         while True:
             with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 _, processed_action = self.policy.get_action(state)
-            self.env.step(processed_action)
+            self.eval_env.step(processed_action)
 
 
     def set_train_mode(self):

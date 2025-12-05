@@ -23,9 +23,10 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class ESPO:
-    def __init__(self, config, env, run_path, writer) -> None:
+    def __init__(self, config, train_env, eval_env, run_path, writer):
         self.config = config
-        self.env = env
+        self.train_env = train_env
+        self.eval_env = eval_env
         self.writer = writer
 
         self.save_model = config.runner.save_model
@@ -69,12 +70,11 @@ class ESPO:
         self.key = jax.random.PRNGKey(self.seed)
         self.key, policy_key, critic_key = jax.random.split(self.key, 3)
 
-        self.os_shape = env.single_observation_space.shape
-        self.as_shape = env.single_action_space.shape
+        self.os_shape = self.train_env.single_observation_space.shape
+        self.as_shape = self.train_env.single_action_space.shape
         
-        self.policy, self.get_processed_action = get_policy(config, env)
-        self.critic = get_critic(config, env)
-
+        self.policy, self.get_processed_action = get_policy(config, self.train_env)
+        self.critic = get_critic(config, self.train_env)
         self.policy.apply = jax.jit(self.policy.apply)
         self.critic.apply = jax.jit(self.critic.apply)
 
@@ -85,7 +85,7 @@ class ESPO:
 
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
-        state = jnp.array([env.single_observation_space.sample()])
+        state = jnp.array([self.train_env.single_observation_space.sample()])
 
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
@@ -257,7 +257,7 @@ class ESPO:
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
 
-        state, _ = self.env.reset()
+        state, _ = self.train_env.reset()
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -272,15 +272,15 @@ class ESPO:
             step_info_collection = {}
             for step in range(self.nr_steps):
                 processed_action, action, value, log_prob, self.key = get_action_and_value(self.policy_state, self.critic_state, state, self.key)
-                next_state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                next_state, reward, terminated, truncated, info = self.train_env.step(jax.device_get(processed_action))
                 done = terminated | truncated
                 actual_next_state = next_state.copy()
                 for i, single_done in enumerate(done):
                     if single_done:
-                        actual_next_state[i] = np.array(self.env.get_final_observation_at_index(info, i))
-                        saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                        actual_next_state[i] = np.array(self.train_env.get_final_observation_at_index(info, i))
+                        saving_return_buffer.append(self.train_env.get_final_info_value_at_index(info, "episode_return", i))
                         dones_this_rollout += 1
-                for key, info_value in self.env.get_logging_info_dict(info).items():
+                for key, info_value in self.train_env.get_logging_info_dict(info).items():
                     step_info_collection.setdefault(key, []).extend(info_value)
 
                 batch.states[step] = state
@@ -322,24 +322,23 @@ class ESPO:
             evaluation_metrics = {}
             if global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1:
                 self.set_eval_mode()
-                state, _ = self.env.reset()
+                eval_state, _ = self.eval_env.reset()
                 eval_nr_episodes = 0
                 evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
                 while True:
-                    processed_action = get_deterministic_action(self.policy_state, state)
-                    state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
-                    done = terminated | truncated
-                    for i, single_done in enumerate(done):
+                    eval_processed_action = get_deterministic_action(self.policy_state, eval_state)
+                    eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(jax.device_get(eval_processed_action))
+                    eval_done = eval_terminated | eval_truncated
+                    for i, single_done in enumerate(eval_done):
                         if single_done:
                             eval_nr_episodes += 1
-                            evaluation_metrics["eval/episode_return"].append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                            evaluation_metrics["eval/episode_length"].append(self.env.get_final_info_value_at_index(info, "episode_length", i))
+                            evaluation_metrics["eval/episode_return"].append(self.eval_env.get_final_info_value_at_index(eval_info, "episode_return", i))
+                            evaluation_metrics["eval/episode_length"].append(self.eval_env.get_final_info_value_at_index(eval_info, "episode_length", i))
                             if eval_nr_episodes == self.evaluation_episodes:
                                 break
                     if eval_nr_episodes == self.evaluation_episodes:
                         break
                 evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
-                state, _ = self.env.reset()
                 self.set_train_mode()
             
             evaluating_end_time = time.time()
@@ -465,10 +464,10 @@ class ESPO:
         for i in range(episodes):
             done = False
             episode_return = 0
-            state, _ = self.env.reset()
+            state, _ = self.eval_env.reset()
             while not done:
                 processed_action = get_action(self.policy_state, state)
-                state, reward, terminated, truncated, info = self.env.step(jax.device_get(processed_action))
+                state, reward, terminated, truncated, info = self.eval_env.step(jax.device_get(processed_action))
                 done = terminated | truncated
                 episode_return += reward
             rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")

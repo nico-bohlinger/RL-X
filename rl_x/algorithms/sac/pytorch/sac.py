@@ -18,9 +18,10 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class SAC:
-    def __init__(self, config, env, run_path, writer) -> None:
+    def __init__(self, config, train_env, eval_env, run_path, writer):
         self.config = config
-        self.env = env
+        self.train_env = train_env
+        self.eval_env = eval_env
         self.writer = writer
 
         self.save_model = config.runner.save_model
@@ -57,16 +58,15 @@ class SAC:
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
 
-        self.env_as_low = env.single_action_space.low
-        self.env_as_high = env.single_action_space.high
+        self.env_as_low = self.train_env.single_action_space.low
+        self.env_as_high = self.train_env.single_action_space.high
 
-        self.policy = torch.compile(get_policy(config, env, self.device).to(self.device), mode="default")
-        self.critic = torch.compile(get_critic(config, env, self.device).to(self.device), mode="default")
-
+        self.policy = torch.compile(get_policy(config, self.train_env, self.device).to(self.device), mode="default")
+        self.critic = torch.compile(get_critic(config, self.train_env, self.device).to(self.device), mode="default")
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
         self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate)
 
-        self.entropy_coefficient = torch.compile(EntropyCoefficient(config, env, self.device).to(self.device), mode="default")
+        self.entropy_coefficient = torch.compile(EntropyCoefficient(config, self.train_env, self.device).to(self.device), mode="default")
         self.alpha = self.entropy_coefficient()
         self.entropy_optimizer = optim.Adam([self.entropy_coefficient.log_alpha], lr=self.learning_rate)
 
@@ -103,11 +103,11 @@ class SAC:
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.env.single_observation_space.shape, self.env.single_action_space.shape, self.rng, self.device)
+        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.train_env.single_observation_space.shape, self.train_env.single_action_space.shape, self.rng, self.device)
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
 
-        state, _ = self.env.reset()
+        state, _ = self.train_env.reset()
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -123,22 +123,22 @@ class SAC:
             # Acting
             dones_this_rollout = 0
             if global_step < self.learning_starts:
-                processed_action = np.array([self.env.single_action_space.sample() for _ in range(self.nr_envs)])
+                processed_action = np.array([self.train_env.single_action_space.sample() for _ in range(self.nr_envs)])
                 action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
             else:
                 action, processed_action, _ = self.policy.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 action = action.detach().cpu().numpy()
                 processed_action = processed_action.detach().cpu().numpy()
             
-            next_state, reward, terminated, truncated, info = self.env.step(processed_action)
+            next_state, reward, terminated, truncated, info = self.train_env.step(processed_action)
             done = terminated | truncated
             actual_next_state = next_state.copy()
             for i, single_done in enumerate(done):
                 if single_done:
-                    actual_next_state[i] = np.array(self.env.get_final_observation_at_index(info, i))
-                    saving_return_buffer.append(self.env.get_final_info_value_at_index(info, "episode_return", i))
+                    actual_next_state[i] = np.array(self.train_env.get_final_observation_at_index(info, i))
+                    saving_return_buffer.append(self.train_env.get_final_info_value_at_index(info, "episode_return", i))
                     dones_this_rollout += 1
-            for key, info_value in self.env.get_logging_info_dict(info).items():
+            for key, info_value in self.train_env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
             
             replay_buffer.add(state, actual_next_state, action, reward, terminated)
@@ -249,23 +249,22 @@ class SAC:
             # Evaluating
             if should_evaluate:
                 self.set_eval_mode()
-                state, _ = self.env.reset()
+                eval_state, _ = self.eval_env.reset()
                 eval_nr_episodes = 0
                 while True:
                     with torch.no_grad():
-                        processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                    state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
-                    done = terminated | truncated
-                    for i, single_done in enumerate(done):
+                        eval_processed_action = self.policy.get_deterministic_action(torch.tensor(eval_state, dtype=torch.float32).to(self.device))
+                    eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(eval_processed_action.cpu().numpy())
+                    eval_done = eval_terminated | eval_truncated
+                    for i, single_done in enumerate(eval_done):
                         if single_done:
                             eval_nr_episodes += 1
-                            evaluation_metrics_collection.setdefault("eval/episode_return", []).append(self.env.get_final_info_value_at_index(info, "episode_return", i))
-                            evaluation_metrics_collection.setdefault("eval/episode_length", []).append(self.env.get_final_info_value_at_index(info, "episode_length", i))
+                            evaluation_metrics_collection.setdefault("eval/episode_return", []).append(self.eval_env.get_final_info_value_at_index(eval_info, "episode_return", i))
+                            evaluation_metrics_collection.setdefault("eval/episode_length", []).append(self.eval_env.get_final_info_value_at_index(eval_info, "episode_length", i))
                             if eval_nr_episodes == self.evaluation_episodes:
                                 break
                     if eval_nr_episodes == self.evaluation_episodes:
                         break
-                state, _ = self.env.reset()
                 self.set_train_mode()
             
             evaluating_end_time = time.time()
@@ -386,11 +385,11 @@ class SAC:
         for i in range(episodes):
             done = False
             episode_return = 0
-            state, _ = self.env.reset()
+            state, _ = self.eval_env.reset()
             while not done:
                 with torch.no_grad():
                     processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                state, reward, terminated, truncated, info = self.env.step(processed_action.cpu().numpy())
+                state, reward, terminated, truncated, info = self.eval_env.step(processed_action.cpu().numpy())
                 done = terminated | truncated
                 episode_return += reward
             rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")

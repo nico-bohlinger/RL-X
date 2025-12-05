@@ -9,6 +9,7 @@ def get_config(environment_name):
     config.seed = 1
     config.nr_envs = 1
     config.async_skip_percentage = 0.0
+    config.copy_train_env_for_eval = True
     config.ip = "localhost"
     config.port = 5555
 

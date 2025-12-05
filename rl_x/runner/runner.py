@@ -20,7 +20,7 @@ from ml_collections import config_dict, config_flags
 from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.default_config import get_config as get_runner_config
 from rl_x.algorithms.algorithm_manager import get_algorithm_config, get_algorithm_model_class, get_algorithm_general_properties
-from rl_x.environments.environment_manager import get_environment_config, get_environment_create_env, get_environment_general_properties
+from rl_x.environments.environment_manager import get_environment_config, get_environment_create_train_and_eval_env, get_environment_general_properties
 from rl_x.environments.data_interface_type import DataInterfaceType
 from rl_x.environments.simulation_type import SimulationType
 from rl_x.algorithms.deep_learning_framework_type import DeepLearningFrameworkType
@@ -176,7 +176,7 @@ class Runner:
                 pass
 
         self._model_class = get_algorithm_model_class(algorithm_name)
-        self._create_env = get_environment_create_env(environment_name)
+        self._create_train_and_eval_env = get_environment_create_train_and_eval_env(environment_name)
         
         self._runner_config_flag = config_flags.DEFINE_config_dict("runner", runner_default_config)
         self._algorithm_config_flag = config_flags.DEFINE_config_dict("algorithm", algorithm_default_config)
@@ -306,18 +306,19 @@ class Runner:
                 "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in all_config_items])),
             )
 
-        env = self._create_env(self._config)
+        train_env, eval_env = self._create_train_and_eval_env(self._config)
         
         if self._config.runner.load_model:
             explicitly_set_algorithm_params = [param_name for param_name in self._algorithm_config_flag._flagvalues if param_name.startswith("algorithm.")]
-            model = self._model_class.load(self._config, env, run_path, writer, explicitly_set_algorithm_params)
+            model = self._model_class.load(self._config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params)
         else:
-            model = self._model_class(self._config, env, run_path, writer)
+            model = self._model_class(self._config, train_env, eval_env, run_path, writer)
 
         try:
             model.train()
         finally:
-            env.close()
+            train_env.close()
+            eval_env.close()
             if self._config.runner.track_tb:
                 writer.close()
             if self._config.runner.track_wandb:
@@ -339,17 +340,18 @@ class Runner:
         run_path = f"runs/{self._config.runner.project_name}/{self._config.runner.exp_name}/{self._config.runner.run_name}"
         run_path = os.path.abspath(run_path)
 
-        env = self._create_env(self._config)
+        train_env, eval_env = self._create_train_and_eval_env(self._config)
         
         if self._config.runner.load_model:
             explicitly_set_algorithm_params = [param_name for param_name in self._algorithm_config_flag._flagvalues if param_name.startswith("algorithm.")]
-            model = self._model_class.load(self._config, env, run_path, None, explicitly_set_algorithm_params)
+            model = self._model_class.load(self._config, train_env, eval_env, run_path, None, explicitly_set_algorithm_params)
         else:
-            model = self._model_class(self._config, env, run_path, None)
+            model = self._model_class(self._config, train_env, eval_env, run_path, None)
         
         try:
             model.test(self._config.runner.nr_test_episodes)
         finally:
-            env.close()
+            train_env.close()
+            eval_env.close()
             if self.environment_uses_isaac_lab:
                 self.isaac_simulation_app.close()

@@ -9,6 +9,7 @@ def get_config(environment_name):
     config.seed = 1
     config.nr_envs = 4096
     config.render = False
+    config.copy_train_env_for_eval = True
     config.disable_fabric = False
     config.livestream = -1
     config.enable_cameras = False

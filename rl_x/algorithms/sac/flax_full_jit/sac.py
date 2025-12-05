@@ -26,9 +26,10 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class SAC:
-    def __init__(self, config, env, run_path, writer):
+    def __init__(self, config, train_env, eval_env, run_path, writer):
         self.config = config
-        self.env = env
+        self.train_env = train_env
+        self.eval_env = eval_env
         self.writer = writer
 
         self.save_model = config.runner.save_model
@@ -59,7 +60,7 @@ class SAC:
         self.nr_eval_save_iterations = self.total_training_timesteps // self.evaluation_and_save_frequency
         self.nr_loggings_per_eval_save_iteration = self.evaluation_and_save_frequency // self.logging_frequency
         self.nr_updates_per_logging_iteration = self.logging_frequency // self.nr_envs
-        self.horizon = env.horizon
+        self.horizon = self.train_env.horizon
 
         if self.nr_parallel_seeds > 1:
             raise ValueError("Parallel seeds are not supported yet. This is mainly limited by not being able to log mutliple wandb runs at the same time.")
@@ -70,14 +71,14 @@ class SAC:
         self.key, reset_key, policy_key, critic_key, entropy_coefficient_key = jax.random.split(self.key, 5)
         reset_key = jax.random.split(reset_key, 1)
 
-        self.env_as_low = env.single_action_space.low
-        self.env_as_high = env.single_action_space.high
+        self.env_as_low = self.train_env.single_action_space.low
+        self.env_as_high = self.train_env.single_action_space.high
 
-        self.policy, self.get_processed_action = get_policy(config, env)
-        self.critic = get_critic(config, env)
+        self.policy, self.get_processed_action = get_policy(config, self.train_env)
+        self.critic = get_critic(config, self.train_env)
         
         if self.target_entropy == "auto":
-            self.target_entropy = -np.prod(env.single_action_space.shape).item()
+            self.target_entropy = -np.prod(self.train_env.single_action_space.shape).item()
         else:
             self.target_entropy = float(self.target_entropy)
         self.entropy_coefficient = EntropyCoefficient(1.0)
@@ -96,9 +97,9 @@ class SAC:
         self.policy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
         self.entropy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
-        env_state = self.env.reset(reset_key, False)
+        env_state = self.train_env.reset(reset_key, False)
         self.dummy_state = env_state.next_observation
-        self.dummy_action = jnp.array([self.env.single_action_space.sample(reset_key[0])])
+        self.dummy_action = jnp.array([self.train_env.single_action_space.sample(reset_key[0])])
 
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
@@ -129,7 +130,7 @@ class SAC:
         def jitable_train_function(key, parallel_seed_id):
             key, reset_key = jax.random.split(key, 2)
             reset_keys = jax.random.split(reset_key, self.nr_envs)
-            env_state = self.env.reset(reset_keys, False)
+            env_state = self.train_env.reset(reset_keys, False)
 
             policy_state = self.policy_state
             critic_state = self.critic_state
@@ -159,9 +160,9 @@ class SAC:
                     env_state, replay_buffer, key = carry
                     key, subkey = jax.random.split(key)
                     observation = env_state.next_observation
-                    processed_action = self.env.single_action_space.sample(subkey)
+                    processed_action = self.train_env.single_action_space.sample(subkey)
                     action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
-                    env_state = self.env.step(env_state, processed_action)
+                    env_state = self.train_env.step(env_state, processed_action)
 
                     replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
                     replay_buffer["next_states"] = replay_buffer["next_states"].at[replay_buffer["pos"]].set(env_state.actual_next_observation)
@@ -192,7 +193,7 @@ class SAC:
                         action_std = jnp.exp(action_logstd)
                         action = jnp.tanh(action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape))
                         processed_action = self.get_processed_action(action)
-                        env_state = self.env.step(env_state, processed_action)
+                        env_state = self.train_env.step(env_state, processed_action)
 
                         # Adding to replay buffer
                         replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
@@ -205,7 +206,7 @@ class SAC:
 
                         if self.render:
                             def render(env_state):
-                                return self.env.render(env_state)
+                                return self.train_env.render(env_state)
                             
                             env_state = jax.experimental.io_callback(render, env_state, env_state)
 
@@ -342,15 +343,15 @@ class SAC:
                 if self.evaluation_active:
                     def single_eval_rollout(carry, _):
                         policy_state, eval_env_state = carry
-                        action_mean, _ = self.policy.apply(policy_state.params, eval_env_state.next_observation)
-                        action = jnp.tanh(action_mean)
-                        processed_action = self.get_processed_action(action)
-                        eval_env_state = self.env.step(eval_env_state, processed_action)
+                        eval_action_mean, _ = self.policy.apply(policy_state.params, eval_env_state.next_observation)
+                        eval_action = jnp.tanh(eval_action_mean)
+                        eval_processed_action = self.get_processed_action(eval_action)
+                        eval_env_state = self.eval_env.step(eval_env_state, eval_processed_action)
                         return (policy_state, eval_env_state), None
 
                     key, reset_key = jax.random.split(key)
                     reset_keys = jax.random.split(reset_key, self.nr_envs)
-                    eval_env_state = self.env.reset(reset_keys, True)
+                    eval_env_state = self.eval_env.reset(reset_keys, True)
                     (policy_state, eval_env_state), _ = jax.lax.scan(single_eval_rollout, (policy_state, eval_env_state), jnp.arange(self.horizon))
 
                     eval_metrics = {
@@ -475,16 +476,16 @@ class SAC:
             # subkey, key = jax.random.split(key)
             # action = jnp.tanh(action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape))
             processed_action = self.get_processed_action(action)
-            env_state = self.env.step(env_state, processed_action)
+            env_state = self.eval_env.step(env_state, processed_action)
             return env_state, key
 
         self.key, subkey = jax.random.split(self.key)
         reset_keys = jax.random.split(subkey, self.nr_envs)
-        env_state = self.env.reset(reset_keys, True)
+        env_state = self.eval_env.reset(reset_keys, True)
         while True:
             env_state, self.key = rollout(env_state, self.key)
             if self.render:
-                env_state = self.env.render(env_state)
+                env_state = self.eval_env.render(env_state)
     
 
     def general_properties():

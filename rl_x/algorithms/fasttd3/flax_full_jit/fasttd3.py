@@ -23,9 +23,10 @@ rlx_logger = logging.getLogger("rl_x")
 
 
 class FastTD3:
-    def __init__(self, config, env, run_path, writer):
+    def __init__(self, config, train_env, eval_env, run_path, writer):
         self.config = config
-        self.env = env
+        self.train_env = train_env
+        self.eval_env = eval_env
         self.writer = writer
 
         self.save_model = config.runner.save_model
@@ -67,9 +68,9 @@ class FastTD3:
         self.nr_loggings_per_eval_save_iteration = self.evaluation_and_save_frequency // self.logging_frequency
         self.nr_updates_per_logging_iteration = self.logging_frequency // self.nr_envs
         self.nr_critic_updates_per_step = self.nr_policy_updates_per_step * self.nr_critic_updates_per_policy_update
-        self.os_shape = env.single_observation_space.shape
-        self.as_shape = env.single_action_space.shape
-        self.horizon = env.horizon
+        self.os_shape = self.train_env.single_observation_space.shape
+        self.as_shape = self.train_env.single_action_space.shape
+        self.horizon = self.train_env.horizon
 
         if self.evaluation_and_save_frequency % self.nr_envs != 0:
             raise ValueError("Evaluation and save frequency must be a multiple of nr envs.")
@@ -104,7 +105,7 @@ class FastTD3:
         self.q_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
         self.policy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
-        env_state = self.env.reset(reset_key, False)
+        env_state = self.train_env.reset(reset_key, False)
 
         if self.max_grad_norm > 0.0:
             policy_tx = optax.chain(
@@ -145,7 +146,7 @@ class FastTD3:
         def jitable_train_function(key, parallel_seed_id):
             key, reset_key, noise_std_key = jax.random.split(key, 3)
             reset_keys = jax.random.split(reset_key, self.nr_envs)
-            env_state = self.env.reset(reset_keys, False)
+            env_state = self.train_env.reset(reset_keys, False)
 
             policy_state = self.policy_state
             critic_state = self.critic_state
@@ -180,7 +181,7 @@ class FastTD3:
                 action = self.policy.apply(policy_state.params, observation)
                 action += jax.random.normal(subkey, action.shape) * noise_scales
                 processed_action = self.get_processed_action(action)
-                env_state = self.env.step(env_state, processed_action)
+                env_state = self.train_env.step(env_state, processed_action)
                 dones = env_state.terminated | env_state.truncated
 
                 # Adding to replay buffer
@@ -202,7 +203,7 @@ class FastTD3:
 
                 if self.render:
                     def render(env_state):
-                        return self.env.render(env_state)
+                        return self.train_env.render(env_state)
                     
                     env_state = jax.experimental.io_callback(render, env_state, env_state)
 
@@ -229,7 +230,7 @@ class FastTD3:
                         action = self.policy.apply(policy_state.params, observation)
                         action += jax.random.normal(subkey, action.shape) * noise_scales
                         processed_action = self.get_processed_action(action)
-                        env_state = self.env.step(env_state, processed_action)
+                        env_state = self.train_env.step(env_state, processed_action)
                         dones = env_state.terminated | env_state.truncated
 
                         # Adding to replay buffer
@@ -251,7 +252,7 @@ class FastTD3:
 
                         if self.render:
                             def render(env_state):
-                                return self.env.render(env_state)
+                                return self.train_env.render(env_state)
                             
                             env_state = jax.experimental.io_callback(render, env_state, env_state)
 
@@ -484,14 +485,14 @@ class FastTD3:
                 if self.evaluation_active:
                     def single_eval_rollout(carry, _):
                         policy_state, eval_env_state = carry
-                        action = self.policy.apply(policy_state.params, eval_env_state.next_observation)
-                        processed_action = self.get_processed_action(action)
-                        eval_env_state = self.env.step(eval_env_state, processed_action)
+                        eval_action = self.policy.apply(policy_state.params, eval_env_state.next_observation)
+                        eval_processed_action = self.get_processed_action(eval_action)
+                        eval_env_state = self.eval_env.step(eval_env_state, eval_processed_action)
                         return (policy_state, eval_env_state), None
 
                     key, reset_key = jax.random.split(key)
                     reset_keys = jax.random.split(reset_key, self.nr_envs)
-                    eval_env_state = self.env.reset(reset_keys, True)
+                    eval_env_state = self.eval_env.reset(reset_keys, True)
                     (policy_state, eval_env_state), _ = jax.lax.scan(single_eval_rollout, (policy_state, eval_env_state), jnp.arange(self.horizon))
 
                     eval_metrics = {
@@ -611,16 +612,16 @@ class FastTD3:
             observation = env_state.next_observation
             action = self.policy.apply(self.policy_state.params, observation)
             processed_action = self.get_processed_action(action)
-            env_state = self.env.step(env_state, processed_action)
+            env_state = self.eval_env.step(env_state, processed_action)
             return env_state, key
 
         self.key, subkey = jax.random.split(self.key)
         reset_keys = jax.random.split(subkey, self.nr_envs)
-        env_state = self.env.reset(reset_keys, True)
+        env_state = self.eval_env.reset(reset_keys, True)
         while True:
             env_state, self.key = rollout(env_state, self.key)
             if self.render:
-                env_state = self.env.render(env_state)
+                env_state = self.eval_env.render(env_state)
 
 
     def general_properties():
