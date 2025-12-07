@@ -43,7 +43,7 @@ class Policy(nn.Module):
         self.policy_logstd = nn.Parameter(torch.full((1, np.prod(single_as_shape, dtype=int).item()), np.log(std_dev).item()))
 
 
-    def layer_init(self, layer, std=np.sqrt(2).item(), bias_const=(0.0)):
+    def layer_init(self, layer, std=np.sqrt(2), bias_const=(0.0)):
         nn.init.orthogonal_(layer.weight, std)
         nn.init.constant_(layer.bias, bias_const)
         return layer

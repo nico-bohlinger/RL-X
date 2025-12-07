@@ -97,7 +97,7 @@ class ESPO:
     def train(self):
         @torch.jit.script
         def calculate_gae_advantages_and_returns_mixed_precision(rewards, terminations, values, next_values, gamma: float, gae_lambda: float):
-            with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+            with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
                 delta = rewards + gamma * next_values * (1 - terminations) - values
                 advantages = torch.zeros_like(rewards)
                 lastgaelam = torch.zeros_like(rewards[0])
@@ -109,13 +109,12 @@ class ESPO:
 
         @torch.jit.script
         def calculate_gae_advantages_and_returns(rewards, terminations, values, next_values, gamma: float, gae_lambda: float):
-            with torch.no_grad():
-                delta = rewards + gamma * next_values * (1 - terminations) - values
-                advantages = torch.zeros_like(rewards)
-                lastgaelam = torch.zeros_like(rewards[0])
-                for t in range(values.shape[0] - 2, -1, -1):
-                    lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
-                returns = advantages + values
+            delta = rewards + gamma * next_values * (1 - terminations) - values
+            advantages = torch.zeros_like(rewards)
+            lastgaelam = torch.zeros_like(rewards[0])
+            for t in range(values.shape[0] - 2, -1, -1):
+                lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
+            returns = advantages + values
             return advantages, returns
         
 
