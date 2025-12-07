@@ -59,6 +59,8 @@ class FastTD3:
         self.nr_policy_updates_per_step = config.algorithm.nr_policy_updates_per_step
         self.clipped_double_q_learning = config.algorithm.clipped_double_q_learning
         self.max_grad_norm = config.algorithm.max_grad_norm
+        self.enable_observation_normalization = config.algorithm.enable_observation_normalization
+        self.normalizer_epsilon = config.algorithm.normalizer_epsilon
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
@@ -136,6 +138,16 @@ class FastTD3:
             tx=critic_tx
         )
 
+        if self.enable_observation_normalization:
+            self.observation_normalizer_state = {
+                "running_mean": jnp.zeros((1, self.os_shape[0])),
+                "running_var": jnp.ones((1, self.os_shape[0])),
+                "running_std_dev": jnp.ones((1, self.os_shape[0])),
+                "count": jnp.zeros(())
+            }
+        else:
+            self.observation_normalizer_state = {}
+
         if self.save_model:
             os.makedirs(self.save_path)
             self.latest_model_file_name = "latest.model"
@@ -150,6 +162,7 @@ class FastTD3:
 
             policy_state = self.policy_state
             critic_state = self.critic_state
+            observation_normalizer_state = self.observation_normalizer_state
 
             noise_scales = jax.random.uniform(noise_std_key, (self.nr_envs, 1), minval=self.noise_std_min, maxval=self.noise_std_max)
 
@@ -173,12 +186,16 @@ class FastTD3:
 
             # Fill replay buffer until learning_starts
             def fill_replay_buffer(carry, _):
-                policy_state, critic_state, replay_buffer, env_state, noise_scales, key = carry
+                policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key = carry
 
                 # Acting
                 key, subkey = jax.random.split(key)
                 observation = env_state.next_observation
-                action = self.policy.apply(policy_state.params, observation)
+                if self.enable_observation_normalization:
+                    normalized_observation = (observation - observation_normalizer_state["running_mean"]) / (observation_normalizer_state["running_std_dev"] + self.normalizer_epsilon)
+                else:
+                    normalized_observation = observation
+                action = self.policy.apply(policy_state.params, normalized_observation)
                 action += jax.random.normal(subkey, action.shape) * noise_scales
                 processed_action = self.get_processed_action(action)
                 env_state = self.train_env.step(env_state, processed_action)
@@ -207,27 +224,31 @@ class FastTD3:
                     
                     env_state = jax.experimental.io_callback(render, env_state, env_state)
 
-                return (policy_state, critic_state, replay_buffer, env_state, noise_scales, key), None
+                return (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key), None
             
             key, subkey = jax.random.split(key)
-            fill_replay_buffer_carry, _ = jax.lax.scan(fill_replay_buffer, (policy_state, critic_state, replay_buffer, env_state, noise_scales, subkey), jnp.arange(self.learning_starts))
-            policy_state, critic_state, replay_buffer, env_state, noise_scales, key = fill_replay_buffer_carry
+            fill_replay_buffer_carry, _ = jax.lax.scan(fill_replay_buffer, (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, subkey), jnp.arange(self.learning_starts))
+            policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key = fill_replay_buffer_carry
 
 
             # Training
             def eval_save_iteration(eval_save_iteration_carry, eval_save_iteration_step):
-                policy_state, critic_state, replay_buffer, env_state, noise_scales, key = eval_save_iteration_carry
+                policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key = eval_save_iteration_carry
 
                 def logging_iteration(logging_iteration_carry, logging_iteration_step):
-                    policy_state, critic_state, replay_buffer, env_state, noise_scales, key = logging_iteration_carry
+                    policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key = logging_iteration_carry
 
                     def learning_iteration(learning_iteration_carry, learning_iteration_step):
-                        policy_state, critic_state, replay_buffer, env_state, noise_scales, key = learning_iteration_carry
+                        policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key = learning_iteration_carry
 
                         # Acting
                         key, subkey = jax.random.split(key)
                         observation = env_state.next_observation
-                        action = self.policy.apply(policy_state.params, observation)
+                        if self.enable_observation_normalization:
+                            normalized_observation = (observation - observation_normalizer_state["running_mean"]) / (observation_normalizer_state["running_std_dev"] + self.normalizer_epsilon)
+                        else:
+                            normalized_observation = observation
+                        action = self.policy.apply(policy_state.params, normalized_observation)
                         action += jax.random.normal(subkey, action.shape) * noise_scales
                         processed_action = self.get_processed_action(action)
                         env_state = self.train_env.step(env_state, processed_action)
@@ -258,10 +279,10 @@ class FastTD3:
 
 
                         # Optimizing - Critic and Policy
-                        def critic_loss_fn(policy_params, critic_params, critic_target_params, state, next_state, action, reward, done, truncated, effective_n_steps, key):
+                        def critic_loss_fn(policy_params, critic_params, critic_target_params, normalized_state, normalized_next_state, action, reward, done, truncated, effective_n_steps, key):
                             # Critic loss
                             clipped_noise = jnp.clip(jax.random.normal(key, action.shape) * self.smoothing_epsilon, -self.smoothing_clip_value, self.smoothing_clip_value)
-                            next_action = jnp.clip(self.policy.apply(policy_params, next_state) + clipped_noise, -1.0, 1.0)
+                            next_action = jnp.clip(self.policy.apply(policy_params, normalized_next_state) + clipped_noise, -1.0, 1.0)
 
                             delta_z = (self.v_max - self.v_min) / (self.nr_atoms - 1)
                             q_support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
@@ -279,7 +300,7 @@ class FastTD3:
                             l = jnp.where(l_mask, l - 1, l)
                             u = jnp.where(u_mask, u + 1, u)
 
-                            next_dist = jax.nn.softmax(self.critic.apply(critic_target_params, next_state, next_action)) # (2, nr_atoms) for the 2 critics
+                            next_dist = jax.nn.softmax(self.critic.apply(critic_target_params, normalized_next_state, next_action)) # (2, nr_atoms) for the 2 critics
                             proj_dist = jnp.zeros_like(next_dist)
                             wt_l = (u.astype(jnp.float32) - b)
                             wt_u = (b - l.astype(jnp.float32))
@@ -303,7 +324,7 @@ class FastTD3:
                                 qf1_next_target_dist = proj_dist[0]
                                 qf2_next_target_dist = proj_dist[1]
 
-                            current_q = self.critic.apply(critic_params, state, action)  # (2, nr_atoms)
+                            current_q = self.critic.apply(critic_params, normalized_state, action)  # (2, nr_atoms)
                             
                             q1_loss = -jnp.sum(qf1_next_target_dist * jax.nn.log_softmax(current_q[0]), axis=-1)
                             q2_loss = -jnp.sum(qf2_next_target_dist * jax.nn.log_softmax(current_q[1]), axis=-1)
@@ -318,11 +339,11 @@ class FastTD3:
 
                             return loss, (metrics)
                         
-                        def policy_loss_fn(policy_params, critic_params, state):
+                        def policy_loss_fn(policy_params, critic_params, normalized_state):
                             # Policy loss
-                            action = self.policy.apply(policy_params, state)
+                            action = self.policy.apply(policy_params, normalized_state)
 
-                            q_values = self.critic.apply(critic_params, state, action)
+                            q_values = self.critic.apply(critic_params, normalized_state, action)
                             q_values = jnp.sum(jax.nn.softmax(q_values) * jnp.linspace(self.v_min, self.v_max, self.nr_atoms), axis=-1)
                             if self.clipped_double_q_learning:
                                 processed_q_value = jnp.min(q_values, axis=0)
@@ -404,11 +425,33 @@ class FastTD3:
                         dones_all = replay_buffer["dones"][flat_t_final, flat_e_final].reshape(idx1.shape)
                         truncations_all = truncations_for_sampling[flat_t_final, flat_e_final].reshape(idx1.shape)
 
+                        if self.enable_observation_normalization:
+                            combined_states = jnp.concatenate([states_all.reshape(-1, self.os_shape[0]), next_states_all.reshape(-1, self.os_shape[0])], axis=0)
+                            batch_mean = jnp.mean(combined_states, axis=0, keepdims=True)
+                            batch_var = jnp.var(combined_states, axis=0, keepdims=True)
+                            batch_count = combined_states.shape[0]
+                            new_count = observation_normalizer_state["count"] + batch_count
+                            delta = batch_mean - observation_normalizer_state["running_mean"]
+                            observation_normalizer_state["running_mean"] += delta * batch_count / new_count
+                            delta2 = batch_mean - observation_normalizer_state["running_mean"]
+                            m_a = observation_normalizer_state["running_var"] * observation_normalizer_state["count"]
+                            m_b = batch_var * batch_count
+                            m2 = m_a + m_b + jnp.square(delta2) * observation_normalizer_state["count"] * batch_count / new_count
+                            observation_normalizer_state["running_var"] = m2 / new_count
+                            observation_normalizer_state["running_std_dev"] = jnp.sqrt(observation_normalizer_state["running_var"])
+                            observation_normalizer_state["count"] = new_count
+
+                            normalized_states_all = (states_all - observation_normalizer_state["running_mean"]) / (observation_normalizer_state["running_std_dev"] + self.normalizer_epsilon)
+                            normalized_next_states_all = (next_states_all - observation_normalizer_state["running_mean"]) / (observation_normalizer_state["running_std_dev"] + self.normalizer_epsilon)
+                        else:
+                            normalized_states_all = states_all
+                            normalized_next_states_all = next_states_all
+
                         update_idx = 0
                         for _ in range(self.nr_policy_updates_per_step):
                             for _ in range(self.nr_critic_updates_per_policy_update):
-                                states = states_all[update_idx]
-                                next_states = next_states_all[update_idx]
+                                normalized_states = normalized_states_all[update_idx]
+                                normalized_next_states = normalized_next_states_all[update_idx]
                                 actions = actions_all[update_idx]
                                 rewards = rewards_all[update_idx]
                                 dones = dones_all[update_idx]
@@ -418,7 +461,7 @@ class FastTD3:
 
                                 (loss, (critic_metrics)), (critic_gradients,) = grad_critic_loss_fn(
                                     policy_state.params, critic_state.params, critic_state.target_params,
-                                    states, next_states, actions, rewards, dones, truncations, effective_n_steps,
+                                    normalized_states, normalized_next_states, actions, rewards, dones, truncations, effective_n_steps,
                                     keys_for_update)
 
                                 critic_state = critic_state.apply_gradients(grads=critic_gradients)
@@ -430,21 +473,21 @@ class FastTD3:
 
                                 update_idx += 1
 
-                            states_for_policy = states
+                            normalized_states_for_policy = normalized_states
 
                             (loss, (policy_metrics)), (policy_gradients,) = grad_policy_loss_fn(
-                                policy_state.params, critic_state.params, states_for_policy)
+                                policy_state.params, critic_state.params, normalized_states_for_policy)
 
                             policy_state = policy_state.apply_gradients(grads=policy_gradients)
                             policy_metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
 
                         metrics = {**critic_metrics, **policy_metrics}
 
-                        return (policy_state, critic_state, replay_buffer, env_state, noise_scales, key), (env_state.info, metrics)
+                        return (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key), (env_state.info, metrics)
                         
                     key, subkey = jax.random.split(key)
-                    learning_iteration_carry, info_and_optimization_metrics = jax.lax.scan(learning_iteration, (policy_state, critic_state, replay_buffer, env_state, noise_scales, subkey), jnp.arange(self.nr_updates_per_logging_iteration))
-                    policy_state, critic_state, replay_buffer, env_state, noise_scales, key = learning_iteration_carry
+                    learning_iteration_carry, info_and_optimization_metrics = jax.lax.scan(learning_iteration, (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, subkey), jnp.arange(self.nr_updates_per_logging_iteration))
+                    policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key = learning_iteration_carry
                     infos, optimization_metrics = info_and_optimization_metrics
                     infos = {key: jnp.mean(infos[key]) for key in infos}
                     optimization_metrics = {key: jnp.mean(optimization_metrics[key]) for key in optimization_metrics}
@@ -474,18 +517,22 @@ class FastTD3:
 
                     jax.debug.callback(callback, (combined_metrics, parallel_seed_id))
 
-                    return (policy_state, critic_state, replay_buffer, env_state, noise_scales, key), None
+                    return (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key), None
 
                 key, subkey = jax.random.split(key)
-                logging_iteration_carry, _ = jax.lax.scan(logging_iteration, (policy_state, critic_state, replay_buffer, env_state, noise_scales, subkey), jnp.arange(self.nr_loggings_per_eval_save_iteration))
-                policy_state, critic_state, replay_buffer, env_state, noise_scales, key = logging_iteration_carry
+                logging_iteration_carry, _ = jax.lax.scan(logging_iteration, (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, subkey), jnp.arange(self.nr_loggings_per_eval_save_iteration))
+                policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key = logging_iteration_carry
 
 
                 # Evaluating
                 if self.evaluation_active:
                     def single_eval_rollout(carry, _):
                         policy_state, eval_env_state = carry
-                        eval_action = self.policy.apply(policy_state.params, eval_env_state.next_observation)
+                        if self.enable_observation_normalization:
+                            eval_normalized_observation = (eval_env_state.next_observation - observation_normalizer_state["running_mean"]) / (observation_normalizer_state["running_std_dev"] + self.normalizer_epsilon)
+                        else:
+                            eval_normalized_observation = eval_env_state.next_observation
+                        eval_action = self.policy.apply(policy_state.params, eval_normalized_observation)
                         eval_processed_action = self.get_processed_action(eval_action)
                         eval_env_state = self.eval_env.step(eval_env_state, eval_processed_action)
                         return (policy_state, eval_env_state), None
@@ -514,14 +561,14 @@ class FastTD3:
 
                 # Saving
                 if self.save_model:
-                    def save_with_check(policy_state, critic_state):
-                        self.save(policy_state, critic_state)
-                    jax.debug.callback(save_with_check, policy_state, critic_state)
+                    def save_with_check(policy_state, critic_state, observation_normalizer_state):
+                        self.save(policy_state, critic_state, observation_normalizer_state)
+                    jax.debug.callback(save_with_check, policy_state, critic_state, observation_normalizer_state)
 
                 
-                return (policy_state, critic_state, replay_buffer, env_state, noise_scales, key), None
+                return (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key), None
 
-            jax.lax.scan(eval_save_iteration, (policy_state, critic_state, replay_buffer, env_state, noise_scales, key), jnp.arange(self.nr_eval_save_iterations))
+            jax.lax.scan(eval_save_iteration, (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key), jnp.arange(self.nr_eval_save_iterations))
             
 
         self.key, subkey = jax.random.split(self.key)
@@ -557,10 +604,11 @@ class FastTD3:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
 
-    def save(self, policy_state, critic_state):
+    def save(self, policy_state, critic_state, observation_normalizer_state):
         checkpoint = {
             "policy": policy_state,
-            "critic": critic_state
+            "critic": critic_state,
+            "observation_normalizer": observation_normalizer_state
         }
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
@@ -589,7 +637,8 @@ class FastTD3:
 
         target = {
             "policy": model.policy_state,
-            "critic": model.critic_state
+            "critic": model.critic_state,
+            "observation_normalizer": model.observation_normalizer_state
         }
         restore_args = orbax_utils.restore_args_from_target(target)
         checkpointer = orbax.checkpoint.PyTreeCheckpointer()
@@ -597,6 +646,7 @@ class FastTD3:
 
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
+        model.observation_normalizer_state = checkpoint["observation_normalizer"]
 
         shutil.rmtree(checkpoint_dir)
 
@@ -610,7 +660,11 @@ class FastTD3:
         def rollout(env_state, key):
             # key, std_dev_key = jax.random.split(key)
             observation = env_state.next_observation
-            action = self.policy.apply(self.policy_state.params, observation)
+            if self.enable_observation_normalization:
+                normalized_observation = (observation - self.observation_normalizer_state["running_mean"]) / (self.observation_normalizer_state["running_std_dev"] + self.normalizer_epsilon)
+            else:
+                normalized_observation = observation
+            action = self.policy.apply(self.policy_state.params, normalized_observation)
             processed_action = self.get_processed_action(action)
             env_state = self.eval_env.step(env_state, processed_action)
             return env_state, key

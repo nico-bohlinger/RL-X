@@ -30,6 +30,8 @@ def get_config(algorithm_name):
     config.clipped_double_q_learning = True
     config.max_grad_norm = -1.0  # -1.0 to disable
     config.action_clipping_and_rescaling = False
+    config.enable_observation_normalization = True
+    config.normalizer_epsilon = 1e-8
     config.logging_frequency = 40960
     config.evaluation_and_save_frequency = 18350080  # -1 to disable
     config.evaluation_active = True
