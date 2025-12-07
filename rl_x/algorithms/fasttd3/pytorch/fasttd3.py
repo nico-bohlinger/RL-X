@@ -12,6 +12,7 @@ from rl_x.algorithms.fasttd3.pytorch.general_properties import GeneralProperties
 from rl_x.algorithms.fasttd3.pytorch.policy import get_policy
 from rl_x.algorithms.fasttd3.pytorch.critic import get_critic
 from rl_x.algorithms.fasttd3.pytorch.replay_buffer import ReplayBuffer
+from rl_x.algorithms.fasttd3.pytorch.observation_normalizer import get_observation_normalizer
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -90,6 +91,8 @@ class FastTD3:
             self.q_scheduler = optim.lr_scheduler.LinearLR(self.q_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
             self.policy_scheduler = optim.lr_scheduler.LinearLR(self.policy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
         
+        self.observation_normalizer = get_observation_normalizer(config, self.train_env.single_observation_space.shape[0], self.device)
+
         self.q_support = torch.linspace(self.v_min, self.v_max, self.nr_atoms, device=self.device)
 
         if self.save_model:
@@ -251,7 +254,8 @@ class FastTD3:
             # Acting
             dones_this_rollout = 0
             with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                action, processed_action = self.policy.get_action(state, noise_scales)
+                normalized_state = self.observation_normalizer.normalize(state, update=False)
+                action, processed_action = self.policy.get_action(normalized_state, noise_scales)
             next_state, reward, terminated, truncated, info = self.train_env.step(processed_action)
             done = terminated | truncated
             actual_next_state = next_state  # TODO: Handle this properly
@@ -291,8 +295,10 @@ class FastTD3:
 
                     for _ in range(self.nr_critic_updates_per_policy_update):
                         batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncations, batch_effective_n_steps = replay_buffer.sample(self.batch_size)
-                        
-                        q_loss, q_min, q_max, critic_grad_norm = critic_loss_fn(batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncations, batch_effective_n_steps)
+                        batch_normalized_states = self.observation_normalizer.normalize(batch_states, update=True)
+                        batch_normalized_next_states = self.observation_normalizer.normalize(batch_next_states, update=True)
+
+                        q_loss, q_min, q_max, critic_grad_norm = critic_loss_fn(batch_normalized_states, batch_normalized_next_states, batch_actions, batch_rewards, batch_dones, batch_truncations, batch_effective_n_steps)
                         
                         with torch.no_grad():
                             for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
@@ -302,7 +308,7 @@ class FastTD3:
 
                         nr_updates += 1
                     
-                    policy_loss, policy_grad_norm = policy_loss_fn(batch_states)
+                    policy_loss, policy_grad_norm = policy_loss_fn(batch_normalized_states)
 
                     optimization_metrics = {
                         "gradients/policy_grad_norm": policy_grad_norm.item(),
@@ -331,7 +337,8 @@ class FastTD3:
                 eval_state, _ = self.eval_env.reset()
                 for _ in range(self.horizon):
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                        _, eval_processed_action = self.policy.get_action(eval_state)
+                        eval_normalized_state = self.observation_normalizer.normalize(eval_state, update=False)
+                        _, eval_processed_action = self.policy.get_action(eval_normalized_state)
                     if self.bf16_mixed_precision_training:
                         eval_processed_action = eval_processed_action.to(torch.float32)
                     eval_state, _, _, _, eval_info = self.eval_env.step(eval_processed_action)
@@ -426,6 +433,7 @@ class FastTD3:
             "q2_target_state_dict": self.critic.q2_target.state_dict(),
             "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
             "q_optimizer_state_dict": self.q_optimizer.state_dict(),
+            "observation_normalizer_state_dict": self.observation_normalizer.state_dict()
         }
         torch.save(save_dict, file_path)
         if self.track_wandb:
@@ -446,6 +454,7 @@ class FastTD3:
         model.critic.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
         model.policy_optimizer.load_state_dict(checkpoint["policy_optimizer_state_dict"])
         model.q_optimizer.load_state_dict(checkpoint["q_optimizer_state_dict"])
+        model.observation_normalizer.load_state_dict(checkpoint["observation_normalizer_state_dict"])
         return model
 
     
@@ -456,7 +465,8 @@ class FastTD3:
         state, _ = self.eval_env.reset()
         while True:
             with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                _, processed_action = self.policy.get_action(state)
+                normalized_state = self.observation_normalizer.normalize(state, update=False)
+                _, processed_action = self.policy.get_action(normalized_state)
             self.eval_env.step(processed_action)
 
 
@@ -466,6 +476,7 @@ class FastTD3:
         self.critic.q2.train()
         self.critic.q1_target.train()
         self.critic.q2_target.train()
+        self.observation_normalizer.train()
 
 
     def set_eval_mode(self):
@@ -474,6 +485,7 @@ class FastTD3:
         self.critic.q2.eval()
         self.critic.q1_target.eval()
         self.critic.q2_target.eval()
+        self.observation_normalizer.eval()
 
     
     def general_properties():
