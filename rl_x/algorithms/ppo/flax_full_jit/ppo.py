@@ -75,8 +75,8 @@ class PPO:
         self.key, policy_key, critic_key, reset_key = jax.random.split(self.key, 4)
         reset_key = jax.random.split(reset_key, 1)
 
-        self.policy, self.get_processed_action = get_policy(self.config, self.env)
-        self.critic = get_critic(self.config, self.env)
+        self.policy, self.get_processed_action = get_policy(self.config, self.train_env)
+        self.critic = get_critic(self.config, self.train_env)
 
         def linear_schedule(count):
             fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates

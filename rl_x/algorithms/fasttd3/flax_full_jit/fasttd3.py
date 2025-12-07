@@ -93,8 +93,8 @@ class FastTD3:
         self.key, policy_key, critic_key, reset_key = jax.random.split(self.key, 4)
         reset_key = jax.random.split(reset_key, self.nr_envs)
 
-        self.policy, self.get_processed_action = get_policy(self.config, self.env)
-        self.critic = get_critic(self.config, self.env)
+        self.policy, self.get_processed_action = get_policy(self.config, self.train_env)
+        self.critic = get_critic(self.config, self.train_env)
 
         def linear_schedule(count):
             step = (count * self.nr_envs) - self.learning_starts
