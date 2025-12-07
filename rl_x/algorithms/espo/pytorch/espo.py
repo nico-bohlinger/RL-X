@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.amp import autocast
 import wandb
 
 from rl_x.algorithms.espo.pytorch.general_properties import GeneralProperties
@@ -29,6 +30,8 @@ class ESPO:
         self.track_tb = config.runner.track_tb
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
+        self.compile_mode = config.algorithm.compile_mode
+        self.bf16_mixed_precision_training = config.algorithm.bf16_mixed_precision_training
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.learning_rate = config.algorithm.learning_rate
@@ -67,6 +70,9 @@ class ESPO:
         self.device = torch.device(device_name)
         rlx_logger.info(f"Using device: {self.device}")
 
+        if self.bf16_mixed_precision_training and self.device.type != "cuda":
+            raise ValueError("bfloat16 mixed precision training is only supported on CUDA devices.")
+
         self.rng = np.random.default_rng(self.seed)
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
@@ -74,10 +80,14 @@ class ESPO:
         self.os_shape = self.train_env.single_observation_space.shape
         self.as_shape = self.train_env.single_action_space.shape
 
-        self.policy = torch.compile(get_policy(config, self.train_env, self.device).to(self.device), mode="default")
-        self.critic = torch.compile(get_critic(config, self.train_env).to(self.device), mode="default")
+        self.policy = get_policy(config, self.train_env, self.device)
+        self.critic = get_critic(config, self.train_env, self.device)
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate)
+        
+        if self.anneal_learning_rate:
+            self.policy_scheduler = optim.lr_scheduler.LinearLR(self.policy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.batch_size)
+            self.critic_scheduler = optim.lr_scheduler.LinearLR(self.critic_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.batch_size)
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -86,43 +96,74 @@ class ESPO:
     
     def train(self):
         @torch.jit.script
-        def calculate_gae_advantages_and_returns(rewards, terminations, values, next_values, gamma: float, gae_lambda: float):
-            delta = rewards + gamma * next_values * (1 - terminations) - values
-            advantages = torch.zeros_like(rewards)
-            lastgaelam = torch.zeros_like(rewards[0])
-            for t in range(values.shape[0] - 2, -1, -1):
-                lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
-            returns = advantages + values
+        def calculate_gae_advantages_and_returns_mixed_precision(rewards, terminations, values, next_values, gamma: float, gae_lambda: float):
+            with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+                delta = rewards + gamma * next_values * (1 - terminations) - values
+                advantages = torch.zeros_like(rewards)
+                lastgaelam = torch.zeros_like(rewards[0])
+                for t in range(values.shape[0] - 2, -1, -1):
+                    lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
+                returns = advantages + values
             return advantages, returns
         
 
-        @torch.compile(mode="default")
-        def policy_loss_fn(policy, states, actions, log_probs, advantages):
-            new_log_prob, entropy = policy.get_logprob_entropy(states, actions)
-            logratio = new_log_prob - log_probs
-            ratio = logratio.exp()
-
+        @torch.jit.script
+        def calculate_gae_advantages_and_returns(rewards, terminations, values, next_values, gamma: float, gae_lambda: float):
             with torch.no_grad():
-                log_ratio = new_log_prob - log_probs
-                approx_kl_div = torch.mean((torch.exp(log_ratio) - 1) - log_ratio)
-
-            minibatch_advantages = advantages
-            minibatch_advantages = (minibatch_advantages - minibatch_advantages.mean()) / (minibatch_advantages.std() + 1e-8)
-
-            pg_loss = (-minibatch_advantages * ratio).mean()
-
-            entropy_loss = entropy.mean()
-            loss = pg_loss - self.entropy_coef * entropy_loss
-
-            return ratio, loss, pg_loss, entropy_loss, approx_kl_div
+                delta = rewards + gamma * next_values * (1 - terminations) - values
+                advantages = torch.zeros_like(rewards)
+                lastgaelam = torch.zeros_like(rewards[0])
+                for t in range(values.shape[0] - 2, -1, -1):
+                    lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
+                returns = advantages + values
+            return advantages, returns
         
 
-        @torch.compile(mode="default")
-        def critic_loss_fn(critic, states, returns):
-            new_value = critic.get_value(states).reshape(-1)
-            v_loss = (0.5 * (new_value - returns) ** 2).mean()
+        @torch.compile(mode=self.compile_mode)
+        def policy_loss_fn(states, actions, log_probs, advantages):
+            with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
+                new_log_prob, entropy = self.policy.get_logprob_entropy(states, actions)
+                logratio = new_log_prob - log_probs
+                ratio = logratio.exp()
 
-            return self.critic_coef * v_loss, v_loss
+                with torch.no_grad():
+                    log_ratio = new_log_prob - log_probs
+                    approx_kl_div = torch.mean((torch.exp(log_ratio) - 1) - log_ratio)
+                    ratio_delta = self.delta_calc_operator(torch.abs(ratio - 1))
+
+                minibatch_advantages = advantages
+                minibatch_advantages = (minibatch_advantages - minibatch_advantages.mean()) / (minibatch_advantages.std() + 1e-8)
+
+                pg_loss = (-minibatch_advantages * ratio).mean()
+
+                entropy_loss = entropy.mean()
+                loss = pg_loss - self.entropy_coef * entropy_loss
+
+            self.policy_optimizer.zero_grad()
+            loss.backward()
+
+            policy_grad_norm = nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+
+            self.policy_optimizer.step()
+
+            return ratio_delta, pg_loss, entropy_loss, approx_kl_div, policy_grad_norm
+        
+
+        @torch.compile(mode=self.compile_mode)
+        def critic_loss_fn(states, returns):
+            with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
+                new_value = self.critic.get_value(states).reshape(-1)
+                v_loss = self.critic_coef * (0.5 * (new_value - returns) ** 2).mean()
+            
+            self.critic_optimizer.zero_grad()
+            v_loss.backward()
+
+            critic_grad_norm = nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
+
+            self.critic_optimizer.step()
+
+            return v_loss, critic_grad_norm
+
 
         self.set_train_mode()
 
@@ -155,7 +196,7 @@ class ESPO:
             dones_this_rollout = 0
             step_info_collection = {}
             for step in range(self.nr_steps):
-                with torch.no_grad():
+                with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                     action, processed_action, log_prob = self.policy.get_action_logprob(state)
                     value = self.critic.get_value(state)
                 next_state, reward, terminated, truncated, info = self.train_env.step(processed_action.cpu().numpy())
@@ -186,24 +227,18 @@ class ESPO:
 
 
             # Calculating advantages and returns
-            with torch.no_grad():
+            with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 next_values = self.critic.get_value(batch.next_states).squeeze(-1)
-            batch.advantages, batch.returns = calculate_gae_advantages_and_returns(batch.rewards, batch.terminations, batch.values, next_values, self.gamma, self.gae_lambda)
+            if self.bf16_mixed_precision_training:
+                batch.advantages, batch.returns = calculate_gae_advantages_and_returns_mixed_precision(batch.rewards, batch.terminations, batch.values, next_values, self.gamma, self.gae_lambda)
+            else:
+                batch.advantages, batch.returns = calculate_gae_advantages_and_returns(batch.rewards, batch.terminations, batch.values, next_values, self.gamma, self.gae_lambda)
             
             calc_adv_return_end_time = time.time()
             time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
 
 
             # Optimizing
-            learning_rate = self.learning_rate
-            if self.anneal_learning_rate:
-                fraction = 1 - (global_step / self.total_timesteps)
-                learning_rate = fraction * self.learning_rate
-                for param_group in self.policy_optimizer.param_groups:
-                    param_group["lr"] = learning_rate
-                for param_group in self.critic_optimizer.param_groups:
-                    param_group["lr"] = learning_rate
-            
             batch_states = batch.states.reshape((-1,) + self.os_shape)
             batch_actions = batch.actions.reshape((-1,) + self.as_shape)
             batch_advantages = batch.advantages.reshape(-1)
@@ -216,30 +251,9 @@ class ESPO:
                 minibatch_indices = self.rng.choice(self.batch_size, size=self.minibatch_size, replace=False)
 
                 # Policy loss
-                ratio, loss1, pg_loss, entropy_loss, approx_kl_div = \
-                    policy_loss_fn(self.policy, batch_states[minibatch_indices], batch_actions[minibatch_indices], batch_log_probs[minibatch_indices], batch_advantages[minibatch_indices])
-                loss2, critic_loss = critic_loss_fn(self.critic, batch_states[minibatch_indices], batch_returns[minibatch_indices])
-
-                self.policy_optimizer.zero_grad()
-                self.critic_optimizer.zero_grad()
-                loss1.backward()
-                loss2.backward()
-
-                policy_grad_norm = 0.0
-                critic_grad_norm = 0.0
-                for param in self.policy.parameters():
-                    policy_grad_norm += param.grad.detach().data.norm(2).item() ** 2
-                for param in self.critic.parameters():
-                    critic_grad_norm += param.grad.detach().data.norm(2).item() ** 2
-                policy_grad_norm = policy_grad_norm ** 0.5
-                critic_grad_norm = critic_grad_norm ** 0.5
-
-                nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-                nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
-                self.policy_optimizer.step()
-                self.critic_optimizer.step()
-
-                ratio_delta = self.delta_calc_operator(torch.abs(ratio - 1))
+                ratio_delta, pg_loss, entropy_loss, approx_kl_div, policy_grad_norm = \
+                    policy_loss_fn(batch_states[minibatch_indices], batch_actions[minibatch_indices], batch_log_probs[minibatch_indices], batch_advantages[minibatch_indices])
+                critic_loss, critic_grad_norm = critic_loss_fn(batch_states[minibatch_indices], batch_returns[minibatch_indices])
 
                 # Create metrics
                 metrics = {
@@ -248,8 +262,8 @@ class ESPO:
                     "loss/entropy_loss": entropy_loss.item(),
                     "policy_ratio/ratio_delta": ratio_delta.item(),
                     "policy_ratio/approx_kl": approx_kl_div.item(),
-                    "gradients/policy_grad_norm": policy_grad_norm,
-                    "gradients/critic_grad_norm": critic_grad_norm,
+                    "gradients/policy_grad_norm": policy_grad_norm.item(),
+                    "gradients/critic_grad_norm": critic_grad_norm.item(),
                 }
                 optimization_metrics_list.append(metrics)
 
@@ -260,9 +274,13 @@ class ESPO:
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+            if self.anneal_learning_rate:
+                self.policy_scheduler.step()
+                self.critic_scheduler.step()
+
             optimization_metrics = {key: np.mean([optimization_metrics[key] for optimization_metrics in optimization_metrics_list]) for key in optimization_metrics_list[0].keys()}
             optimization_metrics["optim/nr_epochs"] = epoch + 1
-            optimization_metrics["lr/learning_rate"] = learning_rate
+            optimization_metrics["lr/learning_rate"] = self.learning_rate if not self.anneal_learning_rate else self.policy_scheduler.get_last_lr()[0]
             optimization_metrics["v_value/explained_variance"] = explained_var
             optimization_metrics["policy/std_dev"] = np.mean(np.exp(self.policy.policy_logstd.data.cpu().numpy()))
 
@@ -280,7 +298,7 @@ class ESPO:
                 eval_nr_episodes = 0
                 evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
                 while True:
-                    with torch.no_grad():
+                    with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                         eval_processed_action = self.policy.get_deterministic_action(torch.tensor(eval_state, dtype=torch.float32).to(self.device))
                     eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(eval_processed_action.cpu().numpy())
                     eval_done = eval_terminated | eval_truncated
@@ -398,7 +416,7 @@ class ESPO:
             episode_return = 0
             state, _ = self.eval_env.reset()
             while not done:
-                with torch.no_grad():
+                with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                     processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, terminated, truncated, info = self.eval_env.step(processed_action.cpu().numpy())
                 done = terminated | truncated
