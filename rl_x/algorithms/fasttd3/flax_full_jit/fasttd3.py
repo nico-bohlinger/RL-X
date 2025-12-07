@@ -107,7 +107,7 @@ class FastTD3:
 
         env_state = self.train_env.reset(reset_key, False)
 
-        if self.max_grad_norm > 0.0:
+        if self.max_grad_norm != -1.0:
             policy_tx = optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
                 optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay),
@@ -122,7 +122,7 @@ class FastTD3:
 
         dummy_action = jnp.zeros((self.nr_envs,) + self.as_shape, dtype=jnp.float32)
 
-        if self.max_grad_norm > 0.0:
+        if self.max_grad_norm != -1.0:
             critic_tx = optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
                 optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay),

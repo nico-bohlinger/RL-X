@@ -121,7 +121,7 @@ class FastTD3:
             self.policy_optimizer.zero_grad()
             loss.backward()
 
-            if self.max_grad_norm > 0.0:
+            if self.max_grad_norm != -1.0:
                 policy_grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             else:
                 policy_grad_norm_val = 0.0
@@ -210,7 +210,7 @@ class FastTD3:
             self.q_optimizer.zero_grad()
             q_loss.backward()
             
-            if self.max_grad_norm > 0.0:
+            if self.max_grad_norm != -1.0:
                 critic_grad_norm = torch.nn.utils.clip_grad_norm_(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), self.max_grad_norm)
             else:
                 critic_grad_norm_val = 0.0
