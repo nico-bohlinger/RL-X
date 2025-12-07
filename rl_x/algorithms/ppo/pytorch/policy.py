@@ -12,22 +12,29 @@ def get_policy(config, env, device):
     action_space_type = env.general_properties.action_space_type
     observation_space_type = env.general_properties.observation_space_type
     policy_observation_indices = getattr(env, "policy_observation_indices", np.arange(env.single_observation_space.shape[0]))
+    compile_mode = config.algorithm.compile_mode
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return ContinuousFlatValuesPolicy(env, config.algorithm.std_dev, config.algorithm.action_clipping_and_rescaling, config.algorithm.nr_hidden_units, device, policy_observation_indices)
+        policy = ContinuousFlatValuesPolicy(env, config.algorithm.std_dev, config.algorithm.action_clipping_and_rescaling, config.algorithm.nr_hidden_units, device, policy_observation_indices)
     elif action_space_type == ActionSpaceType.DISCRETE and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return DiscreteFlatValuesPolicy(env, config.algorithm.nr_hidden_units, policy_observation_indices)
+        policy = DiscreteFlatValuesPolicy(env, config.algorithm.nr_hidden_units, device, policy_observation_indices)
     elif action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.IMAGES:
-        return ContinuousImagesPolicy(env, config.algorithm.std_dev, config.algorithm.action_clipping_and_rescaling, device)
+        policy = ContinuousImagesPolicy(env, config.algorithm.std_dev, config.algorithm.action_clipping_and_rescaling, device)
     elif action_space_type == ActionSpaceType.DISCRETE and observation_space_type == ObservationSpaceType.IMAGES:
-        return DiscreteImagesPolicy(env)
+        policy = DiscreteImagesPolicy(env)
+    
+    policy = torch.compile(policy.to(device), mode=compile_mode)
+    policy.get_action_logprob = torch.compile(policy.get_action_logprob, mode=compile_mode)
+    policy.get_logprob_entropy = torch.compile(policy.get_logprob_entropy, mode=compile_mode)
+    policy.get_deterministic_action = torch.compile(policy.get_deterministic_action, mode=compile_mode)
+    return policy
 
 
 class ContinuousFlatValuesPolicy(nn.Module):
     def __init__(self, env, std_dev, action_clipping_and_rescaling, nr_hidden_units, device, policy_observation_indices):
         super().__init__()
         self.action_clipping_and_rescaling = action_clipping_and_rescaling
-        self.policy_observation_indices = policy_observation_indices
+        self.policy_observation_indices = torch.tensor(policy_observation_indices, dtype=torch.long, device=device)
         obs_input_dim = len(policy_observation_indices)
         self.policy_as_low = -1
         self.policy_as_high = 1
@@ -51,7 +58,6 @@ class ContinuousFlatValuesPolicy(nn.Module):
         return layer
     
 
-    @torch.compile(mode="default")
     def get_action_logprob(self, x):
         x = x[..., self.policy_observation_indices]
         action_mean = self.policy_mean(x)
@@ -67,7 +73,6 @@ class ContinuousFlatValuesPolicy(nn.Module):
         return action, clipped_and_scaled_action, probs.log_prob(action).sum(1)
     
 
-    @torch.compile(mode="default")
     def get_logprob_entropy(self, x, action):
         x = x[..., self.policy_observation_indices]
         action_mean = self.policy_mean(x)
@@ -77,11 +82,9 @@ class ContinuousFlatValuesPolicy(nn.Module):
         return probs.log_prob(action).sum(1), probs.entropy().sum(1)
     
 
-    @torch.compile(mode="default")
     def get_deterministic_action(self, x):
         x = x[..., self.policy_observation_indices]
-        with torch.no_grad():
-            action = self.policy_mean(x)
+        action = self.policy_mean(x)
         if self.action_clipping_and_rescaling:
             clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)
             clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
@@ -91,9 +94,9 @@ class ContinuousFlatValuesPolicy(nn.Module):
 
 
 class DiscreteFlatValuesPolicy(nn.Module):
-    def __init__(self, env, nr_hidden_units, policy_observation_indices):
+    def __init__(self, env, nr_hidden_units, device, policy_observation_indices):
         super().__init__()
-        self.policy_observation_indices = policy_observation_indices
+        self.policy_observation_indices = torch.tensor(policy_observation_indices, dtype=torch.long, device=device)
         obs_input_dim = len(policy_observation_indices)
         logit_size = env.get_single_action_logit_size()
         
@@ -112,7 +115,6 @@ class DiscreteFlatValuesPolicy(nn.Module):
         return layer
 
 
-    @torch.compile(mode="default")
     def get_action_logprob(self, x):
         x = x[..., self.policy_observation_indices]
         action_mean = self.policy_mean(x)
@@ -121,7 +123,6 @@ class DiscreteFlatValuesPolicy(nn.Module):
         return action, action, probs.log_prob(action)
     
 
-    @torch.compile(mode="default")
     def get_logprob_entropy(self, x, action):
         x = x[..., self.policy_observation_indices]
         action_mean = self.policy_mean(x)
@@ -129,11 +130,9 @@ class DiscreteFlatValuesPolicy(nn.Module):
         return probs.log_prob(action), probs.entropy()
     
 
-    @torch.compile(mode="default")
     def get_deterministic_action(self, x):
         x = x[..., self.policy_observation_indices]
-        with torch.no_grad():
-            return self.policy_mean(x).argmax(1)
+        return self.policy_mean(x).argmax(1)
 
 
 class ContinuousImagesPolicy(nn.Module):
@@ -169,7 +168,6 @@ class ContinuousImagesPolicy(nn.Module):
         return layer
     
 
-    @torch.compile(mode="default")
     def get_action_logprob(self, x):
         action_mean = self.policy_mean(x / 255.0)
         action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
@@ -184,7 +182,6 @@ class ContinuousImagesPolicy(nn.Module):
         return action, clipped_and_scaled_action, probs.log_prob(action).sum(1)
     
 
-    @torch.compile(mode="default")
     def get_logprob_entropy(self, x, action):
         action_mean = self.policy_mean(x / 255.0)
         action_logstd = self.policy_logstd.expand_as(action_mean)  # (nr_envs, as_shape)
@@ -193,10 +190,8 @@ class ContinuousImagesPolicy(nn.Module):
         return probs.log_prob(action).sum(1), probs.entropy().sum(1)
     
 
-    @torch.compile(mode="default")
     def get_deterministic_action(self, x):
-        with torch.no_grad():
-            action = self.policy_mean(x / 255.0)
+        action = self.policy_mean(x / 255.0)
         if self.action_clipping_and_rescaling:
             clipped_action = torch.clip(action, self.policy_as_low, self.policy_as_high)
             clipped_and_scaled_action = self.env_as_low + (0.5 * (clipped_action + 1.0) * (self.env_as_high - self.env_as_low))
@@ -232,7 +227,6 @@ class DiscreteImagesPolicy(nn.Module):
         return layer
     
 
-    @torch.compile(mode="default")
     def get_action_logprob(self, x):
         action_mean = self.policy_mean(x / 255.0)
         probs = Categorical(logits=action_mean)
@@ -240,14 +234,11 @@ class DiscreteImagesPolicy(nn.Module):
         return action, action, probs.log_prob(action)
     
 
-    @torch.compile(mode="default")
     def get_logprob_entropy(self, x, action):
         action_mean = self.policy_mean(x / 255.0)
         probs = Categorical(logits=action_mean)
         return probs.log_prob(action), probs.entropy()
     
 
-    @torch.compile(mode="default")
     def get_deterministic_action(self, x):
-        with torch.no_grad():
-            return self.policy_mean(x / 255.0).argmax(1)
+        return self.policy_mean(x / 255.0).argmax(1)
