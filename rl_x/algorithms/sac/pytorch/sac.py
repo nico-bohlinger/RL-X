@@ -6,12 +6,13 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.amp import autocast
 import wandb
 
 from rl_x.algorithms.sac.pytorch.general_properties import GeneralProperties
 from rl_x.algorithms.sac.pytorch.policy import get_policy
 from rl_x.algorithms.sac.pytorch.critic import get_critic
-from rl_x.algorithms.sac.pytorch.entropy_coefficient import EntropyCoefficient
+from rl_x.algorithms.sac.pytorch.entropy_coefficient import get_entropy_coefficient
 from rl_x.algorithms.sac.pytorch.replay_buffer import ReplayBuffer
 
 rlx_logger = logging.getLogger("rl_x")
@@ -30,6 +31,8 @@ class SAC:
         self.track_tb = config.runner.track_tb
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
+        self.compile_mode = config.algorithm.compile_mode
+        self.bf16_mixed_precision_training = config.algorithm.bf16_mixed_precision_training
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.learning_rate = config.algorithm.learning_rate
@@ -54,6 +57,9 @@ class SAC:
         self.device = torch.device(device_name)
         rlx_logger.info(f"Using device: {self.device}")
 
+        if self.bf16_mixed_precision_training and self.device.type != "cuda":
+            raise ValueError("bfloat16 mixed precision training is only supported on CUDA devices.")
+
         self.rng = np.random.default_rng(self.seed)
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
@@ -61,13 +67,11 @@ class SAC:
         self.env_as_low = self.train_env.single_action_space.low
         self.env_as_high = self.train_env.single_action_space.high
 
-        self.policy = torch.compile(get_policy(config, self.train_env, self.device).to(self.device), mode="default")
-        self.critic = torch.compile(get_critic(config, self.train_env, self.device).to(self.device), mode="default")
+        self.policy = get_policy(config, self.train_env, self.device)
+        self.critic = get_critic(config, self.train_env, self.device)
+        self.entropy_coefficient = get_entropy_coefficient(config, self.train_env, self.device)
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
         self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate)
-
-        self.entropy_coefficient = torch.compile(EntropyCoefficient(config, self.train_env, self.device).to(self.device), mode="default")
-        self.alpha = self.entropy_coefficient()
         self.entropy_optimizer = optim.Adam([self.entropy_coefficient.log_alpha], lr=self.learning_rate)
 
         if self.save_model:
@@ -76,29 +80,74 @@ class SAC:
 
     
     def train(self):
-        @torch.compile(mode="default")
-        def policy_loss_fn(current_log_probs, q1, q2, alpha):
-            min_q = torch.minimum(q1, q2)
-            policy_loss = (alpha.detach() * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+        @torch.compile(mode=self.compile_mode)
+        def policy_and_entropy_loss_fn(batch_states):
+            with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
+                current_actions, _, current_log_probs = self.policy.get_action(batch_states)
 
-            return policy_loss, min_q
+                q1 = self.critic.q1(batch_states, current_actions)
+                q2 = self.critic.q2(batch_states, current_actions)
+
+                min_q = torch.minimum(q1, q2)
+
+                alpha = self.entropy_coefficient().detach()
+                policy_loss = (alpha * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+
+            self.policy_optimizer.zero_grad()
+            policy_loss.backward()
+
+            policy_grad_norm = 0.0
+            for param in self.policy.parameters():
+                policy_grad_norm += param.grad.detach().data.norm(2) ** 2
+            policy_grad_norm = policy_grad_norm ** 0.5
+
+            self.policy_optimizer.step()
+
+
+            entropy = -current_log_probs.detach().mean()
+            entropy_loss = self.entropy_coefficient.loss(entropy)
+
+            self.entropy_optimizer.zero_grad()
+            entropy_loss.backward()
+
+            entropy_grad_norm = self.entropy_coefficient.log_alpha.grad.detach().data.norm(2) ** 2
+
+            self.entropy_optimizer.step()
+
+            return policy_loss, entropy_loss, min_q, entropy, alpha, policy_grad_norm, entropy_grad_norm
         
 
-        @torch.compile(mode="default")
-        def critic_loss_fn(critic, states, next_states, actions, next_actions, next_log_probs, rewards, dones, alpha):
-            with torch.no_grad():
-                next_q1_target = critic.q1_target(next_states, next_actions)
-                next_q2_target = critic.q2_target(next_states, next_actions)
-                min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
-                y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (min_next_q_target - alpha.detach() * next_log_probs)
+        @torch.compile(mode=self.compile_mode)
+        def critic_loss_fn(states, next_states, actions, rewards, dones):
+            with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
+                with torch.no_grad():
+                    next_actions, _, next_log_probs = self.policy.get_action(next_states)
+                    next_q1_target = self.critic.q1_target(next_states, next_actions)
+                    next_q2_target = self.critic.q2_target(next_states, next_actions)
+                    min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
+                    alpha = self.entropy_coefficient().detach()
+                    y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (min_next_q_target - alpha * next_log_probs)
 
-            q1 = critic.q1(states, actions)
-            q2 = critic.q2(states, actions)
-            q1_loss = F.mse_loss(q1, y)
-            q2_loss = F.mse_loss(q2, y)
-            q_loss = (q1_loss + q2_loss) / 2
+                q1 = self.critic.q1(states, actions)
+                q2 = self.critic.q2(states, actions)
+                q1_loss = F.mse_loss(q1, y)
+                q2_loss = F.mse_loss(q2, y)
+                q_loss = (q1_loss + q2_loss) / 2
+            
+            self.q_optimizer.zero_grad()
+            q_loss.backward()
 
-            return q_loss
+            q1_grad_norm = 0.0
+            q2_grad_norm = 0.0
+            for param in self.critic.q1.parameters():
+                q1_grad_norm += param.grad.detach().data.norm(2) ** 2
+            for param in self.critic.q2.parameters():
+                q2_grad_norm += param.grad.detach().data.norm(2) ** 2
+            critic_grad_norm = q1_grad_norm ** 0.5 + q2_grad_norm ** 0.5
+
+            self.q_optimizer.step()
+
+            return q_loss, critic_grad_norm
 
 
         self.set_train_mode()
@@ -118,6 +167,7 @@ class SAC:
         steps_metrics = {}
         while global_step < self.total_timesteps:
             start_time = time.time()
+            torch.compiler.cudagraph_mark_step_begin()
 
 
             # Acting
@@ -126,9 +176,10 @@ class SAC:
                 processed_action = np.array([self.train_env.single_action_space.sample() for _ in range(self.nr_envs)])
                 action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
             else:
-                action, processed_action, _ = self.policy.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                action = action.detach().cpu().numpy()
-                processed_action = processed_action.detach().cpu().numpy()
+                with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
+                    action, processed_action, _ = self.policy.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                action = action.cpu().numpy()
+                processed_action = processed_action.cpu().numpy()
             
             next_state, reward, terminated, truncated, info = self.train_env.step(processed_action)
             done = terminated | truncated
@@ -177,60 +228,25 @@ class SAC:
             # Optimizing - Q-functions, policy and entropy coefficient
             if should_optimize:
                 # Critic loss
-                with torch.no_grad():
-                    next_actions, _, next_log_probs = self.policy.get_action(batch_next_states)
-                
-                q_loss = critic_loss_fn(self.critic, batch_states, batch_next_states, batch_actions, next_actions, next_log_probs, batch_rewards, batch_terminations, self.alpha)
-
-                self.q_optimizer.zero_grad()
-                q_loss.backward()
-                q1_grad_norm = 0.0
-                q2_grad_norm = 0.0
-                for param in self.critic.q1.parameters():
-                    q1_grad_norm += param.grad.detach().data.norm(2).item() ** 2
-                for param in self.critic.q2.parameters():
-                    q2_grad_norm += param.grad.detach().data.norm(2).item() ** 2
-                critic_grad_norm = q1_grad_norm ** 0.5 + q2_grad_norm ** 0.5
-                self.q_optimizer.step()
+                q_loss, critic_grad_norm = critic_loss_fn(batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations)
 
                 # Update critic targets
-                for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
-                    target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-                for param, target_param in zip(self.critic.q2.parameters(), self.critic.q2_target.parameters()):
-                    target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+                with torch.no_grad():
+                    for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
+                        target_param.data.mul_(1.0 - self.tau).add_(param.data, alpha=self.tau)
+                    for param, target_param in zip(self.critic.q2.parameters(), self.critic.q2_target.parameters()):
+                        target_param.data.mul_(1.0 - self.tau).add_(param.data, alpha=self.tau)
 
-                # Policy loss
-                current_actions, _, current_log_probs = self.policy.get_action(batch_states)
-                q1 = self.critic.q1(batch_states, current_actions)
-                q2 = self.critic.q2(batch_states, current_actions)
-                policy_loss, min_q = policy_loss_fn(current_log_probs, q1, q2, self.alpha)
-
-                self.policy_optimizer.zero_grad()
-                policy_loss.backward()
-                policy_grad_norm = 0.0
-                for param in self.policy.parameters():
-                    policy_grad_norm += param.grad.detach().data.norm(2).item() ** 2
-                policy_grad_norm = policy_grad_norm ** 0.5
-                self.policy_optimizer.step()
-
-                # Entropy loss
-                entropy = -current_log_probs.detach().mean()
-                entropy_loss = self.entropy_coefficient.loss(entropy)
-
-                self.entropy_optimizer.zero_grad()
-                entropy_loss.backward()
-                entropy_grad_norm = self.entropy_coefficient.log_alpha.grad.detach().data.norm(2).item() ** 2
-                self.entropy_optimizer.step()
-
-                self.alpha = self.entropy_coefficient()
+                # Policy and entropy loss
+                policy_loss, entropy_loss, min_q, entropy, alpha, policy_grad_norm, entropy_grad_norm = policy_and_entropy_loss_fn(batch_states)
 
                 # Create metrics
                 optimization_metrics = {
-                    "entropy/alpha": self.alpha.item(),
+                    "entropy/alpha": alpha.item(),
                     "entropy/entropy": entropy.item(),
-                    "gradients/policy_grad_norm": policy_grad_norm,
-                    "gradients/critic_grad_norm": critic_grad_norm,
-                    "gradients/entropy_grad_norm": entropy_grad_norm,
+                    "gradients/policy_grad_norm": policy_grad_norm.item(),
+                    "gradients/critic_grad_norm": critic_grad_norm.item(),
+                    "gradients/entropy_grad_norm": entropy_grad_norm.item(),
                     "loss/q_loss": q_loss.item(),
                     "loss/policy_loss": policy_loss.item(),
                     "loss/entropy_loss": entropy_loss.item(),
@@ -252,7 +268,7 @@ class SAC:
                 eval_state, _ = self.eval_env.reset()
                 eval_nr_episodes = 0
                 while True:
-                    with torch.no_grad():
+                    with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                         eval_processed_action = self.policy.get_deterministic_action(torch.tensor(eval_state, dtype=torch.float32).to(self.device))
                     eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(eval_processed_action.cpu().numpy())
                     eval_done = eval_terminated | eval_truncated
@@ -387,7 +403,7 @@ class SAC:
             episode_return = 0
             state, _ = self.eval_env.reset()
             while not done:
-                with torch.no_grad():
+                with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                     processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, terminated, truncated, info = self.eval_env.step(processed_action.cpu().numpy())
                 done = terminated | truncated
