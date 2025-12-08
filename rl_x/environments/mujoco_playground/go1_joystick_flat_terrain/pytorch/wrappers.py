@@ -1,14 +1,19 @@
 import gymnasium as gym
 import numpy as np
 
+from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.pytorch.box_space import BoxSpace
+
 
 class RLXInfo(gym.Wrapper):
     def __init__(self, env, nr_envs):
         super(RLXInfo, self).__init__(env)
         self.nr_envs = nr_envs
 
-        self.single_action_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(env.num_actions,), dtype=np.float32)
-        self.single_observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=env.num_privileged_obs, dtype=np.float32)
+        lower_joint_limit, upper_joint_limit = np.asarray(env.env.unwrapped.mj_model.jnt_range[1:].T)
+        nominal_joint_positions = np.asarray(env.env.unwrapped._default_pose)
+        action_scale_factor = env.env.unwrapped._config.action_scale
+        self.single_action_space = BoxSpace(low=lower_joint_limit, high=upper_joint_limit, shape=(env.num_actions,), dtype=np.float32, center=nominal_joint_positions, scale=action_scale_factor)
+        self.single_observation_space = BoxSpace(low=-np.inf, high=np.inf, shape=env.num_privileged_obs, dtype=np.float32)
 
         # This works because the policy observations are contained at the start of the privileged observations
         self.policy_observation_indices = np.arange(env.num_obs[0])
