@@ -7,7 +7,6 @@ def get_entropy_coefficient(config, env, device):
     compile_mode = config.algorithm.compile_mode
     entropy_coefficient = torch.compile(EntropyCoefficient(config, env, device).to(device), mode=compile_mode)
     entropy_coefficient.forward = torch.compile(entropy_coefficient.forward, mode=compile_mode)
-    entropy_coefficient.loss = torch.compile(entropy_coefficient.loss, mode=compile_mode)
     return entropy_coefficient
 
 
@@ -24,10 +23,3 @@ class EntropyCoefficient(nn.Module):
     
     def forward(self):
         return self.log_alpha.exp()
-
-
-    def loss(self, entropy):
-        alpha = self.log_alpha.exp()
-        entropy_loss = alpha * (entropy - self.target_entropy)
-
-        return entropy_loss

@@ -95,31 +95,28 @@ class SAC:
 
                 min_q = torch.minimum(q1, q2)
 
-                alpha = self.entropy_coefficient().detach()
-                policy_loss = (alpha * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+                alpha = self.entropy_coefficient()
+                alpha_detach = alpha.detach()
+                policy_loss = (alpha_detach * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
+
+                entropy = -current_log_probs.detach().mean()
+                entropy_loss = alpha * (entropy - self.entropy_coefficient.target_entropy)
 
             self.policy_optimizer.zero_grad()
+            self.entropy_optimizer.zero_grad()
             policy_loss.backward()
+            entropy_loss.backward()
 
             policy_grad_norm = 0.0
             for param in self.policy.parameters():
                 policy_grad_norm += param.grad.detach().data.norm(2) ** 2
             policy_grad_norm = policy_grad_norm ** 0.5
-
-            self.policy_optimizer.step()
-
-
-            entropy = -current_log_probs.detach().mean()
-            entropy_loss = self.entropy_coefficient.loss(entropy)
-
-            self.entropy_optimizer.zero_grad()
-            entropy_loss.backward()
-
             entropy_grad_norm = self.entropy_coefficient.log_alpha.grad.detach().data.norm(2) ** 2
 
+            self.policy_optimizer.step()
             self.entropy_optimizer.step()
 
-            return policy_loss, entropy_loss, min_q, entropy, alpha, policy_grad_norm, entropy_grad_norm
+            return policy_loss, entropy_loss, min_q, entropy, alpha_detach, policy_grad_norm, entropy_grad_norm
         
 
         @torch.compile(mode=self.compile_mode)
