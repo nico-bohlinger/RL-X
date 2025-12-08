@@ -11,7 +11,7 @@ import wandb
 from rl_x.algorithms.fastsac.pytorch.general_properties import GeneralProperties
 from rl_x.algorithms.fastsac.pytorch.policy import get_policy
 from rl_x.algorithms.fastsac.pytorch.critic import get_critic
-from rl_x.algorithms.sac.pytorch.entropy_coefficient import get_entropy_coefficient
+from rl_x.algorithms.fastsac.pytorch.entropy_coefficient import get_entropy_coefficient
 from rl_x.algorithms.fastsac.pytorch.replay_buffer import ReplayBuffer
 from rl_x.algorithms.fastsac.pytorch.observation_normalizer import get_observation_normalizer
 
