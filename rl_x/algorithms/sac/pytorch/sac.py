@@ -99,8 +99,8 @@ class SAC:
                 alpha_detach = alpha.detach()
                 policy_loss = (alpha_detach * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
 
-                entropy = -current_log_probs.detach().mean()
-                entropy_loss = alpha * (entropy - self.entropy_coefficient.target_entropy)
+                entropy_detach = -current_log_probs.detach()
+                entropy_loss = (alpha * (entropy_detach - self.entropy_coefficient.target_entropy)).mean()
 
             self.policy_optimizer.zero_grad()
             self.entropy_optimizer.zero_grad()
@@ -116,7 +116,7 @@ class SAC:
             self.policy_optimizer.step()
             self.entropy_optimizer.step()
 
-            return policy_loss, entropy_loss, min_q, entropy, alpha_detach, policy_grad_norm, entropy_grad_norm
+            return policy_loss, entropy_loss, min_q, entropy_detach, alpha_detach, policy_grad_norm, entropy_grad_norm
         
 
         @torch.compile(mode=self.compile_mode)
