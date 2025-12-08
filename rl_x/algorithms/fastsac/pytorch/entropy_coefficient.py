@@ -19,7 +19,7 @@ class EntropyCoefficient(nn.Module):
             self.target_entropy = -torch.prod(torch.tensor(np.prod(env.single_action_space.shape), dtype=torch.float32).to(device)).item()
         else:
             self.target_entropy = float(self.target_entropy)
-        self.log_alpha = nn.Parameter(torch.zeros(np.log(config.algorithm.alpha_init), device=device))
+        self.log_alpha = nn.Parameter(np.log(config.algorithm.alpha_init) * torch.ones(1, device=device))
     
     
     def forward(self):
