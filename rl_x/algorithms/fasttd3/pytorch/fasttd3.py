@@ -289,16 +289,23 @@ class FastTD3:
             
             # Optimizing
             if should_optimize:
-                for _ in range(self.nr_policy_updates_per_step):
-                    critic_grad_norm = 0.0
-                    policy_grad_norm = 0.0
+                total_critic_updates = self.nr_policy_updates_per_step * self.nr_critic_updates_per_policy_update
+                total_batch_size = total_critic_updates * self.batch_size
+                total_states, total_next_states, total_actions, total_rewards, total_dones, total_truncations, total_effective_n_steps = replay_buffer.sample(total_batch_size)
+                total_normalized_states = self.observation_normalizer.normalize(total_states, update=True)
+                total_normalized_next_states = self.observation_normalizer.normalize(total_next_states, update=True)
 
-                    for _ in range(self.nr_critic_updates_per_policy_update):
-                        batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncations, batch_effective_n_steps = replay_buffer.sample(self.batch_size)
-                        batch_normalized_states = self.observation_normalizer.normalize(batch_states, update=True)
-                        batch_normalized_next_states = self.observation_normalizer.normalize(batch_next_states, update=True)
+                total_normalized_states = total_normalized_states.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size, -1)
+                total_normalized_next_states = total_normalized_next_states.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size, -1)
+                total_actions = total_actions.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size, -1)
+                total_rewards = total_rewards.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size)
+                total_dones = total_dones.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size)
+                total_truncations = total_truncations.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size)
+                total_effective_n_steps = total_effective_n_steps.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size)
 
-                        q_loss, q_min, q_max, critic_grad_norm = critic_loss_fn(batch_normalized_states, batch_normalized_next_states, batch_actions, batch_rewards, batch_dones, batch_truncations, batch_effective_n_steps)
+                for i in range(self.nr_policy_updates_per_step):
+                    for j in range(self.nr_critic_updates_per_policy_update):
+                        q_loss, q_min, q_max, critic_grad_norm = critic_loss_fn(total_normalized_states[i, j], total_normalized_next_states[i, j], total_actions[i, j], total_rewards[i, j], total_dones[i, j], total_truncations[i, j], total_effective_n_steps[i, j])
                         
                         with torch.no_grad():
                             for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
@@ -308,7 +315,7 @@ class FastTD3:
 
                         nr_updates += 1
                     
-                    policy_loss, policy_grad_norm = policy_loss_fn(batch_normalized_states)
+                    policy_loss, policy_grad_norm = policy_loss_fn(total_normalized_states[i, -1])
 
                     optimization_metrics = {
                         "gradients/policy_grad_norm": policy_grad_norm.item(),
