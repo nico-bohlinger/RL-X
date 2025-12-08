@@ -11,6 +11,7 @@ import wandb
 from rl_x.algorithms.fastsac.pytorch.general_properties import GeneralProperties
 from rl_x.algorithms.fastsac.pytorch.policy import get_policy
 from rl_x.algorithms.fastsac.pytorch.critic import get_critic
+from rl_x.algorithms.sac.pytorch.entropy_coefficient import get_entropy_coefficient
 from rl_x.algorithms.fastsac.pytorch.replay_buffer import ReplayBuffer
 from rl_x.algorithms.fastsac.pytorch.observation_normalizer import get_observation_normalizer
 
@@ -37,6 +38,8 @@ class FastSAC:
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.weight_decay = config.algorithm.weight_decay
+        self.adam_beta1 = config.algorithm.adam_beta1
+        self.adam_beta2 = config.algorithm.adam_beta2
         self.batch_size = config.algorithm.batch_size
         self.buffer_size_per_env = config.algorithm.buffer_size_per_env
         self.learning_starts = config.algorithm.learning_starts
@@ -46,10 +49,6 @@ class FastSAC:
         self.n_steps = config.algorithm.n_steps
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
-        self.noise_std_min = config.algorithm.noise_std_min
-        self.noise_std_max = config.algorithm.noise_std_max
-        self.smoothing_epsilon = config.algorithm.smoothing_epsilon
-        self.smoothing_clip_value = config.algorithm.smoothing_clip_value
         self.nr_critic_updates_per_policy_update = config.algorithm.nr_critic_updates_per_policy_update
         self.nr_policy_updates_per_step = config.algorithm.nr_policy_updates_per_step
         self.clipped_double_q_learning = config.algorithm.clipped_double_q_learning
@@ -83,9 +82,11 @@ class FastSAC:
 
         self.policy = get_policy(config, self.train_env, self.device)
         self.critic = get_critic(config, self.train_env, self.device)
+        self.entropy_coefficient = get_entropy_coefficient(config, self.train_env, self.device)
 
-        self.policy_optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
-        self.q_optimizer = optim.AdamW(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay)
+        self.policy_optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay, betas=(self.adam_beta1, self.adam_beta2), fused=True)
+        self.q_optimizer = optim.AdamW(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay, betas=(self.adam_beta1, self.adam_beta2), fused=True)
+        self.entropy_optimizer = optim.AdamW([self.entropy_coefficient.log_alpha], lr=self.learning_rate, weight_decay=self.weight_decay, betas=(self.adam_beta1, self.adam_beta2), fused=True)
 
         if self.anneal_learning_rate:
             self.q_scheduler = optim.lr_scheduler.LinearLR(self.q_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
@@ -103,7 +104,7 @@ class FastSAC:
         @torch.compile(mode=self.compile_mode)
         def policy_loss_fn(states):
             with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                actions = self.policy(states)
+                actions, log_probs = self.policy.get_action_and_log_prob(states)
 
                 q1_dist = F.softmax(self.critic.q1(states, actions), dim=1)
                 q2_dist = F.softmax(self.critic.q2(states, actions), dim=1)
@@ -116,7 +117,9 @@ class FastSAC:
                 else:
                     q_value = (q1_value + q2_value) / 2.0
 
-                loss = -q_value.mean()
+                alpha_detach = self.entropy_coefficient().detach()
+
+                loss = (alpha_detach * log_probs - q_value).mean()
             
             self.policy_optimizer.zero_grad()
             loss.backward()
@@ -132,19 +135,19 @@ class FastSAC:
             
             self.policy_optimizer.step()
 
-            return loss, policy_grad_norm
+            return loss, alpha_detach, policy_grad_norm
         
 
         @torch.compile(mode=self.compile_mode)
-        def critic_loss_fn(states, next_states, actions, rewards, dones, truncations, effective_n_steps):
+        def critic_and_entropy_loss_fn(states, next_states, actions, rewards, dones, truncations, effective_n_steps):
             with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 with torch.no_grad():
-                    noise = torch.clamp(torch.randn_like(actions) * self.smoothing_epsilon, -self.smoothing_clip_value, self.smoothing_clip_value)
-                    next_actions = torch.clamp(self.policy(next_states) + noise, -1.0, 1.0)
+                    next_actions, next_log_probs = self.policy.get_action_and_log_prob(next_states)
                     delta_z = (self.v_max - self.v_min) / (self.nr_atoms - 1)
                     bootstrap = 1.0 - (dones * (1.0 - truncations))
                     discount = (self.gamma ** effective_n_steps) * bootstrap
-                    target_z = torch.clamp(rewards.unsqueeze(1) + discount.unsqueeze(1) * self.q_support.unsqueeze(0), self.v_min, self.v_max)
+                    entropy_adjusted_reward = rewards - discount * self.entropy_coefficient() * next_log_probs
+                    target_z = torch.clamp(entropy_adjusted_reward.unsqueeze(1) + discount.unsqueeze(1) * self.q_support.unsqueeze(0), self.v_min, self.v_max)
                     b = (target_z - self.v_min) / delta_z
                     l = torch.floor(b).long()
                     u = torch.ceil(b).long()
@@ -220,8 +223,20 @@ class FastSAC:
                 critic_grad_norm = critic_grad_norm_val ** 0.5
             
             self.q_optimizer.step()
+
+            with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
+                entropy = -next_log_probs
+                entropy_mean = entropy.mean()
+                entropy_loss = self.entropy_coefficient.loss(entropy).mean()
+
+            self.entropy_optimizer.zero_grad()
+            entropy_loss.backward()
+
+            entropy_grad_norm = self.entropy_coefficient.log_alpha.grad.detach().data.norm(2) ** 2
+
+            self.entropy_optimizer.step()
             
-            return q_loss, q_min, q_max, critic_grad_norm
+            return q_loss, entropy_loss, q_min, q_max, entropy_mean, critic_grad_norm, entropy_grad_norm
 
 
         self.set_train_mode()
@@ -237,7 +252,6 @@ class FastSAC:
         )
 
         state, _ = self.train_env.reset()
-        noise_scales = torch.rand(self.nr_envs, 1, device=self.device) * (self.noise_std_max - self.noise_std_min) + self.noise_std_min
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -255,8 +269,8 @@ class FastSAC:
             dones_this_rollout = 0
             with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 normalized_state = self.observation_normalizer.normalize(state, update=False)
-                action, processed_action = self.policy.get_action(normalized_state, noise_scales)
-            next_state, reward, terminated, truncated, info = self.train_env.step(processed_action)
+                action = self.policy.get_action(normalized_state)
+            next_state, reward, terminated, truncated, info = self.train_env.step(action)
             done = terminated | truncated
             actual_next_state = next_state  # TODO: Handle this properly
             dones_this_rollout += done.sum().item()
@@ -264,12 +278,6 @@ class FastSAC:
                 step_info_collection.setdefault(key, []).extend(info_value)
             
             replay_buffer.add(state, actual_next_state, action, reward, done, truncated)
-
-            noise_scales = torch.where(
-                done[:, None],
-                torch.rand(self.nr_envs, 1, device=self.device) * (self.noise_std_max - self.noise_std_min) + self.noise_std_min,
-                noise_scales
-            )
 
             state = next_state
             global_step += self.nr_envs
@@ -289,16 +297,23 @@ class FastSAC:
             
             # Optimizing
             if should_optimize:
-                for _ in range(self.nr_policy_updates_per_step):
-                    critic_grad_norm = 0.0
-                    policy_grad_norm = 0.0
+                total_critic_updates = self.nr_policy_updates_per_step * self.nr_critic_updates_per_policy_update
+                total_batch_size = total_critic_updates * self.batch_size
+                total_states, total_next_states, total_actions, total_rewards, total_dones, total_truncations, total_effective_n_steps = replay_buffer.sample(total_batch_size)
+                total_normalized_states = self.observation_normalizer.normalize(total_states, update=True)
+                total_normalized_next_states = self.observation_normalizer.normalize(total_next_states, update=True)
 
-                    for _ in range(self.nr_critic_updates_per_policy_update):
-                        batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncations, batch_effective_n_steps = replay_buffer.sample(self.batch_size)
-                        batch_normalized_states = self.observation_normalizer.normalize(batch_states, update=True)
-                        batch_normalized_next_states = self.observation_normalizer.normalize(batch_next_states, update=True)
+                total_normalized_states = total_normalized_states.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size, -1)
+                total_normalized_next_states = total_normalized_next_states.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size, -1)
+                total_actions = total_actions.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size, -1)
+                total_rewards = total_rewards.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size)
+                total_dones = total_dones.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size)
+                total_truncations = total_truncations.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size)
+                total_effective_n_steps = total_effective_n_steps.view(self.nr_policy_updates_per_step, self.nr_critic_updates_per_policy_update, self.batch_size)
 
-                        q_loss, q_min, q_max, critic_grad_norm = critic_loss_fn(batch_normalized_states, batch_normalized_next_states, batch_actions, batch_rewards, batch_dones, batch_truncations, batch_effective_n_steps)
+                for i in range(self.nr_policy_updates_per_step):
+                    for j in range(self.nr_critic_updates_per_policy_update):
+                        q_loss, entropy_loss,  q_min, q_max, entropy, critic_grad_norm, entropy_grad_norm = critic_and_entropy_loss_fn(total_normalized_states[i, j], total_normalized_next_states[i, j], total_actions[i, j], total_rewards[i, j], total_dones[i, j], total_truncations[i, j], total_effective_n_steps[i, j])
                         
                         with torch.no_grad():
                             for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
@@ -308,13 +323,17 @@ class FastSAC:
 
                         nr_updates += 1
                     
-                    policy_loss, policy_grad_norm = policy_loss_fn(batch_normalized_states)
+                    policy_loss, alpha, policy_grad_norm = policy_loss_fn(total_normalized_states[i, -1])
 
                     optimization_metrics = {
+                        "entropy/alpha": alpha.item(),
+                        "entropy/entropy": entropy.item(),
                         "gradients/policy_grad_norm": policy_grad_norm.item(),
                         "gradients/critic_grad_norm": critic_grad_norm.item(),
+                        "gradients/entropy_grad_norm": entropy_grad_norm.item(),
                         "loss/q_loss": q_loss.item(),
                         "loss/policy_loss": policy_loss.item(),
+                        "loss/entropy_loss": entropy_loss.item(),
                         "lr/learning_rate": self.learning_rate if not self.anneal_learning_rate else self.q_scheduler.get_last_lr()[0],
                         "q/q_max": q_max.item(),
                         "q/q_min": q_min.item()
@@ -338,10 +357,10 @@ class FastSAC:
                 for _ in range(self.horizon):
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                         eval_normalized_state = self.observation_normalizer.normalize(eval_state, update=False)
-                        _, eval_processed_action = self.policy.get_action(eval_normalized_state)
+                        eval_action = self.policy.get_action(eval_normalized_state, deterministic=True)
                     if self.bf16_mixed_precision_training:
-                        eval_processed_action = eval_processed_action.to(torch.float32)
-                    eval_state, _, _, _, eval_info = self.eval_env.step(eval_processed_action)
+                        eval_action = eval_action.to(torch.float32)
+                    eval_state, _, _, _, eval_info = self.eval_env.step(eval_action)
                     eval_logging_info = self.eval_env.get_logging_info_dict(eval_info)
                     if "episode_return" in eval_logging_info:
                         evaluation_metrics_collection.setdefault("eval/episode_return", []).extend(eval_logging_info["episode_return"])
@@ -431,8 +450,10 @@ class FastSAC:
             "q2_state_dict": self.critic.q2.state_dict(),
             "q1_target_state_dict": self.critic.q1_target.state_dict(),
             "q2_target_state_dict": self.critic.q2_target.state_dict(),
+            "log_alpha": self.entropy_coefficient.log_alpha,
             "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
             "q_optimizer_state_dict": self.q_optimizer.state_dict(),
+            "entropy_optimizer_state_dict": self.entropy_optimizer.state_dict(),
             "observation_normalizer_state_dict": self.observation_normalizer.state_dict()
         }
         torch.save(save_dict, file_path)
@@ -452,8 +473,10 @@ class FastSAC:
         model.critic.q2.load_state_dict(checkpoint["q2_state_dict"])
         model.critic.q1_target.load_state_dict(checkpoint["q1_target_state_dict"])
         model.critic.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
+        model.entropy_coefficient.log_alpha = checkpoint["log_alpha"]
         model.policy_optimizer.load_state_dict(checkpoint["policy_optimizer_state_dict"])
         model.q_optimizer.load_state_dict(checkpoint["q_optimizer_state_dict"])
+        model.entropy_optimizer.load_state_dict(checkpoint["entropy_optimizer_state_dict"])
         model.observation_normalizer.load_state_dict(checkpoint["observation_normalizer_state_dict"])
         return model
 
@@ -466,8 +489,8 @@ class FastSAC:
         while True:
             with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 normalized_state = self.observation_normalizer.normalize(state, update=False)
-                _, processed_action = self.policy.get_action(normalized_state)
-            self.eval_env.step(processed_action)
+                action = self.policy.get_action(normalized_state, deterministic=True)
+            self.eval_env.step(action)
 
 
     def set_train_mode(self):

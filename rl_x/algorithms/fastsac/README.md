@@ -8,7 +8,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 ## RL-X implementation
 
 **Implementation Details**
-- No special implementation details
+- No symmetry observations as this is not always available in every environment
 
 **Supported frameworks**
 - PyTorch, JAX (Flax)

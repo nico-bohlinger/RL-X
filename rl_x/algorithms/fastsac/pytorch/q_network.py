@@ -25,13 +25,16 @@ class QNetwork(nn.Module):
         nr_actions = np.prod(env.single_action_space.shape, dtype=int).item()
 
         self.critic = nn.Sequential(
-            nn.Linear(nr_observations + nr_actions, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Linear(256, nr_atoms),
+            nn.Linear(nr_observations + nr_actions, 768),
+            nn.LayerNorm(768),
+            nn.SiLU(),
+            nn.Linear(768, 384),
+            nn.LayerNorm(384),
+            nn.SiLU(),
+            nn.Linear(384, 192),
+            nn.LayerNorm(192),
+            nn.SiLU(),
+            nn.Linear(192, nr_atoms),
         )
 
     
