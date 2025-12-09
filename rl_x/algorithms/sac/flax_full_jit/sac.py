@@ -212,7 +212,7 @@ class SAC:
 
 
                         # Optimizing
-                        def loss_fn(policy_params, critic_params, entropy_coefficient_params, state, next_state, action, reward, terminated, key1, key2):
+                        def loss_fn(policy_params, critic_params, target_critic_params, entropy_coefficient_params, state, next_state, action, reward, terminated, key1, key2):
                             # Critic loss
                             next_action_mean, next_action_logstd = self.policy.apply(stop_gradient(policy_params), next_state)
                             next_action_std = jnp.exp(next_action_logstd)
@@ -225,7 +225,7 @@ class SAC:
                             alpha_with_grad = self.entropy_coefficient.apply(entropy_coefficient_params)
                             alpha = stop_gradient(alpha_with_grad)
 
-                            next_q_target = self.critic.apply(critic_state.target_params, next_state, next_action)
+                            next_q_target = self.critic.apply(target_critic_params, next_state, next_action)
                             min_next_q_target = jnp.min(next_q_target)
 
                             y = reward + self.gamma * (1 - terminated) * (min_next_q_target - alpha * next_log_prob)
@@ -267,10 +267,10 @@ class SAC:
                             return loss, (metrics)
                         
 
-                        vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
+                        vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, None, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
                         safe_mean = lambda x: jnp.mean(x) if x is not None else x
                         mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
-                        grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 2), has_aux=True)
+                        grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 3), has_aux=True)
 
                         keys = jax.random.split(key, (self.batch_size * 2) + 2)
                         key, replay_buffer_key, update_keys = keys[0], keys[1], keys[2:]
@@ -285,7 +285,7 @@ class SAC:
                         terminations = replay_buffer["terminations"][idx1, idx2]
 
                         (loss, (metrics)), (policy_gradients, critic_gradients, entropy_gradients) = grad_loss_fn(
-                            policy_state.params, critic_state.params, entropy_coefficient_state.params,
+                            policy_state.params, critic_state.params, critic_state.target_params, entropy_coefficient_state.params,
                             states, next_states, actions, rewards, terminations, update_keys1, update_keys2)
 
                         policy_state = policy_state.apply_gradients(grads=policy_gradients)
