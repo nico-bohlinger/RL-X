@@ -169,7 +169,11 @@ class LocomotionEnv:
         self.joint_dropout_function = get_joint_dropout_function(env_config["domain_randomization"]["joint_dropout"]["type"], self)
         
         action_space_size = self.nr_actuator_joints
-        self.single_action_space = BoxSpace(low=-jnp.inf, high=jnp.inf, shape=(action_space_size,), dtype=jnp.float32)
+        lower_joint_limit, upper_joint_limit = self.initial_mj_model.jnt_range[self.actuator_joint_mask_joints].T
+        nominal_joint_positions = self.initial_qpos[self.actuator_joint_mask_qpos]
+        action_scale_factor = robot_config["scaling_factor"]
+        # The action space attributes are fixed and do not change with domain randomization, if they are randomized heavily the algorithm using them might need to be adapted
+        self.single_action_space = BoxSpace(low=lower_joint_limit, high=upper_joint_limit, shape=(action_space_size,), dtype=jnp.float32, center=nominal_joint_positions, scale=action_scale_factor)
 
         self.single_observation_space = self.get_observation_space()
 
