@@ -22,12 +22,15 @@ class Critic(nn.Module):
     def __call__(self, x: np.ndarray, a: np.ndarray):
         x = x[..., self.critic_observation_indices]
         x = jnp.concatenate([x, a], -1)
-        x = nn.Dense(1024)(x)
-        x = nn.relu(x)
-        x = nn.Dense(512)(x)
-        x = nn.relu(x)
-        x = nn.Dense(256)(x)
-        x = nn.relu(x)
+        x = nn.Dense(768)(x)
+        x = nn.LayerNorm()(x)
+        x = nn.silu(x)
+        x = nn.Dense(384)(x)
+        x = nn.LayerNorm()(x)
+        x = nn.silu(x)
+        x = nn.Dense(192)(x)
+        x = nn.LayerNorm()(x)
+        x = nn.silu(x)
         x = nn.Dense(self.nr_atoms)(x)
         return x
     
