@@ -11,8 +11,11 @@ class RLXInfo(gym.Wrapper):
     def __init__(self, env, nr_envs):
         super(RLXInfo, self).__init__(env)
         self.nr_envs = nr_envs
-        
-        self.single_action_space = BoxSpace(low=-jnp.inf, high=jnp.inf, shape=(env.action_size,), dtype=jnp.float32)
+
+        lower_joint_limit, upper_joint_limit = env.env.unwrapped.mj_model.jnt_range[1:].T
+        nominal_joint_positions = env.env.unwrapped._default_pose
+        action_scale_factor = env.env.unwrapped._config.action_scale
+        self.single_action_space = BoxSpace(low=lower_joint_limit, high=upper_joint_limit, shape=(env.action_size,), dtype=jnp.float32, center=nominal_joint_positions, scale=action_scale_factor)
         self.single_observation_space = BoxSpace(low=-jnp.inf, high=jnp.inf, shape=env.observation_size["privileged_state"], dtype=jnp.float32)
 
         # This works because the policy observations are contained at the start of the privileged observations
