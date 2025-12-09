@@ -2,7 +2,6 @@ import os
 import shutil
 import json
 from copy import deepcopy
-from functools import partial
 import logging
 import time
 import tree
