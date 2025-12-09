@@ -77,7 +77,7 @@ class Policy(nn.Module):
 
         log_prob = -0.5 * ((action_raw - mean) / std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - log_std
         log_prob -= jnp.log(1.0 - action_tanh ** 2 + 1e-6)
-        log_prob -= log_prob - jnp.log(self.action_scale + 1e-6)
+        log_prob -= jnp.log(self.action_scale + 1e-6)
         log_prob = jnp.sum(log_prob, axis=-1)
 
         return action_scaled, log_prob
