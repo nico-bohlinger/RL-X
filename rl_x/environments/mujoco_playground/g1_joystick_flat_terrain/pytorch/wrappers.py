@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
 
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.pytorch.box_space import BoxSpace
+from rl_x.environments.mujoco_playground.g1_joystick_flat_terrain.pytorch.box_space import BoxSpace
 
 
 class RLXInfo(gym.Wrapper):

@@ -1,7 +1,7 @@
 from mujoco_playground import registry, wrapper, wrapper_torch
 
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.pytorch.wrappers import RLXInfo
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.pytorch.general_properties import GeneralProperties
+from rl_x.environments.mujoco_playground.g1_joystick_flat_terrain.pytorch.wrappers import RLXInfo
+from rl_x.environments.mujoco_playground.g1_joystick_flat_terrain.pytorch.general_properties import GeneralProperties
 
 
 def create_train_and_eval_env(config):

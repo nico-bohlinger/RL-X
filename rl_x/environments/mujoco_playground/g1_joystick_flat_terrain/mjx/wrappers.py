@@ -3,8 +3,8 @@ import gymnasium as gym
 import jax
 import jax.numpy as jnp
 
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.mjx.box_space import BoxSpace
-from rl_x.environments.mujoco_playground.go1_joystick_flat_terrain.mjx.wrapper_state import WrapperState
+from rl_x.environments.mujoco_playground.g1_joystick_flat_terrain.mjx.box_space import BoxSpace
+from rl_x.environments.mujoco_playground.g1_joystick_flat_terrain.mjx.wrapper_state import WrapperState
 
 
 class RLXInfo(gym.Wrapper):
