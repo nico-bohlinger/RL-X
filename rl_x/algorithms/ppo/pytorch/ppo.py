@@ -78,8 +78,8 @@ class PPO:
 
         self.policy = get_policy(config, self.train_env, self.device)
         self.critic = get_critic(config, self.train_env, self.device)
-        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate)
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, fused=True)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate, fused=True)
         
         if self.anneal_learning_rate:
             self.policy_scheduler = optim.lr_scheduler.LinearLR(self.policy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.batch_size)
