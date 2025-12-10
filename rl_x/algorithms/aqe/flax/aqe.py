@@ -456,7 +456,7 @@ class AQE:
             wandb.save(f"{self.save_path}/{self.best_model_file_name}", base_path=self.save_path)
 
 
-    def load(config, env, run_path, writer, explicitly_set_algorithm_params):
+    def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         splitted_path = config.runner.load_model.split("/")
         checkpoint_dir = os.path.abspath("/".join(splitted_path[:-1]))
         checkpoint_file_name = splitted_path[-1]
@@ -467,7 +467,7 @@ class AQE:
         for key, value in loaded_algorithm_config.items():
             if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
                 config.algorithm[key] = value
-        model = AQE(config, env, run_path, writer)
+        model = AQE(config, train_env, eval_env, run_path, writer)
 
         target = {
             "policy": model.policy_state,

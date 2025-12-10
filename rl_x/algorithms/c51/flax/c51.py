@@ -343,7 +343,7 @@ class C51:
             wandb.save(f"{self.save_path}/{self.best_model_file_name}", base_path=self.save_path)
 
 
-    def load(config, env, run_path, writer, explicitly_set_algorithm_params):
+    def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         splitted_path = config.runner.load_model.split("/")
         checkpoint_dir = os.path.abspath("/".join(splitted_path[:-1]))
         checkpoint_file_name = splitted_path[-1]
@@ -354,7 +354,7 @@ class C51:
         for key, value in loaded_algorithm_config.items():
             if f"algorithm.{key}" not in explicitly_set_algorithm_params:
                 config.algorithm[key] = value
-        model = C51(config, env, run_path, writer)
+        model = C51(config, train_env, eval_env, run_path, writer)
 
         target = {
             "critic": model.critic_state

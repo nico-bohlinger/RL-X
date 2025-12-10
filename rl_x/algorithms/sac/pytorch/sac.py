@@ -379,13 +379,13 @@ class SAC:
             wandb.save(file_path, base_path=os.path.dirname(file_path))
     
 
-    def load(config, env, run_path, writer, explicitly_set_algorithm_params):
+    def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         checkpoint = torch.load(config.runner.load_model)
         loaded_algorithm_config = checkpoint["config_algorithm"]
         for key, value in loaded_algorithm_config.items():
             if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
                 config.algorithm[key] = value
-        model = SAC(config, env, run_path, writer)
+        model = SAC(config, train_env, eval_env, run_path, writer)
         model.policy.load_state_dict(checkpoint["policy_state_dict"])
         model.critic.q1.load_state_dict(checkpoint["q1_state_dict"])
         model.critic.q2.load_state_dict(checkpoint["q2_state_dict"])

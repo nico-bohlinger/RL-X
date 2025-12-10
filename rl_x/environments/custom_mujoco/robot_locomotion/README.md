@@ -22,7 +22,6 @@ touch test.sh
 python experiment.py \
     --algorithm.name=ppo.flax \
     --environment.name=custom_mujoco.robot_locomotion.mujoco \
-    --environment.mode=test \
     --environment.render=True \
     --runner.mode=test \
     --runner.load_model="latest.model"
