@@ -17,7 +17,7 @@ def get_config(algorithm_name):
     config.adam_beta2 = 0.95
     config.batch_size = 8192
     config.buffer_size_per_env = 1024
-    config.learning_starts = 10
+    config.learning_starts = 10  # times nr_envs
     config.v_min = -20.0
     config.v_max = 20.0
     config.tau = 0.125

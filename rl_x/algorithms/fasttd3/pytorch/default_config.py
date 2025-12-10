@@ -15,7 +15,7 @@ def get_config(algorithm_name):
     config.weight_decay = 0.1
     config.batch_size = 32768
     config.buffer_size_per_env = 10240
-    config.learning_starts = 10
+    config.learning_starts = 10  # times nr_envs
     config.v_min = -10.0
     config.v_max = 10.0
     config.tau = 0.1
