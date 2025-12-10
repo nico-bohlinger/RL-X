@@ -11,43 +11,40 @@ def get_critic(config, env):
     critic_observation_indices = getattr(env, "critic_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return VectorCritic(config.algorithm.nr_hidden_units, 2, critic_observation_indices)
+        return VectorCritic(config.algorithm.nr_atoms, critic_observation_indices)
 
 
 class Critic(nn.Module):
-    nr_hidden_units: int
+    nr_atoms: int
     critic_observation_indices: Sequence[int]
 
     @nn.compact
     def __call__(self, x: np.ndarray, a: np.ndarray):
         x = x[..., self.critic_observation_indices]
         x = jnp.concatenate([x, a], -1)
-        x = nn.Dense(self.nr_hidden_units)(x)
+        x = nn.Dense(1024)(x)
         x = nn.relu(x)
-        x = nn.Dense(self.nr_hidden_units)(x)
+        x = nn.Dense(512)(x)
         x = nn.relu(x)
-        x = nn.Dense(1)(x)
+        x = nn.Dense(256)(x)
+        x = nn.relu(x)
+        x = nn.Dense(self.nr_atoms)(x)
         return x
     
 
 class VectorCritic(nn.Module):
-    nr_hidden_units: int
-    nr_critics: int
+    nr_atoms: int
     critic_observation_indices: Sequence[int]
 
     @nn.compact
     def __call__(self, obs: np.ndarray, action: np.ndarray):
-        # Reference:
-        # - https://github.com/araffin/sbx/blob/f31288d2701b39dd98c921f55e13ca3530868e9f/sbx/sac/policies.py
-        # - https://github.com/ikostrikov/jaxrl/blob/main/jaxrl/networks/critic_net.py
-
         vmap_critic = nn.vmap(
             Critic,
             variable_axes={"params": 0},  # parameters not shared between the critics
             split_rngs={"params": True},  # different initializations
             in_axes=None,
             out_axes=0,
-            axis_size=self.nr_critics,
+            axis_size=2,
         )
-        q_values = vmap_critic(nr_hidden_units=self.nr_hidden_units, critic_observation_indices=self.critic_observation_indices)(obs, action)
+        q_values = vmap_critic(nr_atoms=self.nr_atoms, critic_observation_indices=self.critic_observation_indices)(obs, action)
         return q_values
