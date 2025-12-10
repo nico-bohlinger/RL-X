@@ -242,14 +242,14 @@ class FastTD3:
                         policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key = learning_iteration_carry
 
                         # Acting
-                        key, subkey = jax.random.split(key)
+                        key, subkey1, subkey2 = jax.random.split(key, 3)
                         observation = env_state.next_observation
                         if self.enable_observation_normalization:
                             normalized_observation = (observation - observation_normalizer_state["running_mean"]) / (observation_normalizer_state["running_std_dev"] + self.normalizer_epsilon)
                         else:
                             normalized_observation = observation
                         action = self.policy.apply(policy_state.params, normalized_observation)
-                        action += jax.random.normal(subkey, action.shape) * noise_scales
+                        action += jax.random.normal(subkey1, action.shape) * noise_scales
                         processed_action = self.get_processed_action(action)
                         env_state = self.train_env.step(env_state, processed_action)
                         dones = env_state.terminated | env_state.truncated
@@ -267,7 +267,7 @@ class FastTD3:
                         # Generate new noise scales for environments that are done
                         noise_scales = jnp.where(
                             dones[:, None],
-                            jax.random.uniform(key, (self.nr_envs, 1), minval=self.noise_std_min, maxval=self.noise_std_max),
+                            jax.random.uniform(subkey2, (self.nr_envs, 1), minval=self.noise_std_min, maxval=self.noise_std_max),
                             noise_scales
                         )
 
