@@ -7,7 +7,6 @@ from collections import deque
 import tree
 import numpy as np
 import jax
-from jax.lax import stop_gradient
 import jax.numpy as jnp
 import flax
 from flax.training import orbax_utils
