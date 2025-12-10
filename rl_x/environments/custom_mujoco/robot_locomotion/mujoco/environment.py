@@ -157,7 +157,7 @@ class LocomotionEnv(gym.Env):
         nominal_joint_positions = self.initial_qpos[self.actuator_joint_mask_qpos]
         action_scale_factor = robot_config["scaling_factor"]
         # The action space attributes are fixed and do not change with domain randomization, if they are randomized heavily the algorithm using them might need to be adapted
-        self.single_action_space = BoxSpace(low=lower_joint_limit, high=upper_joint_limit, shape=(action_space_size,), dtype=np.float32, center=nominal_joint_positions, scale=action_scale_factor)
+        self.action_space = BoxSpace(low=lower_joint_limit, high=upper_joint_limit, shape=(action_space_size,), dtype=np.float32, center=nominal_joint_positions, scale=action_scale_factor)
 
         self.observation_space = self.get_observation_space()
 
