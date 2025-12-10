@@ -6,6 +6,7 @@ import time
 import numpy as np
 import jax
 import jax.numpy as jnp
+from jax.lax import stop_gradient
 from flax.training.train_state import TrainState
 from flax.training import orbax_utils
 import orbax.checkpoint
@@ -15,6 +16,7 @@ import wandb
 from rl_x.algorithms.fastsac.flax.general_properties import GeneralProperties
 from rl_x.algorithms.fastsac.flax.policy import get_policy
 from rl_x.algorithms.fastsac.flax.critic import get_critic
+from rl_x.algorithms.fastsac.flax.entropy_coefficient import EntropyCoefficient
 from rl_x.algorithms.fastsac.flax.replay_buffer import ReplayBuffer
 from rl_x.algorithms.fastsac.flax.rl_train_state import RLTrainState
 
@@ -39,6 +41,8 @@ class FastSAC:
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.weight_decay = config.algorithm.weight_decay
+        self.adam_beta1 = config.algorithm.adam_beta1
+        self.adam_beta2 = config.algorithm.adam_beta2
         self.batch_size = config.algorithm.batch_size
         self.buffer_size_per_env = config.algorithm.buffer_size_per_env
         self.learning_starts = config.algorithm.learning_starts
@@ -48,15 +52,14 @@ class FastSAC:
         self.gamma = config.algorithm.gamma
         self.nr_atoms = config.algorithm.nr_atoms
         self.n_steps = config.algorithm.n_steps
-        self.noise_std_min = config.algorithm.noise_std_min
-        self.noise_std_max = config.algorithm.noise_std_max
-        self.smoothing_epsilon = config.algorithm.smoothing_epsilon
-        self.smoothing_clip_value = config.algorithm.smoothing_clip_value
+        self.target_entropy = config.algorithm.target_entropy
+        self.alpha_init = config.algorithm.alpha_init
+        self.log_std_min = config.algorithm.log_std_min
+        self.log_std_max = config.algorithm.log_std_max
         self.nr_critic_updates_per_policy_update = config.algorithm.nr_critic_updates_per_policy_update
         self.nr_policy_updates_per_step = config.algorithm.nr_policy_updates_per_step
         self.clipped_double_q_learning = config.algorithm.clipped_double_q_learning
         self.max_grad_norm = config.algorithm.max_grad_norm
-        self.action_clipping_and_rescaling = config.algorithm.action_clipping_and_rescaling
         self.enable_observation_normalization = config.algorithm.enable_observation_normalization
         self.normalizer_epsilon = config.algorithm.normalizer_epsilon
         self.logging_frequency = config.algorithm.logging_frequency
@@ -71,25 +74,33 @@ class FastSAC:
             raise ValueError("The save frequency must be a multiple of the number of environments.")
 
         rlx_logger.info(f"Using device: {jax.default_backend()}")
-        
+
         self.rng = np.random.default_rng(self.seed)
         self.key = jax.random.PRNGKey(self.seed)
-        self.key, policy_key, critic_key = jax.random.split(self.key, 3)
+        self.key, policy_key, critic_key, entropy_key = jax.random.split(self.key, 4)
 
-        self.policy, self.get_processed_action = get_policy(self.config, self.train_env)
+        self.policy = get_policy(self.config, self.train_env)
         self.critic = get_critic(self.config, self.train_env)
+        self.entropy_coefficient = EntropyCoefficient(self.alpha_init)
 
         self.policy.apply = jax.jit(self.policy.apply)
         self.critic.apply = jax.jit(self.critic.apply)
+        self.entropy_coefficient.apply = jax.jit(self.entropy_coefficient.apply)
+
+        if self.target_entropy == "auto":
+            self.target_entropy = -np.prod(self.train_env.single_action_space.shape).item()
+        else:
+            self.target_entropy = float(self.target_entropy)
 
         def linear_schedule(count):
             step = (count * self.nr_envs) - (self.learning_starts * self.nr_envs)
             total_steps = self.total_timesteps - (self.learning_starts * self.nr_envs)
             fraction = 1.0 - (step / total_steps)
             return self.learning_rate * fraction
-        
+
         self.q_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
         self.policy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
+        self.entropy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
         state = jnp.array([self.train_env.single_observation_space.sample()])
         action = jnp.array([self.train_env.single_action_space.sample()])
@@ -97,28 +108,41 @@ class FastSAC:
         if self.max_grad_norm != -1.0:
             policy_tx = optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay),
+                optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2),
             )
         else:
-            policy_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay)
+            policy_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2)
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, state),
-            tx=policy_tx
+            tx=policy_tx,
         )
 
         if self.max_grad_norm != -1.0:
             critic_tx = optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay),
+                optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2),
             )
         else:
-            critic_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay)
+            critic_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2)
         self.critic_state = RLTrainState.create(
             apply_fn=self.critic.apply,
             params=self.critic.init(critic_key, state, action),
             target_params=self.critic.init(critic_key, state, action),
-            tx=critic_tx
+            tx=critic_tx,
+        )
+
+        if self.max_grad_norm != -1.0:
+            entropy_tx = optax.chain(
+                optax.clip_by_global_norm(self.max_grad_norm),
+                optax.inject_hyperparams(optax.adamw)(learning_rate=self.entropy_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2),
+            )
+        else:
+            entropy_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.entropy_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2)
+        self.entropy_coefficient_state = TrainState.create(
+            apply_fn=self.entropy_coefficient.apply,
+            params=self.entropy_coefficient.init(entropy_key),
+            tx=entropy_tx,
         )
 
         if self.enable_observation_normalization:
@@ -165,16 +189,20 @@ class FastSAC:
 
     def train(self):
         @jax.jit
-        def update_critic(policy_params, critic_state, normalized_states, normalized_next_states, actions, rewards, dones, truncations, all_effective_n_steps, key):
-            def loss_fn(critic_params, normalized_state, normalized_next_state, action, reward, done, truncated, effective_n_steps, key1):
-                clipped_noise = jnp.clip(jax.random.normal(key1, action.shape) * self.smoothing_epsilon, -self.smoothing_clip_value, self.smoothing_clip_value)
-                next_action = jnp.clip(self.policy.apply(policy_params, normalized_next_state) + clipped_noise, -1.0, 1.0)
+        def update_critic_and_entropy(policy_params, critic_state, entropy_state, normalized_states, normalized_next_states, actions, rewards, dones, truncations, all_effective_n_steps, key):
+            def loss_fn(critic_params, entropy_params, normalized_state, normalized_next_state, action, reward, done, truncated, effective_n_steps, key1):
+                next_mean, next_log_std = self.policy.apply(policy_params, normalized_next_state)
+                next_action, next_log_prob = self.policy.get_action_and_log_prob(next_mean, next_log_std, key1)
+
+                alpha_with_grad = self.entropy_coefficient.apply(entropy_params)
+                alpha = stop_gradient(alpha_with_grad)
 
                 delta_z = (self.v_max - self.v_min) / (self.nr_atoms - 1)
                 q_support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
                 bootstrap = 1.0 - (done * (1.0 - truncated))
                 discount = (self.gamma ** effective_n_steps) * bootstrap
-                target_z = jnp.clip(reward + discount * q_support, self.v_min, self.v_max)
+                entropy_adjusted_reward = reward - discount * alpha * next_log_prob
+                target_z = jnp.clip(entropy_adjusted_reward + discount * q_support, self.v_min, self.v_max)
                 b = (target_z - self.v_min) / delta_z
                 l = jnp.floor(b).astype(jnp.int32)
                 u = jnp.ceil(b).astype(jnp.int32)
@@ -183,10 +211,7 @@ class FastSAC:
                 l_mask = is_int & (l > 0)
                 u_mask = is_int & (l == 0)
 
-                l = jnp.where(l_mask, l - 1, l)
-                u = jnp.where(u_mask, u + 1, u)
-
-                next_dist = jax.nn.softmax(self.critic.apply(critic_state.target_params, normalized_next_state, next_action))
+                next_dist = jax.nn.softmax(self.critic.apply(critic_state.target_params, next_state, next_action))
                 proj_dist = jnp.zeros_like(next_dist)
                 wt_l = (u.astype(jnp.float32) - b)
                 wt_u = (b - l.astype(jnp.float32))
@@ -214,66 +239,80 @@ class FastSAC:
 
                 q1_loss = -jnp.sum(qf1_next_target_dist * jax.nn.log_softmax(current_q[0]), axis=-1)
                 q2_loss = -jnp.sum(qf2_next_target_dist * jax.nn.log_softmax(current_q[1]), axis=-1)
+                q_loss = q1_loss + q2_loss
 
-                loss = q1_loss + q2_loss
+                entropy = -next_log_prob
+                entropy_loss = alpha_with_grad * (entropy - self.target_entropy)
+
+                loss = q_loss + entropy_loss
 
                 metrics = {
-                    "loss/q_loss": loss,
+                    "loss/q_loss": q_loss,
+                    "loss/entropy_loss": entropy_loss,
                     "q/q_max": jnp.max(qf_next_target_value),
                     "q/q_min": jnp.min(qf_next_target_value),
+                    "entropy/entropy": entropy,
+                    "entropy/alpha": alpha,
                 }
 
                 return loss, metrics
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0, 0, 0, 0))
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_loss_fn = lambda *a, **k: jax.tree_util.tree_map(safe_mean, vmap_loss_fn(*a, **k))
-            grad_loss_fn = jax.value_and_grad(mean_loss_fn, argnums=(0,), has_aux=True)
+            grad_loss_fn = jax.value_and_grad(mean_loss_fn, argnums=(0, 1), has_aux=True)
 
             key, subkeys = jax.random.split(key, 2)
             per_sample_keys = jax.random.split(subkeys, normalized_states.shape[0])
 
-            (loss, metrics), (critic_grads,) = grad_loss_fn(critic_state.params, normalized_states, normalized_next_states, actions, rewards, dones, truncations, all_effective_n_steps, per_sample_keys)
+            (loss, metrics), (critic_grads, entropy_grads) = grad_loss_fn(critic_state.params, entropy_state.params, normalized_states, normalized_next_states, actions, rewards, dones, truncations, all_effective_n_steps, per_sample_keys)
             
             critic_state = critic_state.apply_gradients(grads=critic_grads)
+            entropy_state = entropy_state.apply_gradients(grads=entropy_grads)
             
             critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
 
             metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_grads)
+            metrics["gradients/entropy_grad_norm"] = optax.global_norm(entropy_grads)
 
-            return critic_state, metrics, key
+            return critic_state, entropy_state, metrics, key
 
 
         @jax.jit
-        def update_policy(policy_state, critic_state, states):
-            def loss_fn(policy_params, state):
-                action = self.policy.apply(policy_params, state)
+        def update_policy(policy_state, critic_state, entropy_state, states, key):
+            def loss_fn(policy_params, normalized_state, key1):
+                action_mean, action_log_std = self.policy.apply(policy_params, normalized_state)
+                action, log_prob = self.policy.get_action_and_log_prob(action_mean, action_log_std, key1)
 
-                q_values = self.critic.apply(critic_state.params, state, action)
+                q_values = self.critic.apply(critic_state.params, normalized_state, action)
                 q_values = jnp.sum(jax.nn.softmax(q_values) * jnp.linspace(self.v_min, self.v_max, self.nr_atoms), axis=-1)
                 if self.clipped_double_q_learning:
                     processed_q_value = jnp.min(q_values, axis=0)
                 else:
                     processed_q_value = jnp.mean(q_values, axis=0)
-                
-                loss = -jnp.mean(processed_q_value)
-                
+
+                alpha = self.entropy_coefficient.apply(entropy_state.params)
+                loss = jnp.mean(alpha * log_prob - processed_q_value)
+
                 metrics = {"loss/policy_loss": loss}
-                
+
                 return loss, metrics
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0))
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0, 0))
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_loss_fn = lambda *a, **k: jax.tree_util.tree_map(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_loss_fn, argnums=(0,), has_aux=True)
 
-            (loss, metrics), (policy_grads,) = grad_loss_fn(policy_state.params, states)
+            key, subkeys = jax.random.split(key, 2)
+            per_sample_keys = jax.random.split(subkeys, states.shape[0])
+
+            (loss, metrics), (policy_grads,) = grad_loss_fn(policy_state.params, states, per_sample_keys)
             policy_state = policy_state.apply_gradients(grads=policy_grads)
 
             metrics["lr/learning_rate"] = policy_state.opt_state.hyperparams["learning_rate"]
             metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_grads)
 
-            return policy_state, metrics
+            return policy_state, metrics, key
 
 
         self.set_train_mode()
@@ -281,8 +320,6 @@ class FastSAC:
         replay_buffer = ReplayBuffer(self.buffer_size_per_env, self.nr_envs, self.train_env.single_observation_space.shape, self.train_env.single_action_space.shape, self.n_steps, self.gamma, self.rng)
 
         state, _ = self.train_env.reset()
-        self.key, subkey = jax.random.split(self.key)
-        noise_scales = jax.random.uniform(subkey, (self.nr_envs, 1), minval=self.noise_std_min, maxval=self.noise_std_max)
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -298,11 +335,10 @@ class FastSAC:
             # Acting
             dones_this_rollout = 0
             normalized_state = self._normalize_observations(state, update=False)
-            action = self.policy.apply(self.policy_state.params, normalized_state)
-            self.key, subkey1, subkey2 = jax.random.split(self.key, 3)
-            action = action + jax.random.normal(subkey1, action.shape) * noise_scales
-            processed_action = self.get_processed_action(action)
-            next_state, reward, terminated, truncated, info = self.train_env.step(jax.device_get(processed_action))
+            self.key, action_key = jax.random.split(self.key)
+            action_mean, action_log_std = self.policy.apply(self.policy_state.params, normalized_state)
+            action = self.policy.get_action(action_mean, action_log_std, action_key)
+            next_state, reward, terminated, truncated, info = self.train_env.step(jax.device_get(action))
             done = terminated | truncated
             actual_next_state = next_state.copy()
             for i, single_done in enumerate(done):
@@ -313,12 +349,6 @@ class FastSAC:
                 step_info_collection.setdefault(key, []).extend(info_value)
 
             replay_buffer.add(state, actual_next_state, action, reward, done, truncated)
-
-            noise_scales = jnp.where(
-                done[:, None],
-                jax.random.uniform(subkey2, (self.nr_envs, 1), minval=self.noise_std_min, maxval=self.noise_std_max),
-                noise_scales
-            )
 
             state = next_state
             global_step += self.nr_envs
@@ -359,9 +389,10 @@ class FastSAC:
                 for i in range(self.nr_policy_updates_per_step):
                     for j in range(self.nr_critic_updates_per_policy_update):
                         self.key, subkey = jax.random.split(self.key)
-                        self.critic_state, optimization_metrics, self.key = update_critic(
+                        self.critic_state, self.entropy_coefficient_state, optimization_metrics, self.key = update_critic_and_entropy(
                             self.policy_state.params,
                             self.critic_state,
+                            self.entropy_coefficient_state,
                             normalized_states[i, j],
                             normalized_next_states[i, j],
                             batch_actions[i, j],
@@ -375,7 +406,8 @@ class FastSAC:
                             optimization_metrics_collection.setdefault(key, []).append(value)
                         nr_updates += 1
 
-                    self.policy_state, optimization_metrics = update_policy(self.policy_state, self.critic_state, normalized_states[i, -1])
+                    self.key, subkey = jax.random.split(self.key)
+                    self.policy_state, optimization_metrics, self.key = update_policy(self.policy_state, self.critic_state, self.entropy_coefficient_state, normalized_states[i, -1], subkey)
                     for key, value in optimization_metrics.items():
                         optimization_metrics_collection.setdefault(key, []).append(value)
 
@@ -389,9 +421,9 @@ class FastSAC:
                 eval_state, _ = self.eval_env.reset()
                 for _ in range(self.horizon):
                     eval_normalized_state = self._normalize_observations(eval_state, update=False)
-                    eval_action = self.policy.apply(self.policy_state.params, eval_normalized_state)
-                    eval_processed_action = self.get_processed_action(eval_action)
-                    eval_state, _, _, _, eval_info = self.eval_env.step(jax.device_get(eval_processed_action))
+                    eval_mean, _ = self.policy.apply(self.policy_state.params, eval_normalized_state)
+                    eval_action = self.policy.get_deterministic_action(eval_mean)
+                    eval_state, _, _, _, eval_info = self.eval_env.step(jax.device_get(eval_action))
                     eval_logging_info = self.eval_env.get_logging_info_dict(eval_info)
                     if "episode_return" in eval_logging_info:
                         evaluation_metrics_collection.setdefault("eval/episode_return", []).extend(eval_logging_info["episode_return"])
@@ -409,7 +441,7 @@ class FastSAC:
 
             saving_end_time = time.time()
             time_metrics_collection.setdefault("time/saving_time", []).append(saving_end_time - evaluating_end_time)
-            
+
             time_metrics_collection.setdefault("time/sps", []).append(self.nr_envs / (saving_end_time - start_time))
 
 
@@ -453,7 +485,7 @@ class FastSAC:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
             self.log_console(name, value)
-    
+
 
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
@@ -476,7 +508,8 @@ class FastSAC:
         checkpoint = {
             "policy": self.policy_state,
             "critic": self.critic_state,
-            "observation_normalizer": self.observation_normalizer_state
+            "entropy_coefficient": self.entropy_coefficient_state,
+            "observation_normalizer": self.observation_normalizer_state,
         }
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
@@ -506,7 +539,8 @@ class FastSAC:
         target = {
             "policy": model.policy_state,
             "critic": model.critic_state,
-            "observation_normalizer": model.observation_normalizer_state
+            "entropy_coefficient": model.entropy_coefficient_state,
+            "observation_normalizer": model.observation_normalizer_state,
         }
         restore_args = orbax_utils.restore_args_from_target(target)
         checkpointer = orbax.checkpoint.PyTreeCheckpointer()
@@ -514,6 +548,7 @@ class FastSAC:
 
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
+        model.entropy_coefficient_state = checkpoint.get("entropy_coefficient", model.entropy_coefficient_state)
         model.observation_normalizer_state = checkpoint.get("observation_normalizer", model.observation_normalizer_state)
 
         shutil.rmtree(checkpoint_dir)
@@ -529,9 +564,9 @@ class FastSAC:
             state, _ = self.eval_env.reset()
             while not done:
                 normalized_state = self._normalize_observations(state, update=False)
-                action = self.policy.apply(self.policy_state.params, normalized_state)
-                processed_action = self.get_processed_action(action)
-                state, reward, terminated, truncated, _ = self.eval_env.step(jax.device_get(processed_action))
+                action_mean, _ = self.policy.apply(self.policy_state.params, normalized_state)
+                action = self.policy.get_deterministic_action(action_mean)
+                state, reward, terminated, truncated, _ = self.eval_env.step(jax.device_get(action))
                 done = terminated | truncated
                 episode_return += reward
             rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
