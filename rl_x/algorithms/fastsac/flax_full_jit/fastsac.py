@@ -107,8 +107,8 @@ class FastSAC:
         self.entropy_coefficient = EntropyCoefficient(self.alpha_init)
 
         def linear_schedule(count):
-            step = (count * self.nr_envs) - self.learning_starts
-            total_steps = self.total_timesteps - self.learning_starts
+            step = count * self.nr_envs
+            total_steps = self.total_timesteps
             fraction = 1.0 - (step / total_steps)
             return self.learning_rate * fraction
         
