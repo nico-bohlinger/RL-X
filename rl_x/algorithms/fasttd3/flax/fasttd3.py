@@ -246,10 +246,10 @@ class FastTD3:
 
         @jax.jit
         def update_policy(policy_state, critic_state, states):
-            def loss_fn(policy_params, state):
-                action = self.policy.apply(policy_params, state)
+            def loss_fn(policy_params, normalized_state):
+                action = self.policy.apply(policy_params, normalized_state)
 
-                q_values = self.critic.apply(critic_state.params, state, action)
+                q_values = self.critic.apply(critic_state.params, normalized_state, action)
                 q_values = jnp.sum(jax.nn.softmax(q_values) * jnp.linspace(self.v_min, self.v_max, self.nr_atoms), axis=-1)
                 if self.clipped_double_q_learning:
                     processed_q_value = jnp.min(q_values, axis=0)
