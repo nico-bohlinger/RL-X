@@ -7,6 +7,7 @@ import pygame
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.box_space import BoxSpace
 from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.viewer import MujocoViewer
 from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.control_functions.handler import get_control_function
 from rl_x.environments.custom_mujoco.robot_locomotion.mujoco.command_functions.handler import get_command_function
@@ -152,9 +153,11 @@ class LocomotionEnv(gym.Env):
         self.joint_dropout_function = get_joint_dropout_function(env_config["domain_randomization"]["joint_dropout"]["type"], self)
         
         action_space_size = self.nr_actuator_joints
-        action_space_low = -np.ones(action_space_size) * np.inf
-        action_space_high = np.ones(action_space_size) * np.inf
-        self.action_space = gym.spaces.Box(low=action_space_low, high=action_space_high, shape=(action_space_size,), dtype=np.float32)
+        lower_joint_limit, upper_joint_limit = self.initial_mj_model.jnt_range[self.actuator_joint_mask_joints].T
+        nominal_joint_positions = self.initial_qpos[self.actuator_joint_mask_qpos]
+        action_scale_factor = robot_config["scaling_factor"]
+        # The action space attributes are fixed and do not change with domain randomization, if they are randomized heavily the algorithm using them might need to be adapted
+        self.single_action_space = BoxSpace(low=lower_joint_limit, high=upper_joint_limit, shape=(action_space_size,), dtype=np.float32, center=nominal_joint_positions, scale=action_scale_factor)
 
         self.observation_space = self.get_observation_space()
 
