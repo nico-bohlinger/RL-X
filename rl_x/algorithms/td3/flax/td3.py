@@ -70,18 +70,14 @@ class TD3:
         self.policy.apply = jax.jit(self.policy.apply)
         self.critic.apply = jax.jit(self.critic.apply)
 
-        def linear_schedule_critic(step):
-            total_steps = self.total_timesteps
+        def linear_schedule(count):
+            step = (count * self.nr_envs) - self.learning_starts
+            total_steps = self.total_timesteps - self.learning_starts
             fraction = 1.0 - (step / total_steps)
             return self.learning_rate * fraction
-
-        def linear_schedule_policy(step):
-            total_steps = self.total_timesteps
-            fraction = 1.0 - ((step * self.policy_delay) / total_steps)
-            return self.learning_rate * fraction
         
-        self.q_learning_rate = linear_schedule_critic if self.anneal_learning_rate else self.learning_rate
-        self.policy_learning_rate = linear_schedule_policy if self.anneal_learning_rate else self.learning_rate
+        self.q_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
+        self.policy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
         state = jnp.array([self.train_env.single_observation_space.sample()])
         action = jnp.array([self.train_env.single_action_space.sample()])
