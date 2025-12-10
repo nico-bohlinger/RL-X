@@ -358,7 +358,7 @@ class FastSAC:
 
                             return loss, (metrics)
                         
-                        def policy_loss_fn(policy_params, critic_params, entropy_coefficient_params, normalized_state):
+                        def policy_loss_fn(policy_params, critic_params, entropy_coefficient_params, normalized_state, key):
                             # Policy loss
                             action_mean, action_logstd = self.policy.apply(policy_params, normalized_state)
                             action, log_prob = self.policy.get_action_and_log_prob(action_mean, action_logstd, key)
@@ -386,7 +386,7 @@ class FastSAC:
                         mean_vmapped_critic_and_entropy_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_critic_and_entropy_loss_fn(*a, **k))
                         grad_critic_and_entropy_loss_fn = jax.value_and_grad(mean_vmapped_critic_and_entropy_loss_fn, argnums=(1, 3), has_aux=True)
 
-                        vmap_policy_loss_fn = jax.vmap(policy_loss_fn, in_axes=(None, None, None, 0), out_axes=0)
+                        vmap_policy_loss_fn = jax.vmap(policy_loss_fn, in_axes=(None, None, None, 0, 0), out_axes=0)
                         mean_vmapped_policy_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_policy_loss_fn(*a, **k))
                         grad_policy_loss_fn = jax.value_and_grad(mean_vmapped_policy_loss_fn, argnums=(0,), has_aux=True)
 
@@ -409,8 +409,8 @@ class FastSAC:
 
                         idx1 = jax.random.randint(idx_key_t, (self.nr_critic_updates_per_step, self.batch_size), 0, max_start)
                         idx2 = jax.random.randint(idx_key_e, (self.nr_critic_updates_per_step, self.batch_size), 0, self.nr_envs)
-                        update_keys = jax.random.split(noise_key, self.nr_critic_updates_per_step * self.batch_size)
-                        update_keys = update_keys.reshape(self.nr_critic_updates_per_step, self.batch_size, -1)
+                        update_keys = jax.random.split(noise_key, self.nr_critic_updates_per_step * self.batch_size * 2)
+                        update_keys = update_keys.reshape(self.nr_critic_updates_per_step, self.batch_size, 2, -1)
                         states_all = replay_buffer["states"][idx1, idx2]
                         actions_all = replay_buffer["actions"][idx1, idx2]
 
@@ -478,12 +478,13 @@ class FastSAC:
                                 dones = dones_all[update_idx]
                                 truncations = truncations_all[update_idx]
                                 effective_n_steps = effective_n_steps_all[update_idx]
-                                keys_for_update = update_keys[update_idx]
+                                keys_for_critic_update = update_keys[update_idx, :, 0, :]
+                                keys_for_policy_update = update_keys[update_idx, :, 1, :]
 
                                 (loss, (critic_metrics)), (critic_gradients, entropy_coefficient_gradients) = grad_critic_and_entropy_loss_fn(
                                     policy_state.params, critic_state.params, critic_state.target_params, entropy_coefficient_state.params,
                                     normalized_states, normalized_next_states, actions, rewards, dones, truncations, effective_n_steps,
-                                    keys_for_update)
+                                    keys_for_critic_update)
 
                                 critic_state = critic_state.apply_gradients(grads=critic_gradients)
                                 entropy_coefficient_state = entropy_coefficient_state.apply_gradients(grads=entropy_coefficient_gradients)
@@ -499,7 +500,7 @@ class FastSAC:
                             normalized_states_for_policy = normalized_states
 
                             (loss, (policy_metrics)), (policy_gradients,) = grad_policy_loss_fn(
-                                policy_state.params, critic_state.params, entropy_coefficient_state.params, normalized_states_for_policy)
+                                policy_state.params, critic_state.params, entropy_coefficient_state.params, normalized_states_for_policy, keys_for_policy_update)
 
                             policy_state = policy_state.apply_gradients(grads=policy_gradients)
                             policy_metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
