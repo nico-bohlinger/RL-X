@@ -1,0 +1,38 @@
+from ml_collections import config_dict
+
+
+def get_config(algorithm_name):
+    config = config_dict.ConfigDict()
+
+    config.name = algorithm_name
+
+    config.device = "gpu"  # cpu, gpu
+    config.total_timesteps = 2000158720
+    config.learning_rate = 3e-4
+    config.anneal_learning_rate = False
+    config.weight_decay = 0.1
+    config.batch_size = 32768
+    config.buffer_size_per_env = 10240
+    config.learning_starts = 10  # times nr_envs
+    config.v_min = -10.0
+    config.v_max = 10.0
+    config.tau = 0.1
+    config.gamma = 0.97
+    config.nr_atoms = 101
+    config.n_steps = 1
+    config.noise_std_min = 0.001
+    config.noise_std_max = 0.4
+    config.smoothing_epsilon = 0.001
+    config.smoothing_clip_value = 0.5
+    config.nr_critic_updates_per_policy_update = 2
+    config.nr_policy_updates_per_step = 1
+    config.clipped_double_q_learning = True
+    config.max_grad_norm = -1.0  # -1.0 to disable
+    config.action_clipping_and_rescaling = False
+    config.enable_observation_normalization = True
+    config.normalizer_epsilon = 1e-8
+    config.logging_frequency = 40960
+    config.evaluation_frequency = -1  # -1 to disable
+    config.save_frequency = 4096000  # -1 to disable
+
+    return config
