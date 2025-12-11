@@ -1,4 +1,4 @@
-from mujoco_playground import registry, wrapper, wrapper_torch
+from mujoco_playground import registry, wrapper_torch
 
 from rl_x.environments.mujoco_playground.g1_joystick_flat_terrain.pytorch.wrappers import RLXInfo
 from rl_x.environments.mujoco_playground.g1_joystick_flat_terrain.pytorch.general_properties import GeneralProperties

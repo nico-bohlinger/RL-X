@@ -1,0 +1,8 @@
+from rl_x.environments.environment_manager import extract_environment_name_from_file, register_environment
+from rl_x.environments.custom_mujoco.robot_locomotion.mjx_pytorch.create_env import create_train_and_eval_env
+from rl_x.environments.custom_mujoco.robot_locomotion.mjx_pytorch.default_config import get_config
+from rl_x.environments.custom_mujoco.robot_locomotion.mjx_pytorch.general_properties import GeneralProperties
+
+
+ROBOT_LOCOMOTION_MJX_PYTORCH_ENV = extract_environment_name_from_file(__file__)
+register_environment(ROBOT_LOCOMOTION_MJX_PYTORCH_ENV, get_config, create_train_and_eval_env, GeneralProperties)

@@ -11,7 +11,7 @@ The robot locomotion example is a more complex environment and contains everythi
 The version with the MJX suffix uses the new MuJoCo XLA backend that enables running the environment on a GPU (similar to Isaac Gym / Sim / Lab).
 A modern NVIDIA GPU can easily handle 4000 of those environments in parallel.
 This gives a significant speedup compared to using normal MuJoCo.  
-MJX-based environments break the typical Gym interface and can currently only be used with the ```flax_full_jit``` versions of the ```PPO``` and ```SAC``` algorithms.
+MJX-based environments break the typical Gym interface and can currently only be used with ```flax_full_jit``` algorithm implementations (e.g. ```ppo.flax_full_jit```).
 
 More specifically, the example uses the Ant robot and defines as the task to track a given velocity command.
 
@@ -21,3 +21,4 @@ More specifically, the example uses the Ant robot and defines as the task to tra
 | Ant MJX | Flat value | Continuous | JAX |
 | Robot Locomotion | Flat value | Continuous | Numpy |
 | Robot Locomotion MJX | Flat value | Continuous | JAX |
+| Robot Locomotion MJX PyTorch | Flat value | Continuous | Torch |
