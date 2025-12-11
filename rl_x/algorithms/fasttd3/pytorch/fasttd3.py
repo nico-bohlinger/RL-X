@@ -474,7 +474,9 @@ class FastTD3:
             with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 normalized_state = self.observation_normalizer.normalize(state, update=False)
                 _, processed_action = self.policy.get_action(normalized_state)
-            self.eval_env.step(processed_action)
+            if self.bf16_mixed_precision_training:
+                processed_action = processed_action.to(torch.float32)
+            state, _, _, _, _ = self.eval_env.step(processed_action)
 
 
     def set_train_mode(self):

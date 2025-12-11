@@ -490,7 +490,7 @@ class FastSAC:
             with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 normalized_state = self.observation_normalizer.normalize(state, update=False)
                 action = self.policy.get_action(normalized_state, deterministic=True)
-            self.eval_env.step(action)
+            state, _, _, _, _ = self.eval_env.step(action)
 
 
     def set_train_mode(self):
