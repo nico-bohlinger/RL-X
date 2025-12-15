@@ -3,12 +3,11 @@ import os
 # Silence tensorflow warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
-
 # Fix wandb connection issues on slow clusters - https://github.com/wandb/wandb/issues/3911#issuecomment-1409769887
 os.environ["WANDB__SERVICE_WAIT"] = "600"
 
 import sys
+import subprocess
 import importlib
 from absl import app
 from absl import flags
@@ -21,7 +20,6 @@ from rl_x.runner.runner_mode import RunnerMode
 from rl_x.runner.default_config import get_config as get_runner_config
 from rl_x.algorithms.algorithm_manager import get_algorithm_config, get_algorithm_model_class, get_algorithm_general_properties
 from rl_x.environments.environment_manager import get_environment_config, get_environment_create_train_and_eval_env, get_environment_general_properties
-from rl_x.environments.data_interface_type import DataInterfaceType
 from rl_x.environments.simulation_type import SimulationType
 from rl_x.algorithms.deep_learning_framework_type import DeepLearningFrameworkType
 
@@ -280,7 +278,13 @@ class Runner:
     def _train(self, _):
         self.init_config()
 
+        run_path = f"runs/{self._config.runner.project_name}/{self._config.runner.exp_name}/{self._config.runner.run_name}"
+        run_path = os.path.abspath(run_path)
+        if self._config.runner.save_model or self._config.runner.track_tb or self._config.runner.track_wandb:
+            os.makedirs(run_path, exist_ok=True)
+
         if self._config.runner.track_wandb:
+            # Initialize wandb
             import wandb
             wandb.init(
                 entity=self._config.runner.wandb_entity,
@@ -293,9 +297,27 @@ class Runner:
                 monitor_gym=True,
                 save_code=True,
             )
+            # Log python packages
+            python_packages = subprocess.check_output(["pip", "freeze"]).decode().split("\n")
+            python_packages = [package.split("==") for package in python_packages if package]
+            python_packages = [package for package in python_packages if len(package) == 2]
+            python_packages = {package[0]: package[1] for package in python_packages}
+            wandb.config["python_packages"] = python_packages
+            # Log git diff and commit hash
+            try:
+                project_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
+                git_diff = subprocess.check_output(["git", "diff"], cwd=project_dir).decode()
+                with open(os.path.join(run_path, "diff.patch"), "w") as f:
+                    f.write(git_diff)
+                wandb.save(os.path.join(run_path, "diff.patch"), base_path=run_path)
+                git_commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=project_dir).decode().strip()
+                wandb.config["git_commit_hash"] = git_commit_hash
+            except Exception as e:
+                rlx_logger.warning(f"Could not log git diff and commit hash: {e}")
+            # Log slurm job id
+            if "SLURM_JOB_ID" in os.environ:
+                wandb.config["SLURM_JOB_ID"] = os.environ["SLURM_JOB_ID"]
 
-        run_path = f"runs/{self._config.runner.project_name}/{self._config.runner.exp_name}/{self._config.runner.run_name}"
-        run_path = os.path.abspath(run_path)
         writer = None
         if self._config.runner.track_tb:
             from torch.utils.tensorboard import SummaryWriter
