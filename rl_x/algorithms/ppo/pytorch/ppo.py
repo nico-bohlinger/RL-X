@@ -197,6 +197,7 @@ class PPO:
                 dones_this_rollout = 0
                 step_info_collection = {}
                 for step in range(self.nr_steps):
+                    torch.compiler.cudagraph_mark_step_begin()
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                         action, processed_action, log_prob = self.policy.get_action_logprob(state)
                         value = self.critic.get_value(state)
@@ -316,6 +317,7 @@ class PPO:
                     eval_nr_episodes = 0
                     evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
                     while True:
+                        torch.compiler.cudagraph_mark_step_begin()
                         if not self.is_torch_data_interface:
                             eval_state = torch.tensor(eval_state, dtype=torch.float32).to(self.device)
                         with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
@@ -439,6 +441,7 @@ class PPO:
                 episode_return = 0
                 state, _ = self.eval_env.reset()
                 while not done:
+                    torch.compiler.cudagraph_mark_step_begin()
                     if not self.is_torch_data_interface:
                         state = torch.tensor(state, dtype=torch.float32).to(self.device)
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):

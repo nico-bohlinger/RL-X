@@ -354,7 +354,8 @@ class FastSAC:
             if should_evaluate:
                 self.set_eval_mode()
                 eval_state, _ = self.eval_env.reset()
-                for _ in range(self.horizon):
+                for i in range(self.horizon):
+                    torch.compiler.cudagraph_mark_step_begin()
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                         eval_normalized_state = self.observation_normalizer.normalize(eval_state, update=False)
                         eval_action = self.policy.get_action(eval_normalized_state, deterministic=True)
@@ -487,6 +488,7 @@ class FastSAC:
         self.set_eval_mode()
         state, _ = self.eval_env.reset()
         while True:
+            torch.compiler.cudagraph_mark_step_begin()
             with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 normalized_state = self.observation_normalizer.normalize(state, update=False)
                 action = self.policy.get_action(normalized_state, deterministic=True)

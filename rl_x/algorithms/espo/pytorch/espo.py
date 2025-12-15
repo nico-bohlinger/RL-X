@@ -195,6 +195,7 @@ class ESPO:
             dones_this_rollout = 0
             step_info_collection = {}
             for step in range(self.nr_steps):
+                torch.compiler.cudagraph_mark_step_begin()
                 with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                     action, processed_action, log_prob = self.policy.get_action_logprob(state)
                     value = self.critic.get_value(state)
@@ -297,6 +298,7 @@ class ESPO:
                 eval_nr_episodes = 0
                 evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
                 while True:
+                    torch.compiler.cudagraph_mark_step_begin()
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                         eval_processed_action = self.policy.get_deterministic_action(torch.tensor(eval_state, dtype=torch.float32).to(self.device))
                     eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(eval_processed_action.cpu().numpy())
@@ -415,6 +417,7 @@ class ESPO:
             episode_return = 0
             state, _ = self.eval_env.reset()
             while not done:
+                torch.compiler.cudagraph_mark_step_begin()
                 with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                     processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, terminated, truncated, info = self.eval_env.step(processed_action.cpu().numpy())

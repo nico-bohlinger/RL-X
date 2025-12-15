@@ -270,6 +270,7 @@ class SAC:
                 eval_state, _ = self.eval_env.reset()
                 eval_nr_episodes = 0
                 while True:
+                    torch.compiler.cudagraph_mark_step_begin()
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                         eval_processed_action = self.policy.get_deterministic_action(torch.tensor(eval_state, dtype=torch.float32).to(self.device))
                     eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(eval_processed_action.cpu().numpy())
@@ -405,6 +406,7 @@ class SAC:
             episode_return = 0
             state, _ = self.eval_env.reset()
             while not done:
+                torch.compiler.cudagraph_mark_step_begin()
                 with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                     processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, terminated, truncated, info = self.eval_env.step(processed_action.cpu().numpy())
