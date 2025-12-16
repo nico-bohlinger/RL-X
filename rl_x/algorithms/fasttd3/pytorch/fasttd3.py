@@ -449,7 +449,7 @@ class FastTD3:
     
 
     def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
-        checkpoint = torch.load(config.runner.load_model)
+        checkpoint = torch.load(config.runner.load_model, weights_only=False)
         loaded_algorithm_config = checkpoint["config_algorithm"]
         for key, value in loaded_algorithm_config.items():
             if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
@@ -466,7 +466,7 @@ class FastTD3:
         return model
 
     
-    def test(self):
+    def test(self, episodes):
         rlx_logger.info("Testing runs infinitely. The episodes parameter is ignored.")
 
         self.set_eval_mode()
