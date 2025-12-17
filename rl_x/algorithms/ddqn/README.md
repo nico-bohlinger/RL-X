@@ -22,4 +22,4 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 ## Resources
 - Paper: [Deep Reinforcement Learning with Double Q-learning (van Hasselt et al., 2016)](https://arxiv.org/pdf/1509.06461.pdf)
 
-- Blog post by Julien Vitay: [here](https://julien-vitay.net/deeprl/2-Valuebased.html#double-dqn)
+- Blog post by Julien Vitay: [here](https://julien-vitay.net/deeprl/src/2.4-DQNvariants.html#sec-doubleqlearning)
