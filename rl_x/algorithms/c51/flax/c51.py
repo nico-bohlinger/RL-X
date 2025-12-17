@@ -44,6 +44,9 @@ class C51:
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
         self.gamma = config.algorithm.gamma
+        self.v_min = config.algorithm.v_min
+        self.v_max = config.algorithm.v_max
+        self.nr_atoms = config.algorithm.nr_atoms
         self.epsilon_start = config.algorithm.epsilon_start
         self.epsilon_end = config.algorithm.epsilon_end
         self.epsilon_decay_steps = config.algorithm.epsilon_decay_steps
@@ -96,7 +99,9 @@ class C51:
             key, subkey1, subkey2 = jax.random.split(key, 3)
 
             random_action = jax.random.randint(subkey1, (self.nr_envs,), 0, self.nr_available_actions)
-            greedy_action = jnp.argmax(self.critic.apply(critic_state.params, state), axis=-1)
+            greedy_action_dist = jax.nn.softmax(self.critic.apply(critic_state.params, state), axis=-1)
+            greedy_action_q_values = jnp.sum(greedy_action_dist * jnp.linspace(self.v_min, self.v_max, self.nr_atoms), axis=-1)
+            greedy_action = jnp.argmax(greedy_action_q_values, axis=-1)
             action = jnp.where(
                 jax.random.uniform(subkey2) < epsilon,
                 random_action,
@@ -114,17 +119,38 @@ class C51:
             def loss_fn(critic_params: flax.core.FrozenDict,
                         state: np.ndarray, next_state: np.ndarray, action: np.ndarray, reward: np.ndarray, terminated: np.ndarray
                 ):
-                next_q_target = self.critic.apply(critic_state.target_params, next_state)
+                delta_z = (self.v_max - self.v_min) / (self.nr_atoms - 1)
+                q_support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
+                target_z = jnp.clip(reward + self.gamma * (1 - terminated) * q_support, self.v_min, self.v_max)
+                b = (target_z - self.v_min) / delta_z
+                l = jnp.floor(b).astype(jnp.int32)
+                u = jnp.ceil(b).astype(jnp.int32)
 
-                y = reward + self.gamma * (1 - terminated) * jnp.max(next_q_target)
+                is_int = (u == l)
+                l_mask = is_int & (l > 0)
+                u_mask = is_int & (l == 0)
 
-                q = jnp.squeeze(self.critic.apply(critic_params, state))[action]
-                q_loss = (q - y) ** 2
+                l = jnp.where(l_mask, l - 1, l)
+                u = jnp.where(u_mask, u + 1, u)
+                wt_l = (u.astype(jnp.float32) - b)
+                wt_u = (b - l.astype(jnp.float32))
+
+                next_dist = jax.nn.softmax(self.critic.apply(critic_state.target_params, next_state).squeeze(axis=0), axis=-1)
+                next_q_values = jnp.sum(next_dist * q_support, axis=-1)
+                next_action = jnp.argmax(next_q_values, axis=-1)
+                
+                proj_dist = jnp.zeros((self.nr_atoms,))
+                proj_dist = proj_dist.at[l].add(next_dist[next_action] * wt_l)
+                proj_dist = proj_dist.at[u].add(next_dist[next_action] * wt_u)
+
+                current_logits = self.critic.apply(critic_params, state).squeeze(axis=0)
+                current_log_probs = jax.nn.log_softmax(current_logits[action], axis=-1)
+                q_loss = -jnp.sum(proj_dist * current_log_probs , axis=-1)
 
                 # Create metrics
                 metrics = {
                     "loss/q_loss": q_loss,
-                    "q_value/q_value": q,
+                    "q_value/q_value": jnp.sum(jax.nn.softmax(current_logits[action], axis=-1) * q_support),
                 }
 
                 return q_loss, (metrics)
@@ -155,7 +181,9 @@ class C51:
 
         @jax.jit
         def get_greedy_action(critic_state: TrainState, state: np.ndarray):
-            action = jnp.argmax(self.critic.apply(critic_state.params, state), axis=-1)
+            action_dist = jax.nn.softmax(self.critic.apply(critic_state.params, state), axis=-1)
+            q_values = jnp.sum(action_dist * jnp.linspace(self.v_min, self.v_max, self.nr_atoms), axis=-1)
+            action = jnp.argmax(q_values, axis=-1)
             return action
 
 
@@ -373,7 +401,9 @@ class C51:
     def test(self, episodes):
         @jax.jit
         def get_action(critic_state: TrainState, state: np.ndarray):
-            action = jnp.argmax(self.critic.apply(critic_state.params, state), axis=-1)
+            action_dist = jax.nn.softmax(self.critic.apply(critic_state.params, state), axis=-1)
+            q_values = jnp.sum(action_dist * jnp.linspace(self.v_min, self.v_max, self.nr_atoms), axis=-1)
+            action = jnp.argmax(q_values, axis=-1)
             return action
         
         self.set_eval_mode()

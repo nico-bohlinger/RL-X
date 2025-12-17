@@ -9,11 +9,12 @@ def get_critic(config, env):
     observation_space_type = env.general_properties.observation_space_type
 
     if observation_space_type == ObservationSpaceType.IMAGES:
-        return Critic(env.get_single_action_logit_size(), config.algorithm.nr_hidden_units)
+        return Critic(env.get_single_action_logit_size(), config.algorithm.nr_atoms, config.algorithm.nr_hidden_units)
 
 
 class Critic(nn.Module):
     nr_available_actions: int
+    nr_atoms: int
     nr_hidden_units: int
 
     @nn.compact
@@ -29,5 +30,6 @@ class Critic(nn.Module):
         x = x.reshape((x.shape[0], -1))
         x = nn.Dense(self.nr_hidden_units)(x)
         x = nn.relu(x)
-        x = nn.Dense(self.nr_available_actions)(x)
+        x = nn.Dense(self.nr_available_actions * self.nr_atoms)(x)
+        x = x.reshape((x.shape[0], self.nr_available_actions, self.nr_atoms))
         return x

@@ -14,6 +14,9 @@ def get_config(algorithm_name):
     config.learning_starts = 20000
     config.batch_size = 32
     config.gamma = 0.99
+    config.v_min = -10.0
+    config.v_max = 10.0
+    config.nr_atoms = 51
     config.epsilon_start = 1.0
     config.epsilon_end = 0.01
     config.epsilon_decay_steps = 250000
