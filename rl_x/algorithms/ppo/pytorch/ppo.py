@@ -339,7 +339,6 @@ class PPO:
                                     break
                         if eval_nr_episodes == self.evaluation_episodes:
                             break
-                    # evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
                     self.set_train_mode()
             
             evaluating_end_time = time.time()
