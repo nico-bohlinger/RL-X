@@ -259,9 +259,13 @@ class PPO:
         nr_updates = 0
         nr_episodes = 0
         steps_metrics = {}
+        prev_saving_end_time = None
+        logging_time_prev = None
         while global_step < self.total_timesteps:
             start_time = time.time()
             time_metrics = {}
+            if logging_time_prev:
+                time_metrics["time/logging_time_prev"] = logging_time_prev
 
 
             # Acting
@@ -351,9 +355,10 @@ class PPO:
                     self.save()
             
             saving_end_time = time.time()
+            if prev_saving_end_time:
+                time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - prev_saving_end_time))
+            prev_saving_end_time = saving_end_time
             time_metrics["time/saving_time"] = saving_end_time - evaluating_end_time
-
-            time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
 
 
             # Logging
@@ -379,6 +384,9 @@ class PPO:
                 self.log(f"{key}", value, global_step)
 
             self.end_logging()
+
+            logging_end_time = time.time()
+            logging_time_prev = logging_end_time - saving_end_time
 
 
     def log(self, name, value, step):

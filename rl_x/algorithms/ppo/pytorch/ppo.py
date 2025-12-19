@@ -187,9 +187,13 @@ class PPO:
         nr_updates = 0
         nr_episodes = 0
         steps_metrics = {}
+        prev_saving_end_time = None
+        logging_time_prev = None
         while global_step < self.total_timesteps:
             start_time = time.time()
             time_metrics = {}
+            if logging_time_prev:
+                time_metrics["time/logging_time_prev"] = logging_time_prev
         
 
             # Acting
@@ -335,7 +339,7 @@ class PPO:
                                     break
                         if eval_nr_episodes == self.evaluation_episodes:
                             break
-                    evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
+                    # evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
                     self.set_train_mode()
             
             evaluating_end_time = time.time()
@@ -351,9 +355,10 @@ class PPO:
                     self.save()
             
             saving_end_time = time.time()
+            if prev_saving_end_time:
+                time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - prev_saving_end_time))
+            prev_saving_end_time = saving_end_time
             time_metrics["time/saving_time"] = saving_end_time - evaluating_end_time
-
-            time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - start_time))
 
 
             # Logging
@@ -374,11 +379,16 @@ class PPO:
                     if mean_value == mean_value:  # Check if mean_value is NaN
                         metric_dict[f"{metric_group}/{info_name}"] = mean_value
             
+            evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
+            
             combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
             for key, value in combined_metrics.items():
                 self.log(f"{key}", value, global_step)
 
             self.end_logging()
+
+            logging_end_time = time.time()
+            logging_time_prev = logging_end_time - saving_end_time
 
 
     def log(self, name, value, step):
