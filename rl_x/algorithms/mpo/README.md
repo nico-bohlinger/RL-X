@@ -17,11 +17,12 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 - Achieves great performance in general but suffers from sudden loss spikes that can cause the performance to collapse
 
 **Supported frameworks**
-- JAX (Flax)
+- PyTorch, JAX (Flax)
 
 **Supported action space, observation space and data interface types**
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
+| PyTorch | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 
@@ -36,3 +37,4 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 - Repositories:
     - Acme: [here](https://github.com/deepmind/acme/tree/master/acme/agents/jax/mpo)
     - jax-rl: [here](https://github.com/henry-prior/jax-rl/blob/master/jax_rl/MPO.py)
+    - Jogima-cyber's CleanRL fork: [here](https://github.com/Jogima-cyber/cleanrl/blob/master/cleanrl/dmpo_continuous_action.py)
