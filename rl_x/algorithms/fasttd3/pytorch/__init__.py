@@ -4,5 +4,5 @@ from rl_x.algorithms.fasttd3.pytorch.default_config import get_config
 from rl_x.algorithms.fasttd3.pytorch.general_properties import GeneralProperties
 
 
-FASTTD3_TORCHSCRIPT = extract_algorithm_name_from_file(__file__)
-register_algorithm(FASTTD3_TORCHSCRIPT, get_config, FastTD3, GeneralProperties)
+FASTTD3_PYTORCH = extract_algorithm_name_from_file(__file__)
+register_algorithm(FASTTD3_PYTORCH, get_config, FastTD3, GeneralProperties)
