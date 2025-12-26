@@ -38,7 +38,7 @@ A framework for Reinforcement Learning research.
 - [CrossQ](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/crossq) in Flax
 - [Truncated Quantile Critics (TQC)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/tqc) in Flax
 - [Aggressive Q-Learning with Ensembles (AQE)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/aqe) in Flax
-- [Maximum a Posteriori Policy Optimization (MPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/mpo) in Flax
+- [Maximum a Posteriori Policy Optimization (MPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/mpo) in PyTorch, Flax
 - [Deep Q-Network (DQN)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dqn) in Flax
 - [Deep Q-Network with Histogram Loss using Gaussians (DQN HL-Gauss)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dqn_hl_gauss) in Flax
 - [Double Deep Q-Network (DDQN)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ddqn) in Flax
