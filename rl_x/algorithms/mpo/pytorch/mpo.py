@@ -54,8 +54,7 @@ class MPO:
         self.epsilon_parametric_mu = config.algorithm.epsilon_parametric_mu
         self.epsilon_parametric_sigma = config.algorithm.epsilon_parametric_sigma
         self.epsilon_penalty = config.algorithm.epsilon_penalty
-        self.policy_init_scale = config.algorithm.policy_init_scale
-        self.policy_min_scale = config.algorithm.policy_min_scale
+        self.action_clipping = config.algorithm.action_clipping
         self.v_min = config.algorithm.v_min
         self.v_max = config.algorithm.v_max
         self.nr_atoms = config.algorithm.nr_atoms
@@ -151,7 +150,7 @@ class MPO:
                 current_q = (F.softmax(current_logits, dim=-1) * self.q_support).sum(-1)  # (batch,)
                 q_loss = -torch.sum(target_pmf * F.log_softmax(current_logits, dim=1), dim=1).mean()
 
-            self.critic_optimizer.zero_grad(set_to_none=True)
+            self.critic_optimizer.zero_grad()
             q_loss.backward()
             critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.q.parameters(), self.grad_norm_clip)
             self.critic_optimizer.step()
@@ -182,16 +181,21 @@ class MPO:
                 q_logsumexp = torch.logsumexp(expanded_stacked_q / eta, dim=0)  # (2 * batch,)
                 loss_eta = eta * (self.epsilon_non_parametric + torch.mean(q_logsumexp) - self.log_num_actions)
 
-                penalty_temperature = F.softplus(self.duals.log_penalty_temperature) + self.float_epsilon
-                diff_oob = sampled_actions - torch.clamp(sampled_actions, -1.0, 1.0)  # (sampled actions, 2 * batch, action_dim)
-                cost_oob = -torch.linalg.norm(diff_oob, dim=-1)  # (sampled actions, 2 * batch)
-                penalty_improvement = F.softmax(cost_oob / penalty_temperature.detach(), dim=0)
+                if self.action_clipping:
+                    penalty_temperature = F.softplus(self.duals.log_penalty_temperature) + self.float_epsilon
+                    diff_oob = sampled_actions - torch.clamp(sampled_actions, -1.0, 1.0)  # (sampled actions, 2 * batch, action_dim)
+                    cost_oob = -torch.linalg.norm(diff_oob, dim=-1)  # (sampled actions, 2 * batch)
+                    penalty_improvement = F.softmax(cost_oob / penalty_temperature.detach(), dim=0)
 
-                penalty_logsumexp = torch.logsumexp(cost_oob / penalty_temperature, dim=0)  # (2 * batch,)
-                loss_penalty_temp = penalty_temperature * (self.epsilon_penalty + torch.mean(penalty_logsumexp) - self.log_num_actions)
+                    penalty_logsumexp = torch.logsumexp(cost_oob / penalty_temperature, dim=0)  # (2 * batch,)
+                    loss_penalty_temp = penalty_temperature * (self.epsilon_penalty + torch.mean(penalty_logsumexp) - self.log_num_actions)
 
-                improvement_dist = improvement_dist + penalty_improvement
-                loss_eta = loss_eta + loss_penalty_temp
+                    improvement_dist = improvement_dist + penalty_improvement
+                    loss_eta = loss_eta + loss_penalty_temp
+
+                    penalty_temperature_detached = penalty_temperature.detach()
+                else:
+                    penalty_temperature_detached = torch.tensor(0.0, device=self.device)
 
                 online_action_mean, online_action_std = self.actor.get_action(stacked_states)
 
@@ -220,13 +224,13 @@ class MPO:
 
                 actor_loss = loss_pg_mean + loss_pg_std + loss_kl_mean + loss_kl_std
             
-            self.actor_optimizer.zero_grad(set_to_none=True)
+            self.actor_optimizer.zero_grad()
             actor_loss.backward()
             actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_norm_clip)
             self.actor_optimizer.step()
 
             dual_loss = loss_alpha_mean + loss_alpha_std + loss_eta
-            self.dual_optimizer.zero_grad(set_to_none=True)
+            self.dual_optimizer.zero_grad()
             dual_loss.backward()
             dual_grad_norm = torch.nn.utils.clip_grad_norm_(self.duals.parameters(), self.grad_norm_clip)
             self.dual_optimizer.step()
@@ -242,7 +246,7 @@ class MPO:
                 dual_loss,
                 current_q.mean(),
                 eta.detach(),
-                penalty_temperature.detach(),
+                penalty_temperature_detached,
                 alpha_mean.detach().mean(),
                 alpha_std.detach().mean(),
                 loss_eta.detach(),

@@ -15,7 +15,7 @@ def get_policy(config, env, device):
     compile_mode = config.algorithm.compile_mode
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        policy = torch.compile(Policy(env, config.algorithm.policy_init_scale, config.algorithm.policy_min_scale, config.algorithm.action_rescaling, config.algorithm.nr_hidden_units, device, policy_observation_indices).to(device), mode=compile_mode)
+        policy = torch.compile(Policy(env, config.algorithm.policy_init_scale, config.algorithm.policy_min_scale, config.algorithm.action_clipping, config.algorithm.action_rescaling, config.algorithm.nr_hidden_units, device, policy_observation_indices).to(device), mode=compile_mode)
         policy.forward = torch.compile(policy.forward, mode=compile_mode)
         policy.get_action = torch.compile(policy.get_action, mode=compile_mode)
         policy.get_distribution = torch.compile(policy.get_distribution, mode=compile_mode)
@@ -25,10 +25,11 @@ def get_policy(config, env, device):
     
 
 class Policy(nn.Module):
-    def __init__(self, env, policy_init_scale, policy_min_scale, action_rescaling, nr_hidden_units, device, policy_observation_indices):
+    def __init__(self, env, policy_init_scale, policy_min_scale, action_clipping, action_rescaling, nr_hidden_units, device, policy_observation_indices):
         super().__init__()
         self.policy_init_scale = policy_init_scale
         self.policy_min_scale = policy_min_scale
+        self.action_clipping = action_clipping
         self.action_rescaling = action_rescaling
         self.device = device
         self.policy_observation_indices = torch.tensor(policy_observation_indices, dtype=torch.long, device=device)
@@ -84,9 +85,12 @@ class Policy(nn.Module):
 
 
     def scale_to_env(self, action):
-        if not self.action_rescaling:
-            return action
-        return self.env_as_low + (0.5 * (action + 1.0) * (self.env_as_high - self.env_as_low))
+        processed_action = action
+        if self.action_clipping:
+            processed_action = torch.clamp(processed_action, -1.0, 1.0)
+        if self.action_rescaling:
+            processed_action = self.env_as_low + (0.5 * (processed_action + 1.0) * (self.env_as_high - self.env_as_low))
+        return processed_action
 
 
     def sample_action(self, x):

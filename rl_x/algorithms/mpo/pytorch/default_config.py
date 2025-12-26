@@ -34,6 +34,7 @@ def get_config(algorithm_name):
     config.init_log_penalty_temperature = 10.0
     config.policy_init_scale = 0.5
     config.policy_min_scale = 1e-6
+    config.action_clipping = True
     config.action_rescaling = False
     config.v_min = -1600.0
     config.v_max = 1600.0
