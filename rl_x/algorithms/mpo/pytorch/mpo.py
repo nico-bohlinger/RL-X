@@ -421,6 +421,8 @@ class MPO:
                     torch.compiler.cudagraph_mark_step_begin()
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                         eval_processed_action = self.actor.get_deterministic_action(torch.tensor(eval_state, dtype=torch.float32).to(self.device))
+                    if self.bf16_mixed_precision_training:
+                        eval_processed_action = eval_processed_action.to(torch.float32)
                     eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(eval_processed_action.cpu().numpy())
                     eval_done = eval_terminated | eval_truncated
                     for i, single_done in enumerate(eval_done):
