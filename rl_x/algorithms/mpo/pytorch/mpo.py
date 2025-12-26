@@ -310,7 +310,6 @@ class MPO:
             for key, info_value in self.train_env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
             
-            state = torch.tensor(state, dtype=torch.float32, device=self.device)
             next_state = torch.tensor(next_state, dtype=torch.float32, device=self.device)
             actual_next_state = torch.tensor(actual_next_state, dtype=torch.float32, device=self.device)
             reward = torch.tensor(reward, dtype=torch.float32, device=self.device)
