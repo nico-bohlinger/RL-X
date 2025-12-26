@@ -45,7 +45,6 @@ class MPO:
         self.batch_size = config.algorithm.batch_size
         self.actor_update_period = config.algorithm.actor_update_period
         self.target_network_update_period = config.algorithm.target_network_update_period
-        self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
         self.n_steps = config.algorithm.n_steps
         self.optimize_every_n_steps = config.algorithm.optimize_every_n_steps
@@ -301,7 +300,7 @@ class MPO:
             else:
                 with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                     normalized_state = self.observation_normalizer.normalize(state, update=False)
-                    action, processed_action = self.actor.sample_action(normalized_state)
+                    action, processed_action = self.env_actor.sample_action(normalized_state)
                 processed_action = processed_action.cpu().numpy()
             
             next_state, reward, terminated, truncated, info = self.train_env.step(processed_action)

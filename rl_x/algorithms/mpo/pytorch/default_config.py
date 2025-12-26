@@ -19,7 +19,6 @@ def get_config(algorithm_name):
     config.batch_size = 256
     config.actor_update_period = 1000
     config.target_network_update_period = 100
-    config.tau = 0.005
     config.gamma = 0.99
     config.n_steps = 4
     config.optimize_every_n_steps = 4
