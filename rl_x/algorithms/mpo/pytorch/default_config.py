@@ -35,7 +35,7 @@ def get_config(algorithm_name):
     config.policy_init_scale = 0.5
     config.policy_min_scale = 1e-6
     config.action_clipping = True
-    config.action_rescaling = False
+    config.action_rescaling = True
     config.v_min = -1600.0
     config.v_max = 1600.0
     config.nr_atoms = 51
