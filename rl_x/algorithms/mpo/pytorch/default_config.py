@@ -43,6 +43,7 @@ def get_config(algorithm_name):
     config.float_epsilon = 1e-8
     config.min_log_temperature = -18.0
     config.min_log_alpha = -18.0
+    config.enable_observation_normalization = True
     config.logging_frequency = 300
     config.evaluation_frequency = 200000  # -1 to disable
     config.evaluation_episodes = 10

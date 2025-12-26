@@ -14,6 +14,7 @@ from rl_x.algorithms.mpo.pytorch.policy import get_policy
 from rl_x.algorithms.mpo.pytorch.critic import get_critic
 from rl_x.algorithms.mpo.pytorch.dual_variables import DualVariables
 from rl_x.algorithms.mpo.pytorch.replay_buffer import ReplayBuffer
+from rl_x.algorithms.mpo.pytorch.observation_normalizer import get_observation_normalizer
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -63,6 +64,7 @@ class MPO:
         self.min_log_temperature = config.algorithm.min_log_temperature
         self.min_log_alpha = config.algorithm.min_log_alpha
         self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.enable_observation_normalization = config.algorithm.enable_observation_normalization
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.evaluation_episodes = config.algorithm.evaluation_episodes
@@ -107,6 +109,8 @@ class MPO:
             self.actor_scheduler = optim.lr_scheduler.LinearLR(self.actor_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps - self.learning_starts) // self.nr_envs)
         if self.anneal_dual_learning_rate:
             self.dual_scheduler = optim.lr_scheduler.LinearLR(self.dual_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps - self.learning_starts) // self.nr_envs)
+
+        self.observation_normalizer = get_observation_normalizer(config, self.train_env.single_observation_space.shape[0], self.device)
 
         self.q_support = torch.linspace(self.v_min, self.v_max, self.nr_atoms, device=self.device)
         self.log_num_actions = torch.log(torch.tensor(self.action_sampling_number, dtype=torch.float32, device=self.device))
@@ -296,7 +300,8 @@ class MPO:
                 action = torch.tensor((processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0, dtype=torch.float32, device=self.device)
             else:
                 with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                    action, processed_action = self.actor.sample_action(state)
+                    normalized_state = self.observation_normalizer.normalize(state, update=False)
+                    action, processed_action = self.actor.sample_action(normalized_state)
                 processed_action = processed_action.cpu().numpy()
             
             next_state, reward, terminated, truncated, info = self.train_env.step(processed_action)
@@ -344,6 +349,8 @@ class MPO:
             # Optimizing
             if should_optimize:
                 batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncation, batch_effective_n_steps  = replay_buffer.sample(self.batch_size)
+                batch_normalized_states = self.observation_normalizer.normalize(batch_states, update=True)
+                batch_normalized_next_states = self.observation_normalizer.normalize(batch_next_states, update=True)
 
                 (
                     q_loss,
@@ -364,8 +371,8 @@ class MPO:
                     min_action_stddev,
                     max_action_stddev,
                 ) = update(
-                    batch_states,
-                    batch_next_states,
+                    batch_normalized_states,
+                    batch_normalized_next_states,
                     batch_actions,
                     batch_rewards,
                     batch_dones,
@@ -420,7 +427,8 @@ class MPO:
                 while True:
                     torch.compiler.cudagraph_mark_step_begin()
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                        eval_processed_action = self.actor.get_deterministic_action(torch.tensor(eval_state, dtype=torch.float32).to(self.device))
+                        eval_normalized_state = self.observation_normalizer.normalize(torch.tensor(eval_state, dtype=torch.float32, device=self.device), update=False)
+                        eval_processed_action = self.actor.get_deterministic_action(eval_normalized_state)
                     if self.bf16_mixed_precision_training:
                         eval_processed_action = eval_processed_action.to(torch.float32)
                     eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(eval_processed_action.cpu().numpy())
@@ -527,6 +535,7 @@ class MPO:
             "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
             "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
             "dual_optimizer_state_dict": self.dual_optimizer.state_dict(),
+            "observation_normalizer_state_dict": self.observation_normalizer.state_dict(),
         }
         torch.save(save_dict, file_path)
         if self.track_wandb:
@@ -549,6 +558,7 @@ class MPO:
         model.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
         model.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
         model.dual_optimizer.load_state_dict(checkpoint["dual_optimizer_state_dict"])
+        model.observation_normalizer.load_state_dict(checkpoint["observation_normalizer_state_dict"])
         return model
 
     
@@ -561,7 +571,8 @@ class MPO:
             while not done:
                 torch.compiler.cudagraph_mark_step_begin()
                 with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                    processed_action = self.actor.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                    normalized_state = self.observation_normalizer.normalize(torch.tensor(state, dtype=torch.float32, device=self.device), update=False)
+                    processed_action = self.actor.get_deterministic_action(normalized_state)
                 state, reward, terminated, truncated, info = self.eval_env.step(processed_action.cpu().numpy())
                 done = terminated | truncated
                 episode_return += reward
