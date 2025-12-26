@@ -235,7 +235,6 @@ class MPO:
                 self.duals.log_eta.data.clamp_(min=self.min_log_temperature)
                 self.duals.log_alpha_mean.data.clamp_(min=self.min_log_alpha)
                 self.duals.log_alpha_stddev.data.clamp_(min=self.min_log_alpha)
-                self.duals.log_penalty_temperature.data.clamp_(min=self.min_log_temperature)
 
             return (
                 q_loss,
