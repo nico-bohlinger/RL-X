@@ -112,6 +112,7 @@ class MPO:
 
         self.q_support = torch.linspace(self.v_min, self.v_max, self.nr_atoms, device=self.device)
         self.log_num_actions = torch.log(torch.tensor(self.action_sampling_number, dtype=torch.float32, device=self.device))
+        self.log_2pi = torch.log(torch.tensor(2.0 * np.pi, dtype=torch.float32, device=self.device))
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -125,8 +126,7 @@ class MPO:
             with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 with torch.no_grad():
                     target_next_action_mean, target_next_action_std = self.target_actor.get_action(next_states)
-                    target_next_dist = torch.distributions.Independent(torch.distributions.Normal(target_next_action_mean, target_next_action_std), 1)
-                    sampled_next_actions = target_next_dist.rsample((self.action_sampling_number,))  # (sampled actions, batch, action_dim)
+                    sampled_next_actions = target_next_action_mean.unsqueeze(0) + target_next_action_std.unsqueeze(0) * torch.randn((self.action_sampling_number, target_next_action_mean.shape[0], target_next_action_mean.shape[1]), device=self.device)  # (sampled actions, batch, action_dim)
 
                     expanded_next_states = next_states.unsqueeze(0).expand(self.action_sampling_number, -1, -1)  # (sampled actions, batch, state_dim)
                     target_next_logits = self.critic.q_target(expanded_next_states.reshape(-1, expanded_next_states.shape[-1]), sampled_next_actions.reshape(-1, sampled_next_actions.shape[-1]))
@@ -161,10 +161,7 @@ class MPO:
 
                 with torch.no_grad():
                     target_action_mean, target_action_std = self.target_actor.get_action(stacked_states)
-                    target_dist_full = torch.distributions.Independent(torch.distributions.Normal(target_action_mean, target_action_std), 1)
-                    target_base_per_dim = torch.distributions.Normal(target_action_mean, target_action_std)  # (2 * batch, action_dim)
-
-                    sampled_actions = target_dist_full.rsample((self.action_sampling_number,))  # (sampled actions, 2 * batch, action_dim)
+                    sampled_actions = target_action_mean.unsqueeze(0) + target_action_std.unsqueeze(0) * torch.randn((self.action_sampling_number, target_action_mean.shape[0], target_action_mean.shape[1]), device=self.device)  # (sampled actions, 2 * batch, action_dim)
 
                     expanded_states = stacked_states.unsqueeze(0).expand(self.action_sampling_number, -1, -1)  # (sampled actions, 2 * batch, state_dim)
                     expanded_stacked_logits = self.critic.q_target(
@@ -202,22 +199,28 @@ class MPO:
                 alpha_mean = F.softplus(self.duals.log_alpha_mean) + self.float_epsilon
                 alpha_std = (torch.logaddexp(self.duals.log_alpha_stddev, torch.zeros_like(self.duals.log_alpha_stddev)) + self.float_epsilon)
 
-                online_mean_dist = torch.distributions.Independent(torch.distributions.Normal(online_action_mean, target_action_std), 1)
-                logprob_mean = online_mean_dist.log_prob(sampled_actions)  # (sampled actions, 2 * batch)
+                logprob_mean = torch.sum(-0.5 * ((((sampled_actions - online_action_mean) / target_action_std) ** 2) + self.log_2pi) - torch.log(target_action_std), dim=-1)  # (sampled actions, 2 * batch)
 
                 loss_pg_mean = -(logprob_mean * improvement_dist).sum(dim=0).mean()
 
-                kl_mean = torch.distributions.kl.kl_divergence(target_base_per_dim, online_mean_dist.base_dist)  # (2 * batch, action_dim)
+                kl_mean_std0 = torch.clamp(target_action_std, min=self.float_epsilon)
+                kl_mean_std1 = torch.clamp(target_action_std, min=self.float_epsilon)
+                kl_mean_var0 = kl_mean_std0 ** 2
+                kl_mean_var1 = kl_mean_std1 ** 2
+                kl_mean = torch.log(kl_mean_std1 / kl_mean_std0) + (kl_mean_var0 + (target_action_mean - online_action_mean) ** 2) / (2.0 * kl_mean_var1) - 0.5
                 mean_kl_mean = kl_mean.mean(dim=0)  # (action_dim,)
                 loss_kl_mean = torch.sum(alpha_mean.detach() * mean_kl_mean)
                 loss_alpha_mean = torch.sum(alpha_mean * (self.epsilon_parametric_mu - mean_kl_mean.detach()))
 
-                online_std_dist = torch.distributions.Independent(torch.distributions.Normal(target_action_mean, online_action_std), 1)
-                logprob_std = online_std_dist.log_prob(sampled_actions)  # (sampled actions, 2 * batch)
+                logprob_std = torch.sum(-0.5 * ((((sampled_actions - target_action_mean) / online_action_std) ** 2) + self.log_2pi) - torch.log(online_action_std), dim=-1)  # (sampled actions, 2 * batch)
 
                 loss_pg_std = -(logprob_std * improvement_dist).sum(dim=0).mean()
 
-                kl_std = torch.distributions.kl.kl_divergence(target_base_per_dim, online_std_dist.base_dist)  # (2 * batch, action_dim)
+                kl_std_std0 = torch.clamp(target_action_std, min=self.float_epsilon)
+                kl_std_std1 = torch.clamp(online_action_std, min=self.float_epsilon)
+                kl_std_var0 = kl_std_std0 ** 2
+                kl_std_var1 = kl_std_std1 ** 2
+                kl_std = torch.log(kl_std_std1 / kl_std_std0) + (kl_std_var0 + (target_action_mean - target_action_mean) ** 2) / (2.0 * kl_std_var1) - 0.5
                 mean_kl_std = kl_std.mean(dim=0)
                 loss_kl_std = torch.sum(alpha_std.detach() * mean_kl_std)
                 loss_alpha_std = torch.sum(alpha_std * (self.epsilon_parametric_sigma - mean_kl_std.detach()))

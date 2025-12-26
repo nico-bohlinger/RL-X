@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Normal, Independent
 
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
@@ -18,7 +17,6 @@ def get_policy(config, env, device):
         policy = torch.compile(Policy(env, config.algorithm.policy_init_scale, config.algorithm.policy_min_scale, config.algorithm.action_clipping, config.algorithm.action_rescaling, config.algorithm.nr_hidden_units, device, policy_observation_indices).to(device), mode=compile_mode)
         policy.forward = torch.compile(policy.forward, mode=compile_mode)
         policy.get_action = torch.compile(policy.get_action, mode=compile_mode)
-        policy.get_distribution = torch.compile(policy.get_distribution, mode=compile_mode)
         policy.sample_action = torch.compile(policy.sample_action, mode=compile_mode)
         policy.get_deterministic_action = torch.compile(policy.get_deterministic_action, mode=compile_mode)
         return policy
@@ -79,11 +77,6 @@ class Policy(nn.Module):
         return mean, std
 
 
-    def get_distribution(self, x):
-        mean, std = self.get_action(x)
-        return Independent(Normal(mean, std), 1)
-
-
     def scale_to_env(self, action):
         processed_action = action
         if self.action_clipping:
@@ -94,8 +87,8 @@ class Policy(nn.Module):
 
 
     def sample_action(self, x):
-        dist = self.get_distribution(x)
-        a = dist.rsample()
+        mean, std = self.get_action(x)
+        a = mean + std * torch.randn_like(mean)
         return a, self.scale_to_env(a)
 
 
