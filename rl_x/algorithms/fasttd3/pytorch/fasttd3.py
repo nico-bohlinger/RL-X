@@ -88,8 +88,8 @@ class FastTD3:
         self.q_optimizer = optim.AdamW(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay, fused=True)
 
         if self.anneal_learning_rate:
-            self.q_scheduler = optim.lr_scheduler.LinearLR(self.q_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
-            self.policy_scheduler = optim.lr_scheduler.LinearLR(self.policy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
+            self.q_scheduler = optim.lr_scheduler.LinearLR(self.q_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps // self.nr_envs) - self.learning_starts)
+            self.policy_scheduler = optim.lr_scheduler.LinearLR(self.policy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps // self.nr_envs) - self.learning_starts)
         
         self.observation_normalizer = get_observation_normalizer(config, self.train_env.single_observation_space.shape[0], self.device)
 
@@ -334,9 +334,9 @@ class FastTD3:
                     for key, value in optimization_metrics.items():
                         optimization_metrics_collection.setdefault(key, []).append(value)
             
-            if self.anneal_learning_rate:
-                self.q_scheduler.step()
-                self.policy_scheduler.step()
+                if self.anneal_learning_rate:
+                    self.q_scheduler.step()
+                    self.policy_scheduler.step()
 
             optimizing_end_time = time.time()
             time_metrics_collection.setdefault("time/optimizing_time", []).append(optimizing_end_time - acting_end_time)

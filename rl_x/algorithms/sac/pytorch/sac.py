@@ -75,9 +75,9 @@ class SAC:
         self.entropy_optimizer = optim.Adam([self.entropy_coefficient.log_alpha], lr=self.learning_rate, fused=True)
 
         if self.anneal_learning_rate:
-            self.q_scheduler = optim.lr_scheduler.LinearLR(self.q_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
-            self.policy_scheduler = optim.lr_scheduler.LinearLR(self.policy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
-            self.entropy_scheduler = optim.lr_scheduler.LinearLR(self.entropy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
+            self.q_scheduler = optim.lr_scheduler.LinearLR(self.q_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps - self.learning_starts) // self.nr_envs)
+            self.policy_scheduler = optim.lr_scheduler.LinearLR(self.policy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps - self.learning_starts) // self.nr_envs)
+            self.entropy_scheduler = optim.lr_scheduler.LinearLR(self.entropy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps - self.learning_starts) // self.nr_envs)
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -259,10 +259,10 @@ class SAC:
                     optimization_metrics_collection.setdefault(key, []).append(value)
                 nr_updates += 1
             
-            if self.anneal_learning_rate:
-                self.q_scheduler.step()
-                self.policy_scheduler.step()
-                self.entropy_scheduler.step()
+                if self.anneal_learning_rate:
+                    self.q_scheduler.step()
+                    self.policy_scheduler.step()
+                    self.entropy_scheduler.step()
             
             optimizing_end_time = time.time()
             time_metrics_collection.setdefault("time/optimizing_time", []).append(optimizing_end_time - acting_end_time)
