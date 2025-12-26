@@ -12,7 +12,7 @@ import wandb
 from rl_x.algorithms.mpo.pytorch.general_properties import GeneralProperties
 from rl_x.algorithms.mpo.pytorch.policy import get_policy
 from rl_x.algorithms.mpo.pytorch.critic import get_critic
-from rl_x.algorithms.mpo.pytorch.entropy_coefficient import get_entropy_coefficient
+from rl_x.algorithms.mpo.pytorch.dual_variables import DualVariables
 from rl_x.algorithms.mpo.pytorch.replay_buffer import ReplayBuffer
 
 rlx_logger = logging.getLogger("rl_x")
@@ -35,14 +35,33 @@ class MPO:
         self.bf16_mixed_precision_training = config.algorithm.bf16_mixed_precision_training
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
-        self.learning_rate = config.algorithm.learning_rate
-        self.anneal_learning_rate = config.algorithm.anneal_learning_rate
+        self.agent_learning_rate = config.algorithm.agent_learning_rate
+        self.dual_learning_rate = config.algorithm.dual_learning_rate
+        self.anneal_agent_learning_rate = config.algorithm.anneal_agent_learning_rate
+        self.anneal_dual_learning_rate = config.algorithm.anneal_dual_learning_rate
         self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
+        self.actor_update_period = config.algorithm.actor_update_period
+        self.target_network_update_period = config.algorithm.target_network_update_period
         self.tau = config.algorithm.tau
         self.gamma = config.algorithm.gamma
-        self.target_entropy = config.algorithm.target_entropy
+        self.n_steps = config.algorithm.n_steps
+        self.optimize_every_n_steps = config.algorithm.optimize_every_n_steps
+        self.action_sampling_number = config.algorithm.action_sampling_number
+        self.grad_norm_clip = config.algorithm.grad_norm_clip
+        self.epsilon_non_parametric = config.algorithm.epsilon_non_parametric
+        self.epsilon_parametric_mu = config.algorithm.epsilon_parametric_mu
+        self.epsilon_parametric_sigma = config.algorithm.epsilon_parametric_sigma
+        self.epsilon_penalty = config.algorithm.epsilon_penalty
+        self.policy_init_scale = config.algorithm.policy_init_scale
+        self.policy_min_scale = config.algorithm.policy_min_scale
+        self.v_min = config.algorithm.v_min
+        self.v_max = config.algorithm.v_max
+        self.nr_atoms = config.algorithm.nr_atoms
+        self.float_epsilon = config.algorithm.float_epsilon
+        self.min_log_temperature = config.algorithm.min_log_temperature
+        self.min_log_alpha = config.algorithm.min_log_alpha
         self.nr_hidden_units = config.algorithm.nr_hidden_units
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_frequency = config.algorithm.evaluation_frequency
@@ -67,17 +86,30 @@ class MPO:
         self.env_as_low = self.train_env.single_action_space.low
         self.env_as_high = self.train_env.single_action_space.high
 
-        self.policy = get_policy(config, self.train_env, self.device)
-        self.critic = get_critic(config, self.train_env, self.device)
-        self.entropy_coefficient = get_entropy_coefficient(config, self.train_env, self.device)
-        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, fused=True)
-        self.q_optimizer = optim.Adam(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, fused=True)
-        self.entropy_optimizer = optim.Adam([self.entropy_coefficient.log_alpha], lr=self.learning_rate, fused=True)
+        self.actor = get_policy(config, self.train_env, self.device)
+        self.target_actor = get_policy(config, self.train_env, self.device)
+        self.env_actor = get_policy(config, self.train_env, self.device)
+        self.target_actor.load_state_dict(self.actor.state_dict())
+        self.env_actor.load_state_dict(self.target_actor.state_dict())
 
-        if self.anneal_learning_rate:
-            self.q_scheduler = optim.lr_scheduler.LinearLR(self.q_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
-            self.policy_scheduler = optim.lr_scheduler.LinearLR(self.policy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
-            self.entropy_scheduler = optim.lr_scheduler.LinearLR(self.entropy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.nr_envs)
+        self.critic = get_critic(config, self.train_env, self.device)
+
+        nr_actions = int(np.prod(self.train_env.single_action_space.shape, dtype=int).item())
+        self.duals = DualVariables(config, nr_actions, self.device)
+
+        fused = self.device.type == "cuda"
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.agent_learning_rate, fused=fused)
+        self.critic_optimizer = optim.Adam(self.critic.q.parameters(), lr=self.agent_learning_rate, fused=fused)
+        self.dual_optimizer = optim.Adam(self.duals.parameters(), lr=self.dual_learning_rate, fused=fused)
+
+        if self.anneal_agent_learning_rate:
+            self.critic_scheduler = optim.lr_scheduler.LinearLR(self.critic_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps - self.learning_starts) // self.nr_envs)
+            self.actor_scheduler = optim.lr_scheduler.LinearLR(self.actor_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps - self.learning_starts) // self.nr_envs)
+        if self.anneal_dual_learning_rate:
+            self.dual_scheduler = optim.lr_scheduler.LinearLR(self.dual_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps - self.learning_starts) // self.nr_envs)
+
+        self.q_support = torch.linspace(self.v_min, self.v_max, self.nr_atoms, device=self.device)
+        self.log_num_actions = torch.log(torch.tensor(self.action_sampling_number, dtype=torch.float32, device=self.device))
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -86,84 +118,159 @@ class MPO:
     
     def train(self):
         @torch.compile(mode=self.compile_mode)
-        def policy_and_entropy_loss_fn(batch_states):
-            with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                current_actions, _, current_log_probs = self.policy.get_action(batch_states)
-
-                q1 = self.critic.q1(batch_states, current_actions)
-                q2 = self.critic.q2(batch_states, current_actions)
-
-                min_q = torch.minimum(q1, q2)
-
-                alpha = self.entropy_coefficient()
-                alpha_detach = alpha.detach()
-                policy_loss = (alpha_detach * current_log_probs - min_q).mean()  # sign switched compared to paper because paper uses gradient ascent
-
-            self.policy_optimizer.zero_grad()
-            policy_loss.backward()
-
-            policy_grad_norm = 0.0
-            for param in self.policy.parameters():
-                policy_grad_norm += param.grad.detach().data.norm(2) ** 2
-            policy_grad_norm = policy_grad_norm ** 0.5
-
-            self.policy_optimizer.step()
-
-            with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                entropy_detach = -current_log_probs.detach()
-                entropy_detach_mean = entropy_detach.mean()
-                entropy_loss = self.entropy_coefficient.loss(entropy_detach).mean()
-
-            self.entropy_optimizer.zero_grad()
-            entropy_loss.backward()
-
-            entropy_grad_norm = self.entropy_coefficient.log_alpha.grad.detach().data.norm(2) ** 2
-            
-            self.entropy_optimizer.step()
-
-            return policy_loss, entropy_loss, min_q, entropy_detach_mean, alpha_detach, policy_grad_norm, entropy_grad_norm
-        
-
-        @torch.compile(mode=self.compile_mode)
-        def critic_loss_fn(states, next_states, actions, rewards, dones):
+        def update(states, next_states, actions, rewards, dones, truncations, effective_n_steps):
+            # Critic update
             with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 with torch.no_grad():
-                    next_actions, _, next_log_probs = self.policy.get_action(next_states)
-                    next_q1_target = self.critic.q1_target(next_states, next_actions)
-                    next_q2_target = self.critic.q2_target(next_states, next_actions)
-                    min_next_q_target = torch.minimum(next_q1_target, next_q2_target)
-                    alpha = self.entropy_coefficient().detach()
-                    y = rewards.reshape(-1, 1) + self.gamma * (1 - dones.reshape(-1, 1)) * (min_next_q_target - alpha * next_log_probs)
+                    target_next_action_mean, target_next_action_std = self.target_actor.get_action(next_states)
+                    target_next_dist = torch.distributions.Independent(torch.distributions.Normal(target_next_action_mean, target_next_action_std), 1)
+                    sampled_next_actions = target_next_dist.rsample((self.action_sampling_number,))  # (sampled actions, batch, action_dim)
 
-                q1 = self.critic.q1(states, actions)
-                q2 = self.critic.q2(states, actions)
-                q1_loss = F.mse_loss(q1, y)
-                q2_loss = F.mse_loss(q2, y)
-                q_loss = (q1_loss + q2_loss) / 2
-            
-            self.q_optimizer.zero_grad()
+                    expanded_next_states = next_states.unsqueeze(0).expand(self.action_sampling_number, -1, -1)  # (sampled actions, batch, state_dim)
+                    target_next_logits = self.critic.q_target(expanded_next_states.reshape(-1, expanded_next_states.shape[-1]), sampled_next_actions.reshape(-1, sampled_next_actions.shape[-1]))
+                    target_next_logits = target_next_logits.view(self.action_sampling_number, states.shape[0], self.nr_atoms)  # (sampled actions, batch, atoms)
+                    target_next_pmf = F.softmax(target_next_logits, dim=-1).unsqueeze(-2)  # (sampled actions, batch, 1, atoms)
+
+                    bootstrap = 1.0 - (dones * (1.0 - truncations))
+                    discount = (self.gamma ** effective_n_steps) * bootstrap
+                    target_z = torch.clamp(rewards.unsqueeze(1) + discount.unsqueeze(1) * self.q_support.unsqueeze(0), self.v_min, self.v_max)  # (batch, atoms)
+
+                    abs_delta = torch.abs(
+                        target_z.unsqueeze(1) - self.q_support.unsqueeze(0).unsqueeze(2)  # (1, atoms, 1)
+                    ).unsqueeze(0)  # (1, batch, atoms, atoms)
+
+                    delta_z = self.q_support[1] - self.q_support[0]
+                    target_pmf = torch.clamp(1.0 - abs_delta / delta_z, 0.0, 1.0) * target_next_pmf  # (sampled actions, batch, atoms, atoms)
+                    target_pmf = torch.sum(target_pmf, dim=-1)  # (sampled actions, batch, atoms)
+                    target_pmf = target_pmf.mean(0)  # (batch, atoms)
+
+                current_logits = self.critic.q(states, actions)  # (batch, atoms)
+                current_q = (F.softmax(current_logits, dim=-1) * self.q_support).sum(-1)  # (batch,)
+                q_loss = -torch.sum(target_pmf * F.log_softmax(current_logits, dim=1), dim=1).mean()
+
+            self.critic_optimizer.zero_grad(set_to_none=True)
             q_loss.backward()
+            critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.q.parameters(), self.grad_norm_clip)
+            self.critic_optimizer.step()
 
-            q1_grad_norm = 0.0
-            q2_grad_norm = 0.0
-            for param in self.critic.q1.parameters():
-                q1_grad_norm += param.grad.detach().data.norm(2) ** 2
-            for param in self.critic.q2.parameters():
-                q2_grad_norm += param.grad.detach().data.norm(2) ** 2
-            critic_grad_norm = q1_grad_norm ** 0.5 + q2_grad_norm ** 0.5
+            # Actor and dual update
+            with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
+                stacked_states = torch.cat([states, next_states], dim=0)  # (2 * batch, state_dim)
 
-            self.q_optimizer.step()
+                with torch.no_grad():
+                    target_action_mean, target_action_std = self.target_actor.get_action(stacked_states)
+                    target_dist_full = torch.distributions.Independent(torch.distributions.Normal(target_action_mean, target_action_std), 1)
+                    target_base_per_dim = torch.distributions.Normal(target_action_mean, target_action_std)  # (2 * batch, action_dim)
 
-            return q_loss, critic_grad_norm
+                    sampled_actions = target_dist_full.rsample((self.action_sampling_number,))  # (sampled actions, 2 * batch, action_dim)
+
+                    expanded_states = stacked_states.unsqueeze(0).expand(self.action_sampling_number, -1, -1)  # (sampled actions, 2 * batch, state_dim)
+                    expanded_stacked_logits = self.critic.q_target(
+                        expanded_states.reshape(-1, expanded_states.shape[-1]),
+                        sampled_actions.reshape(-1, sampled_actions.shape[-1]),
+                    ).view(self.action_sampling_number, stacked_states.shape[0], self.nr_atoms)  # (sampled actions, 2 * batch, atoms)
+
+                    expanded_stacked_pmf = torch.softmax(expanded_stacked_logits, dim=-1)
+                    expanded_stacked_q = (expanded_stacked_pmf * self.q_support).sum(-1)  # (sampled actions, 2 * batch)
+                
+                eta = F.softplus(self.duals.log_eta) + self.float_epsilon
+                improvement_dist = F.softmax(expanded_stacked_q / eta.detach(), dim=0)  # (sampled actions, 2 * batch)
+
+                q_logsumexp = torch.logsumexp(expanded_stacked_q / eta, dim=0)  # (2 * batch,)
+                loss_eta = eta * (self.epsilon_non_parametric + torch.mean(q_logsumexp) - self.log_num_actions)
+
+                penalty_temperature = F.softplus(self.duals.log_penalty_temperature) + self.float_epsilon
+                diff_oob = sampled_actions - torch.clamp(sampled_actions, -1.0, 1.0)  # (sampled actions, 2 * batch, action_dim)
+                cost_oob = -torch.linalg.norm(diff_oob, dim=-1)  # (sampled actions, 2 * batch)
+                penalty_improvement = F.softmax(cost_oob / penalty_temperature.detach(), dim=0)
+
+                penalty_logsumexp = torch.logsumexp(cost_oob / penalty_temperature, dim=0)  # (2 * batch,)
+                loss_penalty_temp = penalty_temperature * (self.epsilon_penalty + torch.mean(penalty_logsumexp) - self.log_num_actions)
+
+                improvement_dist = improvement_dist + penalty_improvement
+                loss_eta = loss_eta + loss_penalty_temp
+
+                online_action_mean, online_action_std = self.actor.get_action(stacked_states)
+
+                alpha_mean = F.softplus(self.duals.log_alpha_mean) + self.float_epsilon
+                alpha_std = (torch.logaddexp(self.duals.log_alpha_stddev, torch.zeros_like(self.duals.log_alpha_stddev)) + self.float_epsilon)
+
+                online_mean_dist = torch.distributions.Independent(torch.distributions.Normal(online_action_mean, target_action_std), 1)
+                logprob_mean = online_mean_dist.log_prob(sampled_actions)  # (sampled actions, 2 * batch)
+
+                loss_pg_mean = -(logprob_mean * improvement_dist).sum(dim=0).mean()
+
+                kl_mean = torch.distributions.kl.kl_divergence(target_base_per_dim, online_mean_dist.base_dist)  # (2 * batch, action_dim)
+                mean_kl_mean = kl_mean.mean(dim=0)  # (action_dim,)
+                loss_kl_mean = torch.sum(alpha_mean.detach() * mean_kl_mean)
+                loss_alpha_mean = torch.sum(alpha_mean * (self.epsilon_parametric_mu - mean_kl_mean.detach()))
+
+                online_std_dist = torch.distributions.Independent(torch.distributions.Normal(target_action_mean, online_action_std), 1)
+                logprob_std = online_std_dist.log_prob(sampled_actions)  # (sampled actions, 2 * batch)
+
+                loss_pg_std = -(logprob_std * improvement_dist).sum(dim=0).mean()
+
+                kl_std = torch.distributions.kl.kl_divergence(target_base_per_dim, online_std_dist.base_dist)  # (2 * batch, action_dim)
+                mean_kl_std = kl_std.mean(dim=0)
+                loss_kl_std = torch.sum(alpha_std.detach() * mean_kl_std)
+                loss_alpha_std = torch.sum(alpha_std * (self.epsilon_parametric_sigma - mean_kl_std.detach()))
+
+                actor_loss = loss_pg_mean + loss_pg_std + loss_kl_mean + loss_kl_std
+            
+            self.actor_optimizer.zero_grad(set_to_none=True)
+            actor_loss.backward()
+            actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_norm_clip)
+            self.actor_optimizer.step()
+
+            dual_loss = loss_alpha_mean + loss_alpha_std + loss_eta
+            self.dual_optimizer.zero_grad(set_to_none=True)
+            dual_loss.backward()
+            dual_grad_norm = torch.nn.utils.clip_grad_norm_(self.duals.parameters(), self.grad_norm_clip)
+            self.dual_optimizer.step()
+        
+            with torch.no_grad():
+                self.duals.log_eta.data.clamp_(min=self.min_log_temperature)
+                self.duals.log_alpha_mean.data.clamp_(min=self.min_log_alpha)
+                self.duals.log_alpha_stddev.data.clamp_(min=self.min_log_alpha)
+                self.duals.log_penalty_temperature.data.clamp_(min=self.min_log_temperature)
+
+            return (
+                q_loss,
+                actor_loss,
+                dual_loss,
+                current_q.mean(),
+                eta.detach(),
+                penalty_temperature.detach(),
+                alpha_mean.detach().mean(),
+                alpha_std.detach().mean(),
+                loss_eta.detach(),
+                loss_alpha_mean.detach() + loss_alpha_std.detach(),
+                mean_kl_mean.detach().mean(),
+                mean_kl_std.detach().mean(),
+                actor_grad_norm.detach(),
+                critic_grad_norm.detach(),
+                dual_grad_norm.detach(),
+                online_action_std.detach().min(dim=1).values.mean(),
+                online_action_std.detach().max(dim=1).values.mean(),
+            )
 
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.train_env.single_observation_space.shape, self.train_env.single_action_space.shape, self.rng, self.device)
+        replay_buffer = ReplayBuffer(
+            int(max(1, self.buffer_size // self.nr_envs)),
+            self.nr_envs,
+            self.train_env.single_observation_space.shape,
+            self.train_env.single_action_space.shape,
+            self.n_steps,
+            self.gamma,
+            self.device
+        )
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
 
         state, _ = self.train_env.reset()
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -174,6 +281,7 @@ class MPO:
         steps_metrics = {}
         prev_saving_end_time = None
         logging_time_prev = None
+
         while global_step < self.total_timesteps:
             start_time = time.time()
             torch.compiler.cudagraph_mark_step_begin()
@@ -185,11 +293,10 @@ class MPO:
             dones_this_rollout = 0
             if global_step < self.learning_starts:
                 processed_action = np.array([self.train_env.single_action_space.sample() for _ in range(self.nr_envs)])
-                action = (processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0
+                action = torch.tensor((processed_action - self.env_as_low) / (self.env_as_high - self.env_as_low) * 2.0 - 1.0, dtype=torch.float32, device=self.device)
             else:
                 with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                    action, processed_action, _ = self.policy.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
-                action = action.cpu().numpy()
+                    action, processed_action = self.actor.sample_action(state)
                 processed_action = processed_action.cpu().numpy()
             
             next_state, reward, terminated, truncated, info = self.train_env.step(processed_action)
@@ -203,7 +310,14 @@ class MPO:
             for key, info_value in self.train_env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
             
-            replay_buffer.add(state, actual_next_state, action, reward, terminated)
+            state = torch.tensor(state, dtype=torch.float32, device=self.device)
+            next_state = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+            actual_next_state = torch.tensor(actual_next_state, dtype=torch.float32, device=self.device)
+            reward = torch.tensor(reward, dtype=torch.float32, device=self.device)
+            # terminated = torch.tensor(terminated, dtype=torch.float32, device=self.device)
+            done = torch.tensor(done, dtype=torch.float32, device=self.device)
+            truncated = torch.tensor(truncated, dtype=torch.float32, device=self.device)
+            replay_buffer.add(state, actual_next_state, action, reward, done, truncated)
 
             state = next_state
             global_step += self.nr_envs
@@ -214,55 +328,86 @@ class MPO:
 
 
             # What to do in this step after acting
+            iteration = global_step // self.nr_envs
             should_learning_start = global_step > self.learning_starts
-            should_optimize = should_learning_start
+            should_update_actor = should_learning_start and (iteration % self.actor_update_period == 0)
+            should_optimize = should_learning_start and (iteration % self.optimize_every_n_steps == 0)
             should_evaluate = global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1
             should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
             should_log = global_step % self.logging_frequency == 0
 
             
-            # Optimizing - Prepare batches
+            # Update actor
+            if should_update_actor:
+                self.env_actor.load_state_dict(self.target_actor.state_dict())
+
+
+            # Optimizing
             if should_optimize:
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size)
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncation, batch_effective_n_steps  = replay_buffer.sample(self.batch_size)
 
+                (
+                    q_loss,
+                    actor_loss,
+                    dual_loss,
+                    current_q_mean,
+                    eta,
+                    penalty_temperature,
+                    alpha_mean,
+                    alpha_std,
+                    dual_loss_eta,
+                    dual_loss_alpha,
+                    mean_kl_mean,
+                    mean_kl_std,
+                    actor_grad_norm,
+                    critic_grad_norm,
+                    dual_grad_norm,
+                    min_action_stddev,
+                    max_action_stddev,
+                ) = update(
+                    batch_states,
+                    batch_next_states,
+                    batch_actions,
+                    batch_rewards,
+                    batch_dones,
+                    batch_truncation,
+                    batch_effective_n_steps,
+                )
+                nr_updates += 1
 
-            # Optimizing - Q-functions, policy and entropy coefficient
-            if should_optimize:
-                # Critic loss
-                q_loss, critic_grad_norm = critic_loss_fn(batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations)
-
-                # Update critic targets
-                with torch.no_grad():
-                    for param, target_param in zip(self.critic.q1.parameters(), self.critic.q1_target.parameters()):
-                        target_param.data.mul_(1.0 - self.tau).add_(param.data, alpha=self.tau)
-                    for param, target_param in zip(self.critic.q2.parameters(), self.critic.q2_target.parameters()):
-                        target_param.data.mul_(1.0 - self.tau).add_(param.data, alpha=self.tau)
-
-                # Policy and entropy loss
-                policy_loss, entropy_loss, min_q, entropy, alpha, policy_grad_norm, entropy_grad_norm = policy_and_entropy_loss_fn(batch_states)
+                if nr_updates % self.target_network_update_period == 0:
+                    self.target_actor.load_state_dict(self.actor.state_dict())
+                    self.critic.q_target.load_state_dict(self.critic.q.state_dict())
 
                 # Create metrics
                 optimization_metrics = {
-                    "entropy/alpha": alpha.item(),
-                    "entropy/entropy": entropy.item(),
-                    "gradients/policy_grad_norm": policy_grad_norm.item(),
+                    "loss/critic_loss": q_loss.item(),
+                    "loss/actor_loss": actor_loss.item(),
+                    "loss/dual_loss": dual_loss.item(),
+                    "loss/loss_eta": dual_loss_eta.item(),
+                    "loss/loss_alpha": dual_loss_alpha.item(),
+                    "q/current_q_mean": current_q_mean.item(),
+                    "dual/eta": eta.item(),
+                    "dual/penalty_temperature": penalty_temperature.item(),
+                    "dual/alpha_mean": alpha_mean.item(),
+                    "dual/alpha_std": alpha_std.item(),
+                    "kl/mean_kl_mean": mean_kl_mean.item(),
+                    "kl/mean_kl_std": mean_kl_std.item(),
+                    "gradients/actor_grad_norm": actor_grad_norm.item(),
                     "gradients/critic_grad_norm": critic_grad_norm.item(),
-                    "gradients/entropy_grad_norm": entropy_grad_norm.item(),
-                    "loss/q_loss": q_loss.item(),
-                    "loss/policy_loss": policy_loss.item(),
-                    "loss/entropy_loss": entropy_loss.item(),
-                    "lr/learning_rate": self.learning_rate if not self.anneal_learning_rate else self.q_scheduler.get_last_lr()[0],
-                    "q_value/q_value": min_q.mean().item(),
+                    "gradients/dual_grad_norm": dual_grad_norm.item(),
+                    "policy/std_min_mean": min_action_stddev.item(),
+                    "policy/std_max_mean": max_action_stddev.item(),
                 }
 
                 for key, value in optimization_metrics.items():
                     optimization_metrics_collection.setdefault(key, []).append(value)
-                nr_updates += 1
             
-            if self.anneal_learning_rate:
-                self.q_scheduler.step()
-                self.policy_scheduler.step()
-                self.entropy_scheduler.step()
+                if self.anneal_agent_learning_rate:
+                    self.critic_scheduler.step()
+                    self.actor_scheduler.step()
+                if self.anneal_dual_learning_rate:
+                    self.dual_scheduler.step()
             
             optimizing_end_time = time.time()
             time_metrics_collection.setdefault("time/optimizing_time", []).append(optimizing_end_time - acting_end_time)
@@ -276,7 +421,7 @@ class MPO:
                 while True:
                     torch.compiler.cudagraph_mark_step_begin()
                     with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                        eval_processed_action = self.policy.get_deterministic_action(torch.tensor(eval_state, dtype=torch.float32).to(self.device))
+                        eval_processed_action = self.actor.get_deterministic_action(torch.tensor(eval_state, dtype=torch.float32).to(self.device))
                     eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(eval_processed_action.cpu().numpy())
                     eval_done = eval_terminated | eval_truncated
                     for i, single_done in enumerate(eval_done):
@@ -373,15 +518,14 @@ class MPO:
         file_path = self.save_path + "/best.model"
         save_dict = {
             "config_algorithm": self.config.algorithm,
-            "policy_state_dict": self.policy.state_dict(),
-            "q1_state_dict": self.critic.q1.state_dict(),
-            "q2_state_dict": self.critic.q2.state_dict(),
-            "q1_target_state_dict": self.critic.q1_target.state_dict(),
-            "q2_target_state_dict": self.critic.q2_target.state_dict(),
-            "log_alpha": self.entropy_coefficient.log_alpha,
-            "policy_optimizer_state_dict": self.policy_optimizer.state_dict(),
-            "q_optimizer_state_dict": self.q_optimizer.state_dict(),
-            "entropy_optimizer_state_dict": self.entropy_optimizer.state_dict(),
+            "actor_state_dict": self.actor.state_dict(),
+            "target_actor_state_dict": self.target_actor.state_dict(),
+            "critic_state_dict": self.critic.q.state_dict(),
+            "critic_target_state_dict": self.critic.q_target.state_dict(),
+            "duals_state_dict": self.duals.state_dict(),
+            "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+            "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+            "dual_optimizer_state_dict": self.dual_optimizer.state_dict(),
         }
         torch.save(save_dict, file_path)
         if self.track_wandb:
@@ -395,15 +539,15 @@ class MPO:
             if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
                 config.algorithm[key] = value
         model = MPO(config, train_env, eval_env, run_path, writer)
-        model.policy.load_state_dict(checkpoint["policy_state_dict"])
-        model.critic.q1.load_state_dict(checkpoint["q1_state_dict"])
-        model.critic.q2.load_state_dict(checkpoint["q2_state_dict"])
-        model.critic.q1_target.load_state_dict(checkpoint["q1_target_state_dict"])
-        model.critic.q2_target.load_state_dict(checkpoint["q2_target_state_dict"])
-        model.entropy_coefficient.log_alpha = checkpoint["log_alpha"]
-        model.policy_optimizer.load_state_dict(checkpoint["policy_optimizer_state_dict"])
-        model.q_optimizer.load_state_dict(checkpoint["q_optimizer_state_dict"])
-        model.entropy_optimizer.load_state_dict(checkpoint["entropy_optimizer_state_dict"])
+        model.actor.load_state_dict(checkpoint["actor_state_dict"])
+        model.target_actor.load_state_dict(checkpoint["target_actor_state_dict"])
+        model.env_actor.load_state_dict(checkpoint["target_actor_state_dict"])
+        model.critic.q.load_state_dict(checkpoint["critic_state_dict"])
+        model.critic.q_target.load_state_dict(checkpoint["critic_target_state_dict"])
+        model.duals.load_state_dict(checkpoint["duals_state_dict"])
+        model.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
+        model.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
+        model.dual_optimizer.load_state_dict(checkpoint["dual_optimizer_state_dict"])
         return model
 
     
@@ -416,7 +560,7 @@ class MPO:
             while not done:
                 torch.compiler.cudagraph_mark_step_begin()
                 with torch.no_grad(), autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
-                    processed_action = self.policy.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
+                    processed_action = self.actor.get_deterministic_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 state, reward, terminated, truncated, info = self.eval_env.step(processed_action.cpu().numpy())
                 done = terminated | truncated
                 episode_return += reward
@@ -424,19 +568,21 @@ class MPO:
 
 
     def set_train_mode(self):
-        self.policy.train()
-        self.critic.q1.train()
-        self.critic.q2.train()
-        self.critic.q1_target.train()
-        self.critic.q2_target.train()
+        self.actor.train()
+        self.target_actor.train()
+        self.env_actor.train()
+        self.critic.q.train()
+        self.critic.q_target.train()
+        self.duals.train()
 
 
     def set_eval_mode(self):
-        self.policy.eval()
-        self.critic.q1.eval()
-        self.critic.q2.eval()
-        self.critic.q1_target.eval()
-        self.critic.q2_target.eval()
+        self.actor.eval()
+        self.target_actor.eval()
+        self.env_actor.eval()
+        self.critic.q.eval()
+        self.critic.q_target.eval()
+        self.duals.eval()
 
     
     def general_properties():

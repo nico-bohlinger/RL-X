@@ -14,9 +14,6 @@ def get_critic(config, env, device):
 class Critic(nn.Module):
     def __init__(self, config, env, device):
         super().__init__()
-        self.q1 = get_q_network(config, env, device)
-        self.q2 = get_q_network(config, env, device)
-        self.q1_target = get_q_network(config, env, device)
-        self.q2_target = get_q_network(config, env, device)
-        self.q1_target.load_state_dict(self.q1.state_dict())
-        self.q2_target.load_state_dict(self.q2.state_dict())
+        self.q = get_q_network(config, env, device)
+        self.q_target = get_q_network(config, env, device)
+        self.q_target.load_state_dict(self.q.state_dict())
