@@ -84,8 +84,9 @@ class FastTD3:
         self.policy = get_policy(config, self.train_env, self.device)
         self.critic = get_critic(config, self.train_env, self.device)
 
-        self.policy_optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay, fused=True)
-        self.q_optimizer = optim.AdamW(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay, fused=True)
+        fused = self.device.type == "cuda"
+        self.policy_optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay, fused=fused)
+        self.q_optimizer = optim.AdamW(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay, fused=fused)
 
         if self.anneal_learning_rate:
             self.q_scheduler = optim.lr_scheduler.LinearLR(self.q_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps // self.nr_envs) - self.learning_starts)

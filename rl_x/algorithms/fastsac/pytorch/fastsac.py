@@ -84,9 +84,10 @@ class FastSAC:
         self.critic = get_critic(config, self.train_env, self.device)
         self.entropy_coefficient = get_entropy_coefficient(config, self.train_env, self.device)
 
-        self.policy_optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay, betas=(self.adam_beta1, self.adam_beta2), fused=True)
-        self.q_optimizer = optim.AdamW(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay, betas=(self.adam_beta1, self.adam_beta2), fused=True)
-        self.entropy_optimizer = optim.AdamW([self.entropy_coefficient.log_alpha], lr=self.learning_rate, weight_decay=self.weight_decay, betas=(self.adam_beta1, self.adam_beta2), fused=True)
+        fused = self.device.type == "cuda"
+        self.policy_optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay, betas=(self.adam_beta1, self.adam_beta2), fused=fused)
+        self.q_optimizer = optim.AdamW(list(self.critic.q1.parameters()) + list(self.critic.q2.parameters()), lr=self.learning_rate, weight_decay=self.weight_decay, betas=(self.adam_beta1, self.adam_beta2), fused=fused)
+        self.entropy_optimizer = optim.AdamW([self.entropy_coefficient.log_alpha], lr=self.learning_rate, weight_decay=self.weight_decay, betas=(self.adam_beta1, self.adam_beta2), fused=fused)
 
         if self.anneal_learning_rate:
             self.q_scheduler = optim.lr_scheduler.LinearLR(self.q_optimizer, start_factor=1.0, end_factor=0.0, total_iters=(self.total_timesteps // self.nr_envs) - self.learning_starts)
