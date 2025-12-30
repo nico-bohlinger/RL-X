@@ -345,7 +345,7 @@ class MPO:
 
             # Optimizing
             if should_optimize:
-                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncation, batch_effective_n_steps  = replay_buffer.sample(self.batch_size)
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncation, batch_effective_n_steps = replay_buffer.sample(self.batch_size)
                 batch_normalized_states = self.observation_normalizer.normalize(batch_states, update=True)
                 batch_normalized_next_states = self.observation_normalizer.normalize(batch_next_states, update=True)
 
