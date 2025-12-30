@@ -266,15 +266,7 @@ class MPO:
 
         self.set_train_mode()
 
-        replay_buffer = ReplayBuffer(
-            int(max(1, self.buffer_size // self.nr_envs)),
-            self.nr_envs,
-            self.train_env.single_observation_space.shape,
-            self.train_env.single_action_space.shape,
-            self.n_steps,
-            self.gamma,
-            self.device
-        )
+        replay_buffer = ReplayBuffer(int(max(1, self.buffer_size // self.nr_envs)), self.nr_envs, self.train_env.single_observation_space.shape, self.train_env.single_action_space.shape, self.n_steps, self.gamma,  self.device)
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
 
