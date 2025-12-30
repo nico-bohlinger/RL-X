@@ -49,7 +49,7 @@ class MPO:
         self.n_steps = config.algorithm.n_steps
         self.optimize_every_n_steps = config.algorithm.optimize_every_n_steps
         self.action_sampling_number = config.algorithm.action_sampling_number
-        self.grad_norm_clip = config.algorithm.grad_norm_clip
+        self.max_grad_norm = config.algorithm.max_grad_norm
         self.epsilon_non_parametric = config.algorithm.epsilon_non_parametric
         self.epsilon_parametric_mu = config.algorithm.epsilon_parametric_mu
         self.epsilon_parametric_sigma = config.algorithm.epsilon_parametric_sigma
@@ -152,7 +152,7 @@ class MPO:
 
             self.critic_optimizer.zero_grad()
             q_loss.backward()
-            critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.q.parameters(), self.grad_norm_clip)
+            critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.q.parameters(), self.max_grad_norm)
             self.critic_optimizer.step()
 
             # Actor and dual update
@@ -229,13 +229,13 @@ class MPO:
             
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
-            actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_norm_clip)
+            actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
             self.actor_optimizer.step()
 
             dual_loss = loss_alpha_mean + loss_alpha_std + loss_eta
             self.dual_optimizer.zero_grad()
             dual_loss.backward()
-            dual_grad_norm = torch.nn.utils.clip_grad_norm_(self.duals.parameters(), self.grad_norm_clip)
+            dual_grad_norm = torch.nn.utils.clip_grad_norm_(self.duals.parameters(), self.max_grad_norm)
             self.dual_optimizer.step()
         
             with torch.no_grad():

@@ -23,7 +23,7 @@ def get_config(algorithm_name):
     config.n_steps = 4
     config.optimize_every_n_steps = 4
     config.action_sampling_number = 20
-    config.grad_norm_clip = 40.0
+    config.max_grad_norm = 40.0
     config.epsilon_non_parametric = 0.1
     config.epsilon_parametric_mu = 0.01
     config.epsilon_parametric_sigma = 1e-6
