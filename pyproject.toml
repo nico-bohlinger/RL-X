@@ -27,8 +27,7 @@ dependencies = [
     "flax<=0.12.0",
     "orbax_checkpoint>=0.11.28",
     "optax>=0.2.6",
-    "chex>=0.1.91",
-    "tensorflow_probability>=0.25.0"
+    "chex>=0.1.91"
 ]
 
 [project.optional-dependencies]
