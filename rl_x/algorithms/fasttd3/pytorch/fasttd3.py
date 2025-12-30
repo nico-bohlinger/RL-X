@@ -249,6 +249,7 @@ class FastTD3:
         steps_metrics = {}
         prev_saving_end_time = None
         logging_time_prev = None
+        
         while global_step < self.total_timesteps:
             start_time = time.time()
             torch.compiler.cudagraph_mark_step_begin()
