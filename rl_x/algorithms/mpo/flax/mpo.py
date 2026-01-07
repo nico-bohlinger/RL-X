@@ -8,6 +8,7 @@ import tree
 import numpy as np
 import jax
 import jax.numpy as jnp
+from jax.lax import stop_gradient
 import flax
 from flax.training.train_state import TrainState
 from flax.training import orbax_utils
@@ -207,25 +208,133 @@ class MPO():
         @jax.jit
         def update(
             policy_state: PolicyTrainState, critic_state: CriticTrainState, dual_variables_state: TrainState,
-            normalized_states: np.ndarray, normalized_next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, truncations: np.ndarray, all_effective_n_steps: np.ndarray, key: jax.random.PRNGKey
+            states: np.ndarray, next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, truncations: np.ndarray, all_effective_n_steps: np.ndarray, key: jax.random.PRNGKey
         ):
-            def loss_fn(policy_params, policy_target_params, critic_params, critic_target_params, dual_variables_params, normalized_state, normalized_next_state, action, reward, done, truncation, effective_n_step, key1):
-                # TODO:
-                loss = 0.0
+            def loss_fn(policy_params, policy_target_params, critic_params, critic_target_params, dual_variables_params, state, next_state, action, reward, done, truncation, effective_n_step, key1, key2):
+                # Critic update
+                target_next_action_mean, target_next_action_std = self.policy.apply(stop_gradient(policy_target_params), next_state)
+                sampled_next_actions = target_next_action_mean[None, :] + target_next_action_std[None, :] * jax.random.normal(key1, shape=(self.action_sampling_number,) + target_next_action_mean.shape)  # (sampled actions, action_dim)
+
+                expanded_next_states = jnp.repeat(next_state[None, :], self.action_sampling_number, axis=0)  # (sampled actions, state_dim)
+                target_next_logits = self.critic.apply(stop_gradient(critic_target_params), expanded_next_states, sampled_next_actions)  # (sampled actions, nr_atoms)
+                target_next_pmf = jax.nn.softmax(target_next_logits, axis=-1)[:, None, :]  # (sampled actions, 1, nr_atoms)
+
+                bootstrap = 1.0 - (done * (1.0 - truncation))
+                discount = (self.gamma ** effective_n_step) * bootstrap
+                q_support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
+                target_z = jnp.clip(reward + discount * q_support, self.v_min, self.v_max)  # (atoms,)
+
+                abs_delta = jnp.abs(target_z[None, None, :] - q_support[None, :, None])  # (1, atoms, 1)
+
+                delta_z = q_support[1] - q_support[0]
+                target_pmf = jnp.clip(1.0 - abs_delta / delta_z, 0.0, 1.0) * target_next_pmf  # (sampled actions, atoms, atoms)
+                target_pmf = jnp.sum(target_pmf, axis=-1)  # (sampled actions, atoms)
+                target_pmf = target_pmf.mean(0)  # (atoms,)
+
+                current_logits = self.critic.apply(critic_params, state, action)  # (nr_atoms,)
+                current_q = jnp.sum(jax.nn.softmax(current_logits, axis=-1) * q_support, axis=-1)  # ()
+                q_loss = -jnp.sum(target_pmf * jax.nn.log_softmax(current_logits, axis=-1), axis=-1)
+
+                # Actor and dual update
+                stacked_states = jnp.concatenate([state[None, :], next_state[None, :]], axis=0)  # (2, state_dim)
+                target_action_mean, target_action_std = self.policy.apply(stop_gradient(policy_target_params), stacked_states)
+                sampled_actions = target_action_mean[None, :, :] + target_action_std[None, :, :] * jax.random.normal(key2, shape=(self.action_sampling_number,) + target_action_mean.shape)  # (sampled actions, 2, action_dim)
+
+                expanded_states = jnp.repeat(stacked_states[None, :, :], self.action_sampling_number, axis=0)  # (sampled actions, 2, state_dim)
+                expanded_stacked_logits = self.critic.apply(stop_gradient(critic_target_params), expanded_states.reshape((-1, expanded_states.shape[-1])), sampled_actions.reshape((-1, sampled_actions.shape[-1])))  # (sampled actions * 2, nr_atoms)
+                expanded_stacked_logits = expanded_stacked_logits.reshape((self.action_sampling_number, 2, -1))  # (sampled actions, 2, nr_atoms)
                 
-                metrics = {}
+                expanded_stacked_pmf = jax.nn.softmax(expanded_stacked_logits, axis=-1)  # (sampled actions, 2, nr_atoms)
+                expanded_stacked_q = jnp.sum(expanded_stacked_pmf * q_support, axis=-1)  # (sampled actions, 2)
+
+                log_eta, log_alpha_mean, log_alpha_stddev, log_penalty_temperature = self.dual_variables.apply(dual_variables_params)
+                eta = jax.nn.softplus(log_eta) + self.float_epsilon
+                improvement_dist = jax.nn.softmax(expanded_stacked_q / stop_gradient(eta), axis=0)  # (sampled actions, 2)
+
+                q_logsumexp = jax.scipy.special.logsumexp(expanded_stacked_q / eta, axis=0)  # (2,)
+                loss_eta = eta * (self.epsilon_non_parametric + jnp.mean(q_logsumexp) - jnp.log(self.action_sampling_number))
+
+                if self.action_clipping:
+                    penalty_temperature = jax.nn.softplus(log_penalty_temperature) + self.float_epsilon
+                    diff_oob = sampled_actions - jnp.clip(sampled_actions, -1.0, 1.0)  # (sampled actions, 2, action_dim)
+                    cost_oob = -jnp.linalg.norm(diff_oob, axis=-1)  # (sampled actions, 2)
+                    penalty_improvement = jax.nn.softmax(cost_oob / stop_gradient(penalty_temperature), axis=0)
+
+                    penalty_logsumexp = jax.scipy.special.logsumexp(cost_oob / penalty_temperature, axis=0)  # (2,)
+                    loss_penalty_temp = penalty_temperature * (self.epsilon_penalty + jnp.mean(penalty_logsumexp) - jnp.log(self.action_sampling_number))
+
+                    improvement_dist = improvement_dist + penalty_improvement
+                    loss_eta = loss_eta + loss_penalty_temp
+
+                    penalty_temperature_detached = stop_gradient(penalty_temperature)
+                else:
+                    penalty_temperature_detached = jnp.array(0.0, dtype=jnp.float32)
+
+                online_action_mean, online_action_std =  self.policy.apply(policy_params, stacked_states)
+
+                alpha_mean = jax.nn.softplus(log_alpha_mean) + self.float_epsilon
+                alpha_std = (jnp.logaddexp(log_alpha_stddev, jnp.zeros_like(log_alpha_stddev)) + self.float_epsilon)
+
+                logprob_mean = jnp.sum(-0.5 * ((((sampled_actions - online_action_mean) / target_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(target_action_std), axis=-1)  # (sampled actions, 2 * batch)
+
+                loss_pg_mean = -(logprob_mean * improvement_dist).sum(axis=0).mean()
+
+                kl_mean_std0 = jnp.clip(target_action_std, min=self.float_epsilon)
+                kl_mean_std1 = jnp.clip(target_action_std, min=self.float_epsilon)
+                kl_mean_var0 = kl_mean_std0 ** 2
+                kl_mean_var1 = kl_mean_std1 ** 2
+                kl_mean = jnp.log(kl_mean_std1 / kl_mean_std0) + (kl_mean_var0 + (target_action_mean - online_action_mean) ** 2) / (2.0 * kl_mean_var1) - 0.5
+                mean_kl_mean = kl_mean.mean(axis=0)  # (action_dim,)
+                loss_kl_mean = jnp.sum(stop_gradient(alpha_mean) * mean_kl_mean)
+                loss_alpha_mean = jnp.sum(alpha_mean * (self.epsilon_parametric_mu - stop_gradient(mean_kl_mean)))
+
+                logprob_std = jnp.sum(-0.5 * ((((sampled_actions - target_action_mean) / online_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(online_action_std), axis=-1)  # (sampled actions, 2 * batch)
+
+                loss_pg_std = -(logprob_std * improvement_dist).sum(axis=0).mean()
+
+                kl_std_std0 = jnp.clip(target_action_std, min=self.float_epsilon)
+                kl_std_std1 = jnp.clip(online_action_std, min=self.float_epsilon)
+                kl_std_var0 = kl_std_std0 ** 2
+                kl_std_var1 = kl_std_std1 ** 2
+                kl_std = jnp.log(kl_std_std1 / kl_std_std0) + (kl_std_var0 + (target_action_mean - target_action_mean) ** 2) / (2.0 * kl_std_var1) - 0.5
+                mean_kl_std = kl_std.mean(axis=0)
+                loss_kl_std = jnp.sum(stop_gradient(alpha_std) * mean_kl_std)
+                loss_alpha_std = jnp.sum(alpha_std * (self.epsilon_parametric_sigma - stop_gradient(mean_kl_std)))
+
+                actor_loss = loss_pg_mean + loss_pg_std + loss_kl_mean + loss_kl_std
+                dual_loss = loss_alpha_mean + loss_alpha_std + loss_eta
+                loss = q_loss + actor_loss + dual_loss
+                
+                # Create metrics
+                metrics = {
+                    "loss/critic_loss": q_loss,
+                    "loss/actor_loss": actor_loss,
+                    "loss/dual_loss": dual_loss,
+                    "q/current_q_mean": current_q,
+                    "dual/eta": eta,
+                    "dual/penalty_temperature": penalty_temperature_detached,
+                    "dual/alpha_mean": alpha_mean.mean(),
+                    "dual/alpha_std": alpha_std.mean(),
+                    "loss/loss_eta": loss_eta,
+                    "loss/loss_alpha": loss_alpha_mean + loss_alpha_std,
+                    "kl/mean_kl_mean": mean_kl_mean.mean(),
+                    "kl/mean_kl_std": mean_kl_std.mean(),
+                    "policy/std_min_mean": jnp.min(online_action_std, axis=1).mean(),
+                    "policy/std_max_mean": jnp.max(online_action_std, axis=1).mean(),
+                }
 
                 return loss, metrics
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, None, None, 0, 0, 0, 0, 0, 0, 0, 0))
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, None, None, 0, 0, 0, 0, 0, 0, 0, 0, 0))
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_loss_fn = lambda *a, **k: jax.tree_util.tree_map(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_loss_fn, argnums=(0, 2, 4), has_aux=True)
 
-            key, subkeys = jax.random.split(key, 2)
-            per_sample_keys = jax.random.split(subkeys, normalized_states.shape[0])
+            key, subkeys1, subkeys2 = jax.random.split(key, 3)
+            per_sample_keys1 = jax.random.split(subkeys1, states.shape[0])
+            per_sample_keys2 = jax.random.split(subkeys2, states.shape[0])
 
-            (loss, metrics), (policy_grads, critic_grads, dual_variables_grads) = grad_loss_fn(policy_state.params, policy_state.target_params, critic_state.params, critic_state.target_params, dual_variables_state.params, normalized_states, normalized_next_states, actions, rewards, dones, truncations, all_effective_n_steps, per_sample_keys)
+            (loss, metrics), (policy_grads, critic_grads, dual_variables_grads) = grad_loss_fn(policy_state.params, policy_state.target_params, critic_state.params, critic_state.target_params, dual_variables_state.params, states, next_states, actions, rewards, dones, truncations, all_effective_n_steps, per_sample_keys1, per_sample_keys2)
             
             policy_state = policy_state.apply_gradients(grads=policy_grads)
             critic_state = critic_state.apply_gradients(grads=critic_grads)
