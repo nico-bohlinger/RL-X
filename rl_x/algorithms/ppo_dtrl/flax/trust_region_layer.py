@@ -10,8 +10,8 @@ def dual(eta_omega, pred_std, target_std, target_logdet, eps, omega_offset):
     """
 
     eta = jnp.where(eta_omega[0] > 0.0, eta_omega[0], 0.0)
-    new_std = jnp.sqrt((eta + omega_offset) / jnp.clip((eta/(target_std**2)) + (1/pred_std)**2, a_min=1e-8))
-    new_std = jnp.clip(jnp.nan_to_num(new_std), a_min=1e-8)
+    new_std = jnp.sqrt((eta + omega_offset) / jnp.clip((eta/(target_std**2)) + (1/pred_std)**2, min=1e-8))
+    new_std = jnp.clip(jnp.nan_to_num(new_std), min=1e-8)
     new_logdet = -2.0 * jnp.sum(jnp.log(1/new_std))
 
     dual_val = eta * eps - 0.5 * eta * target_logdet
@@ -36,7 +36,7 @@ def kl_cov_proj(pred_std: jnp.ndarray, target_std: jnp.ndarray, eps: float, max_
     eta_init: initial guess for L-BFGS
     """
 
-    target_logdet = -2.0 * jnp.sum(jnp.log(jnp.clip(1/target_std, a_min=1e-8)))
+    target_logdet = -2.0 * jnp.sum(jnp.log(jnp.clip(1/target_std, min=1e-8)))
 
     def objective(eta_omega):
         val, grad = dual(eta_omega, pred_std, target_std, target_logdet, eps, omega_offset)
@@ -74,8 +74,8 @@ def kl_cov_proj(pred_std: jnp.ndarray, target_std: jnp.ndarray, eps: float, max_
     params, _ = opt_bfgs(init_params, lambda x: objective(x)[0], lbfgs, max_iter=max_eval, tol=1e-9)
     eta_opt = params[0]
 
-    projected_cov = (eta_opt + omega_offset) / jnp.clip(eta_opt/(target_std**2) + (1.0/pred_std)**2, a_min=1e-8)
-    projected_cov = jnp.clip(jnp.nan_to_num(projected_cov), a_min=1e-16)
+    projected_cov = (eta_opt + omega_offset) / jnp.clip(eta_opt/(target_std**2) + (1.0/pred_std)**2, min=1e-8)
+    projected_cov = jnp.clip(jnp.nan_to_num(projected_cov), min=1e-16)
     return projected_cov, eta_opt
 
 
@@ -129,7 +129,7 @@ def kl_cov_proj_backward(d_proj: jnp.ndarray,
     d_eta = jnp.sum(d_Q * dQ_deta)
     d_Q_pred = d_eta * deta_dQ_pred + d_Q / eo
     d_cov_pred = - (1/pred_std**2) * d_Q_pred * (1/pred_std**2)  
-    d_cov_pred = jnp.clip(jnp.nan_to_num(d_cov_pred), a_min=1e-20)
+    d_cov_pred = jnp.clip(jnp.nan_to_num(d_cov_pred), min=1e-20)
     d_pred_std = 2.0 * pred_std * d_cov_pred
 
     return d_pred_std
