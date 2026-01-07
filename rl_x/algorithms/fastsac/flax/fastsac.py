@@ -330,6 +330,7 @@ class FastSAC:
         steps_metrics = {}
         prev_saving_end_time = None
         logging_time_prev = None
+        
         while global_step < self.total_timesteps:
             start_time = time.time()
             if logging_time_prev:
