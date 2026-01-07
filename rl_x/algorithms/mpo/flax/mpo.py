@@ -200,6 +200,45 @@ class MPO():
         
 
         @jax.jit
+        def update_target_networks(policy_state: PolicyTrainState, critic_state: CriticTrainState):
+            return policy_state.replace(target_params=policy_state.params), critic_state.replace(target_params=critic_state.params)
+        
+
+        @jax.jit
+        def update(
+            policy_state: PolicyTrainState, critic_state: CriticTrainState, dual_variables_state: TrainState,
+            normalized_states: np.ndarray, normalized_next_states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, truncations: np.ndarray, all_effective_n_steps: np.ndarray, key: jax.random.PRNGKey
+        ):
+            def loss_fn(policy_params, policy_target_params, critic_params, critic_target_params, dual_variables_params, normalized_state, normalized_next_state, action, reward, done, truncation, effective_n_step, key1):
+                # TODO:
+                loss = 0.0
+                
+                metrics = {}
+
+                return loss, metrics
+
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, None, None, None, 0, 0, 0, 0, 0, 0, 0, 0))
+            safe_mean = lambda x: jnp.mean(x) if x is not None else x
+            mean_loss_fn = lambda *a, **k: jax.tree_util.tree_map(safe_mean, vmap_loss_fn(*a, **k))
+            grad_loss_fn = jax.value_and_grad(mean_loss_fn, argnums=(0, 2, 4), has_aux=True)
+
+            key, subkeys = jax.random.split(key, 2)
+            per_sample_keys = jax.random.split(subkeys, normalized_states.shape[0])
+
+            (loss, metrics), (policy_grads, critic_grads, dual_variables_grads) = grad_loss_fn(policy_state.params, policy_state.target_params, critic_state.params, critic_state.target_params, dual_variables_state.params, normalized_states, normalized_next_states, actions, rewards, dones, truncations, all_effective_n_steps, per_sample_keys)
+            
+            policy_state = policy_state.apply_gradients(grads=policy_grads)
+            critic_state = critic_state.apply_gradients(grads=critic_grads)
+            dual_variables_state = dual_variables_state.apply_gradients(grads=dual_variables_grads)
+            
+            metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_grads)
+            metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_grads)
+            metrics["gradients/dual_variables_grad_norm"] = optax.global_norm(dual_variables_grads)
+
+            return policy_state, critic_state, dual_variables_state, metrics, key
+
+
+        @jax.jit
         def get_deterministic_action(policy_state: PolicyTrainState, state: np.ndarray):
             action_mean, _ = self.policy.apply(policy_state.params, state)
             return self.get_processed_action(action_mean)
@@ -276,10 +315,39 @@ class MPO():
                 self.policy_state = update_actor(self.policy_state)
 
 
-            # TODO:
             # Optimizing
             if should_optimize:
+                batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones, batch_truncation, batch_effective_n_steps = replay_buffer.sample(self.batch_size)
+                if self.enable_observation_normalization:
+                    combined_states = np.concatenate([batch_states, batch_next_states], axis=0)
+                    self._normalize_observations(combined_states, update=True, no_normalize_after_update=True)
+                batch_normalized_states = self._normalize_observations(batch_states, update=False)
+                batch_normalized_next_states = self._normalize_observations(batch_next_states, update=False)
+
+                self.policy_state, self.critic_state, self.dual_variables_state, optimization_metrics, self.key = update(
+                    self.policy_state,
+                    self.critic_state,
+                    self.dual_variables_state,
+                    batch_normalized_states,
+                    batch_normalized_next_states,
+                    batch_actions,
+                    batch_rewards,
+                    batch_dones,
+                    batch_truncation,
+                    batch_effective_n_steps,
+                    self.key
+                )
                 nr_updates += 1
+
+                if nr_updates % self.target_network_update_period == 0:
+                    self.policy_state, self.critic_state = update_target_networks(self.policy_state, self.critic_state)
+
+                # Create metrics
+                optimization_metrics = {
+                }
+
+                for key, value in optimization_metrics.items():
+                    optimization_metrics_collection.setdefault(key, []).append(value)
 
             optimizing_end_time = time.time()
             time_metrics_collection.setdefault("time/optimizing_time", []).append(optimizing_end_time - acting_end_time)
