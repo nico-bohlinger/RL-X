@@ -2,8 +2,11 @@ from typing import Sequence
 import numpy as np
 import jax
 import jax.numpy as jnp
+from jax.nn.initializers import variance_scaling
+from jax import random
+from jax._src import dtypes
 import flax.linen as nn
-from flax.linen.initializers import constant
+from flax.linen.initializers import constant, normal
 
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
@@ -14,24 +17,31 @@ def get_policy(config, env):
     observation_space_type = env.general_properties.observation_space_type
     policy_observation_indices = getattr(env, "policy_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
-    env_as_scale = env.single_action_space.scale
-    env_as_center = env.single_action_space.center
-    env_as_low = env.single_action_space.low
-    env_as_high = env.single_action_space.high
-    range_to_lower = jnp.abs(env_as_low - env_as_center)
-    range_to_upper = jnp.abs(env_as_high - env_as_center)
-    max_range = jnp.maximum(range_to_lower, range_to_upper)
-    action_scale = max_range / env_as_scale
-
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return Policy(env.single_action_space.shape, config.algorithm.log_std_min, config.algorithm.log_std_max, action_scale, policy_observation_indices)
+        if config.policy_network_type == "fastsac":
+            policy = FastSACPolicy(env.single_action_space.shape, config.algorithm.policy_init_scale, config.algorithm.policy_min_scale, policy_observation_indices)
+        elif config.policy_network_type == "fasttd3":
+            policy = FastTD3Policy(env.single_action_space.shape, config.algorithm.policy_init_scale, config.algorithm.policy_min_scale, policy_observation_indices)
+        elif config.policy_network_type == "mpo":
+            policy = MPOPolicy(env.single_action_space.shape, config.algorithm.policy_init_scale, config.algorithm.policy_min_scale, policy_observation_indices)
 
+        env_as_scale = env.single_action_space.scale
+        env_as_center = env.single_action_space.center
+        env_as_low = env.single_action_space.low
+        env_as_high = env.single_action_space.high
+        range_to_lower = jnp.abs(env_as_low - env_as_center)
+        range_to_upper = jnp.abs(env_as_high - env_as_center)
+        max_range = jnp.maximum(range_to_lower, range_to_upper)
+        action_scale = max_range / env_as_scale
 
-class Policy(nn.Module):
+        fn = ...
+
+        return (policy, fn)
+
+class FastSACPolicy(nn.Module):
     as_shape: Sequence[int]
-    log_std_min: float
-    log_std_max: float
-    action_scale: jnp.ndarray
+    policy_init_scale: float
+    policy_min_scale: float
     policy_observation_indices: Sequence[int]
 
     @nn.compact
@@ -48,36 +58,76 @@ class Policy(nn.Module):
         torso = nn.silu(torso)
 
         mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=constant(0.0), bias_init=constant(0.0))(torso)
-        log_std = nn.Dense(np.prod(self.as_shape).item(), kernel_init=constant(0.0), bias_init=constant(0.0))(torso)
-        log_std = jnp.tanh(log_std)
-        log_std = self.log_std_min + 0.5 * (self.log_std_max - self.log_std_min) * (log_std + 1)
 
-        return mean, log_std
-    
+        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=constant(0.0), bias_init=constant(0.0))(x)
+        stddev = self.policy_min_scale + (jax.nn.softplus(stddev) * self.policy_init_scale / jax.nn.softplus(0.0))
 
-    def get_action(self, mean, log_std, key):
-        std = jnp.exp(log_std)
-        action_raw = mean + std * jax.random.normal(key, shape=mean.shape)
-        action_tanh = jnp.tanh(action_raw)
-        action_scaled = action_tanh * self.action_scale
-        return action_scaled
-    
+        return mean, stddev
 
-    def get_deterministic_action(self, mean):
-        action_tanh = jnp.tanh(mean)
-        action_scaled = action_tanh * self.action_scale
-        return action_scaled
-    
 
-    def get_action_and_log_prob(self, mean, log_std, key):
-        std = jnp.exp(log_std)
-        action_raw = mean + std * jax.random.normal(key, shape=mean.shape)
-        action_tanh = jnp.tanh(action_raw)
-        action_scaled = action_tanh * self.action_scale
+class FastTD3Policy(nn.Module):
+    as_shape: Sequence[int]
+    policy_init_scale: float
+    policy_min_scale: float
+    policy_observation_indices: Sequence[int]
 
-        log_prob = -0.5 * ((action_raw - mean) / std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - log_std
-        log_prob -= jnp.log(1.0 - action_tanh ** 2 + 1e-6)
-        log_prob -= jnp.log(self.action_scale + 1e-6)
-        log_prob = jnp.sum(log_prob, axis=-1)
+    @nn.compact
+    def __call__(self, x):
+        x = x[..., self.policy_observation_indices]
+        policy_mean = nn.Dense(512)(x)
+        policy_mean = nn.relu(policy_mean)
+        policy_mean = nn.Dense(256)(policy_mean)
+        policy_mean = nn.relu(policy_mean)
+        policy_mean = nn.Dense(128)(policy_mean)
+        policy_mean = nn.relu(policy_mean)
 
-        return action_scaled, log_prob
+        mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=normal(0.01), bias_init=constant(0.0))(policy_mean)
+
+        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=constant(0.0), bias_init=constant(0.0))(x)
+        stddev = self.policy_min_scale + (jax.nn.softplus(stddev) * self.policy_init_scale / jax.nn.softplus(0.0))
+
+        return mean, stddev
+
+
+def uniform_scaling(scale, dtype = jnp.float_):
+    def init(key, shape, dtype=dtype):
+        dtype = dtypes.canonicalize_dtype(dtype)
+        fan_in = shape[0]
+        max_val = jnp.sqrt(3 / fan_in) * scale
+        return random.uniform(key, shape, dtype, -max_val, max_val)
+    return init
+
+
+class MPOPolicy(nn.Module):
+    as_shape: Sequence[int]
+    policy_init_scale: float
+    policy_min_scale: float
+    policy_observation_indices: Sequence[int]
+
+    @nn.compact
+    def __call__(self, x):
+        x = x[..., self.policy_observation_indices]
+        x = nn.Dense(512, kernel_init=uniform_scaling(0.333))(x)
+        x = nn.LayerNorm()(x)
+        x = nn.tanh(x)
+        x = nn.Dense(256, kernel_init=uniform_scaling(0.333))(x)
+        x = nn.elu(x)
+        x = nn.Dense(128, kernel_init=uniform_scaling(0.333))(x)
+        x = nn.elu(x)
+
+        mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal"))(x)
+
+        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal"))(x)
+        stddev = self.policy_min_scale + (jax.nn.softplus(stddev) * self.policy_init_scale / jax.nn.softplus(0.0))
+
+        return mean, stddev
+
+
+def get_processed_action_function(action_clipping, action_rescaling, env_as_low, env_as_high):
+    def get_clipped_and_scaled_action(action, env_as_low=env_as_low, env_as_high=env_as_high):
+        if action_clipping:
+            action = jnp.clip(action, -1, 1)
+        if action_rescaling:
+            action = env_as_low + (0.5 * (action + 1.0) * (env_as_high - env_as_low))
+        return action
+    return jax.jit(get_clipped_and_scaled_action)

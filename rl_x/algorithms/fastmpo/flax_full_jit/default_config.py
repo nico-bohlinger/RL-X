@@ -9,6 +9,12 @@ def get_config(algorithm_name):
     config.device = "gpu"  # cpu, gpu
     config.nr_parallel_seeds = 1
     config.total_timesteps = 2000158720
+    config.critic_network_type = "fastsac"  # fastsac, fasttd3, mpo
+    config.dual_critic = False
+    config.policy_network_type = "fastsac"  # fastsac, fasttd3, mpo
+
+
+
     config.learning_rate = 3e-4
     config.anneal_learning_rate = False
     config.weight_decay = 0.001
