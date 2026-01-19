@@ -12,11 +12,15 @@ def get_config(algorithm_name):
     config.critic_network_type = "fastsac"  # fastsac, fasttd3, mpo
     config.dual_critic = False
     config.policy_network_type = "fastsac"  # fastsac, fasttd3, mpo
+    config.action_clipping = True
+    config.action_rescaling = "fastsac"  # "", "fastsac", "normal"
+    config.policy_learning_rate = 3e-4
+    config.critic_learning_rate = 3e-4
+    config.dual_learning_rate = 1e-2
+    config.anneal_policy_learning_rate = False
+    config.anneal_critic_learning_rate = False
+    config.anneal_dual_learning_rate = False
 
-
-
-    config.learning_rate = 3e-4
-    config.anneal_learning_rate = False
     config.weight_decay = 0.001
     config.adam_beta1 = 0.9
     config.adam_beta2 = 0.95

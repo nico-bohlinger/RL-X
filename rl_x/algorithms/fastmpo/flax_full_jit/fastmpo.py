@@ -18,7 +18,7 @@ import wandb
 from rl_x.algorithms.fastmpo.flax_full_jit.general_properties import GeneralProperties
 from rl_x.algorithms.fastmpo.flax_full_jit.policy import get_policy
 from rl_x.algorithms.fastmpo.flax_full_jit.critic import get_critic
-from rl_x.algorithms.fastmpo.flax_full_jit.entropy_coefficient import EntropyCoefficient
+from rl_x.algorithms.fastmpo.flax_full_jit.dual_variables import DualVariables
 from rl_x.algorithms.fastmpo.flax_full_jit.rl_train_state import RLTrainState
 
 rlx_logger = logging.getLogger("rl_x")
@@ -41,8 +41,12 @@ class FastMPO:
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.render = config.environment.render
-        self.learning_rate = config.algorithm.learning_rate
-        self.anneal_learning_rate = config.algorithm.anneal_learning_rate
+        self.policy_learning_rate = config.algorithm.policy_learning_rate
+        self.critic_learning_rate = config.algorithm.critic_learning_rate
+        self.dual_learning_rate = config.algorithm.dual_learning_rate
+        self.anneal_policy_learning_rate = config.algorithm.anneal_policy_learning_rate
+        self.anneal_critic_learning_rate = config.algorithm.anneal_critic_learning_rate
+        self.anneal_dual_learning_rate = config.algorithm.anneal_dual_learning_rate
         self.weight_decay = config.algorithm.weight_decay
         self.adam_beta1 = config.algorithm.adam_beta1
         self.adam_beta2 = config.algorithm.adam_beta2
@@ -94,29 +98,42 @@ class FastMPO:
         rlx_logger.info(f"Using device: {jax.default_backend()}")
 
         self.key = jax.random.PRNGKey(self.seed)
-        self.key, policy_key, critic_key, entropy_key, reset_key = jax.random.split(self.key, 5)
+        self.key, policy_key, critic_key, dual_key, reset_key = jax.random.split(self.key, 5)
         reset_key = jax.random.split(reset_key, self.nr_envs)
 
-        self.policy = get_policy(self.config, self.train_env)
+        self.policy, self.get_processed_action = get_policy(self.config, self.train_env)
         self.critic = get_critic(self.config, self.train_env)
-        
-        if self.target_entropy == "auto":
-            self.target_entropy = -np.prod(self.train_env.single_action_space.shape).item()
-        else:
-            self.target_entropy = float(self.target_entropy)
-        self.entropy_coefficient = EntropyCoefficient(self.alpha_init)
+        nr_actions = np.prod(self.train_env.single_action_space.shape).item()
+        self.dual_variables = DualVariables(nr_actions, self.init_log_eta, self.init_log_alpha_mean, self.init_log_alpha_stddev, self.init_log_penalty_temperature)
 
-        def linear_schedule(count):
+        def policy_linear_schedule(count):
             step = count * self.nr_envs
             total_steps = self.total_timesteps
             fraction = 1.0 - (step / total_steps)
-            return self.learning_rate * fraction
+            return self.policy_learning_rate * fraction
         
-        self.q_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
-        self.policy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
-        self.entropy_learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
+        def critic_linear_schedule(count):
+            step = count * self.nr_envs
+            total_steps = self.total_timesteps
+            fraction = 1.0 - (step / total_steps)
+            return self.critic_learning_rate * fraction
+        
+        def dual_linear_schedule(count):
+            step = count * self.nr_envs
+            total_steps = self.total_timesteps
+            fraction = 1.0 - (step / total_steps)
+            return self.dual_learning_rate * fraction
+        
+        self.q_learning_rate = policy_linear_schedule if self.anneal_policy_learning_rate else self.policy_learning_rate
+        self.policy_learning_rate = critic_linear_schedule if self.anneal_critic_learning_rate else self.critic_learning_rate
+        self.dual_learning_rate = dual_linear_schedule if self.anneal_dual_learning_rate else self.dual_learning_rate
 
         env_state = self.train_env.reset(reset_key, False)
+
+        # TODO:
+
+
+
 
         if self.max_grad_norm != -1.0:
             policy_tx = optax.chain(

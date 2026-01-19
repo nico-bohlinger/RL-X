@@ -34,9 +34,10 @@ def get_policy(config, env):
         max_range = jnp.maximum(range_to_lower, range_to_upper)
         action_scale = max_range / env_as_scale
 
-        fn = ...
+        fn = get_processed_action_function(config.algorithm.action_clipping, config.algorithm.action_rescaling, env_as_low, env_as_high, action_scale)
 
         return (policy, fn)
+
 
 class FastSACPolicy(nn.Module):
     as_shape: Sequence[int]
@@ -59,7 +60,7 @@ class FastSACPolicy(nn.Module):
 
         mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=constant(0.0), bias_init=constant(0.0))(torso)
 
-        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=constant(0.0), bias_init=constant(0.0))(x)
+        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=constant(0.0), bias_init=constant(0.0))(torso)
         stddev = self.policy_min_scale + (jax.nn.softplus(stddev) * self.policy_init_scale / jax.nn.softplus(0.0))
 
         return mean, stddev
@@ -74,16 +75,16 @@ class FastTD3Policy(nn.Module):
     @nn.compact
     def __call__(self, x):
         x = x[..., self.policy_observation_indices]
-        policy_mean = nn.Dense(512)(x)
-        policy_mean = nn.relu(policy_mean)
-        policy_mean = nn.Dense(256)(policy_mean)
-        policy_mean = nn.relu(policy_mean)
-        policy_mean = nn.Dense(128)(policy_mean)
-        policy_mean = nn.relu(policy_mean)
+        torso = nn.Dense(512)(x)
+        torso = nn.relu(torso)
+        torso = nn.Dense(256)(torso)
+        torso = nn.relu(torso)
+        torso = nn.Dense(128)(torso)
+        torso = nn.relu(torso)
 
-        mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=normal(0.01), bias_init=constant(0.0))(policy_mean)
+        mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=normal(0.01), bias_init=constant(0.0))(torso)
 
-        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=constant(0.0), bias_init=constant(0.0))(x)
+        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=constant(0.0), bias_init=constant(0.0))(torso)
         stddev = self.policy_min_scale + (jax.nn.softplus(stddev) * self.policy_init_scale / jax.nn.softplus(0.0))
 
         return mean, stddev
@@ -106,28 +107,30 @@ class MPOPolicy(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        x = x[..., self.policy_observation_indices]
-        x = nn.Dense(512, kernel_init=uniform_scaling(0.333))(x)
-        x = nn.LayerNorm()(x)
-        x = nn.tanh(x)
-        x = nn.Dense(256, kernel_init=uniform_scaling(0.333))(x)
-        x = nn.elu(x)
-        x = nn.Dense(128, kernel_init=uniform_scaling(0.333))(x)
-        x = nn.elu(x)
+        torso = x[..., self.policy_observation_indices]
+        torso = nn.Dense(512, kernel_init=uniform_scaling(0.333))(torso)
+        torso = nn.LayerNorm()(torso)
+        torso = nn.tanh(torso)
+        torso = nn.Dense(256, kernel_init=uniform_scaling(0.333))(torso)
+        torso = nn.elu(torso)
+        torso = nn.Dense(128, kernel_init=uniform_scaling(0.333))(torso)
+        torso = nn.elu(torso)
 
-        mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal"))(x)
+        mean = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal"))(torso)
 
-        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal"))(x)
+        stddev = nn.Dense(np.prod(self.as_shape).item(), kernel_init=variance_scaling(1e-4, "fan_in", "truncated_normal"))(torso)
         stddev = self.policy_min_scale + (jax.nn.softplus(stddev) * self.policy_init_scale / jax.nn.softplus(0.0))
 
         return mean, stddev
 
 
-def get_processed_action_function(action_clipping, action_rescaling, env_as_low, env_as_high):
+def get_processed_action_function(action_clipping, action_rescaling, env_as_low, env_as_high, action_scale):
     def get_clipped_and_scaled_action(action, env_as_low=env_as_low, env_as_high=env_as_high):
         if action_clipping:
             action = jnp.clip(action, -1, 1)
-        if action_rescaling:
+        if action_rescaling == "normal":
             action = env_as_low + (0.5 * (action + 1.0) * (env_as_high - env_as_low))
+        elif action_rescaling == "fastsac":
+            action = action * action_scale
         return action
     return jax.jit(get_clipped_and_scaled_action)
