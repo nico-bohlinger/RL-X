@@ -211,7 +211,7 @@ class FastSAC:
                 l_mask = is_int & (l > 0)
                 u_mask = is_int & (l == 0)
 
-                next_dist = jax.nn.softmax(self.critic.apply(critic_state.target_params, next_state, next_action))
+                next_dist = jax.nn.softmax(self.critic.apply(critic_state.target_params, normalized_next_state, next_action))
                 proj_dist = jnp.zeros_like(next_dist)
                 wt_l = (u.astype(jnp.float32) - b)
                 wt_u = (b - l.astype(jnp.float32))
