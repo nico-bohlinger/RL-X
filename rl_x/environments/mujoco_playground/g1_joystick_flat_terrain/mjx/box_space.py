@@ -18,4 +18,4 @@ class BoxSpace:
         self.scale = scale if scale is not None else jax.numpy.ones(shape, dtype=dtype)
 
     def sample(self, rng):
-        return jax.random.uniform(rng, shape=self.shape, minval=self.low, maxval=self.high).astype(self.dtype)
+        return jax.random.uniform(rng, shape=self.shape, minval=self.low, maxval=self.high).astype(self.dtype) / self.scale
