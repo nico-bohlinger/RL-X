@@ -2,12 +2,13 @@
 
 <mujoco model="ant">
   <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
-  <option timestep="0.01" solver="Newton" iterations="1" ls_iterations="4">
+  <option timestep="0.005" solver="Newton" iterations="1" ls_iterations="4">
     <flag eulerdamp="disable"/>
   </option>
   <default>
-    <joint armature="1" damping="1" limited="true"/>
+    <joint armature="0.02" damping="0.1" frictionloss="0.1"/>
     <geom contype="0" conaffinity="0" condim="3" density="5.0" friction="1 0.5 0.5" margin="0.01" rgba="0.8 0.6 0.4 1"/>
+    <position forcelimited="true" kp="20" kv="0.5"/>
   </default>
   <asset>
     <texture builtin="flat" height="1278" mark="cross" markrgb="1 1 1" name="texgeom" random="0.01" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" type="cube" width="127"/>
@@ -75,16 +76,16 @@
     <pair geom1="fourth_ankle_geom" geom2="floor"/>
   </contact>
   <actuator>
-    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="hip_4" gear="150"/>
-    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="ankle_4" gear="150"/>
-    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="hip_1" gear="150"/>
-    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="ankle_1" gear="150"/>
-    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="hip_2" gear="150"/>
-    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="ankle_2" gear="150"/>
-    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="hip_3" gear="150"/>
-    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="ankle_3" gear="150"/>
+    <position name="hip_1" joint="hip_1" forcerange="-150 150"/>
+    <position name="ankle_1" joint="ankle_1" forcerange="-150 150"/>
+    <position name="hip_2" joint="hip_2" forcerange="-150 150"/>
+    <position name="ankle_2" joint="ankle_2" forcerange="-150 150"/>
+    <position name="hip_3" joint="hip_3" forcerange="-150 150"/>
+    <position name="ankle_3" joint="ankle_3" forcerange="-150 150"/>
+    <position name="hip_4" joint="hip_4" forcerange="-150 150"/>
+    <position name="ankle_4" joint="ankle_4" forcerange="-150 150"/>
   </actuator>
   <keyframe>
-    <key name="home" qpos="0 0 0.75 1 0 0 0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0"/>
+    <key name="home" qpos="0 0 0.61 1 0 0 0 0.0 1.2 0.0 -1.2 0.0 -1.2 0.0 1.2"/>
   </keyframe>
 </mujoco>

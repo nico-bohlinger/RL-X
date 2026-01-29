@@ -9,7 +9,7 @@ from rl_x.environments.custom_mujoco.ant.mujoco.general_properties import Genera
 def create_train_and_eval_env(config):
     def make_env(seed):
         def thunk():
-            env = Ant(render=config.environment.render)
+            env = Ant(env_config=config.environment)
             env = RecordEpisodeStatistics(env)
             env.action_space.seed(seed)
             env.observation_space.seed(seed)
