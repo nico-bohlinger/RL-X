@@ -265,10 +265,8 @@ class MPO():
 
                     improvement_dist = improvement_dist + penalty_improvement
                     loss_eta = loss_eta + loss_penalty_temp
-
-                    penalty_temperature_detached = stop_gradient(penalty_temperature)
                 else:
-                    penalty_temperature_detached = jnp.array(0.0, dtype=jnp.float32)
+                    penalty_temperature = jnp.array(0.0, dtype=jnp.float32)
 
                 online_action_mean, online_action_std =  self.policy.apply(policy_params, stacked_states)
 
@@ -312,7 +310,7 @@ class MPO():
                     "loss/dual_loss": dual_loss,
                     "q/current_q_mean": current_q,
                     "dual/eta": eta,
-                    "dual/penalty_temperature": penalty_temperature_detached,
+                    "dual/penalty_temperature": penalty_temperature,
                     "dual/alpha_mean": alpha_mean.mean(),
                     "dual/alpha_std": alpha_std.mean(),
                     "loss/loss_eta": loss_eta,
