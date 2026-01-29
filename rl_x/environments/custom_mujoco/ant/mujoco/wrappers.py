@@ -4,6 +4,7 @@ import gymnasium as gym
 class RLXInfo(gym.Wrapper):
     def __init__(self, env):
         super(RLXInfo, self).__init__(env)
+        self.horizon = env.call("horizon")[0]
     
 
     def get_logging_info_dict(self, info):

@@ -338,6 +338,8 @@ class Runner:
 
         try:
             model.train()
+        except Exception:
+            rlx_logger.error("Uncaught exception", exc_info=True)
         finally:
             train_env.close()
             eval_env.close()
@@ -372,6 +374,8 @@ class Runner:
         
         try:
             model.test(self._config.runner.nr_test_episodes)
+        except Exception:
+            rlx_logger.error("Uncaught exception", exc_info=True)
         finally:
             train_env.close()
             eval_env.close()

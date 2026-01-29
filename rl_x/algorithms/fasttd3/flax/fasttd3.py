@@ -225,7 +225,7 @@ class FastTD3:
 
                 return loss, metrics
 
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0))
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_loss_fn = lambda *a, **k: jax.tree_util.tree_map(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_loss_fn, argnums=(0,), has_aux=True)
