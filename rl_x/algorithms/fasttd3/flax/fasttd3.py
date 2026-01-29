@@ -523,7 +523,7 @@ class FastTD3:
 
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
-        model.observation_normalizer_state = checkpoint.get("observation_normalizer", model.observation_normalizer_state)
+        model.observation_normalizer_state = checkpoint["observation_normalizer"]
 
         shutil.rmtree(checkpoint_dir)
 
