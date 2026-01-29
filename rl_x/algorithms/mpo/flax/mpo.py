@@ -339,6 +339,17 @@ class MPO():
             policy_state = policy_state.apply_gradients(grads=policy_grads)
             critic_state = critic_state.apply_gradients(grads=critic_grads)
             dual_variables_state = dual_variables_state.apply_gradients(grads=dual_variables_grads)
+
+            dual_variables_state = dual_variables_state.replace(
+                params={
+                    "params": {
+                        "log_eta": jnp.maximum(dual_variables_state.params["params"]["log_eta"], self.min_log_temperature),
+                        "log_alpha_mean": jnp.maximum(dual_variables_state.params["params"]["log_alpha_mean"], self.min_log_alpha),
+                        "log_alpha_stddev": jnp.maximum(dual_variables_state.params["params"]["log_alpha_stddev"], self.min_log_alpha),
+                        "log_penalty_temperature": dual_variables_state.params["params"]["log_penalty_temperature"],
+                    }
+                }
+            )
             
             metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_grads)
             metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_grads)
