@@ -13,8 +13,10 @@ from rl_x.environments.custom_mujoco.ant.mjx.viewer import MujocoViewer
 
 
 class Ant:
-    def __init__(self, render, horizon=1000):
-        self.horizon = horizon
+    def __init__(self, env_config):
+        self.should_render = env_config.render
+        self.horizon = env_config.horizon
+        self.action_scaling_factor = env_config.action_scaling_factor
         
         xml_path = (Path(__file__).resolve().parent.parent / "data" / "ant.xml").as_posix()
         self.mj_model = mujoco.MjModel.from_xml_path(xml_path)
@@ -22,7 +24,7 @@ class Ant:
         self.mjx_model = mjx.put_model(self.mj_model)
         self.mjx_data = mjx.make_data(self.mjx_model)
 
-        self.nr_intermediate_steps = 1
+        self.nr_intermediate_steps = 4
 
         self.initial_qpos = jnp.array(self.mj_model.keyframe("home").qpos)
         self.initial_qvel = jnp.array(self.mj_model.keyframe("home").qvel)
@@ -30,13 +32,15 @@ class Ant:
         self.target_local_x_velocity = 2.0
         self.target_local_y_velocity = 0.0
 
-        action_bounds = self.mj_model.actuator_ctrlrange
-        action_low, action_high = action_bounds.T
-        self.single_action_space = BoxSpace(low=action_low, high=action_high, shape=(8,), dtype=jnp.float32)
+        action_space_size = self.mj_model.nu
+        lower_joint_limit, upper_joint_limit = self.mj_model.jnt_range.T
+        self.nominal_joint_positions = self.initial_qpos[7:]
+        self.single_action_space = BoxSpace(low=lower_joint_limit[1:], high=upper_joint_limit[1:], shape=(action_space_size,), dtype=jnp.float32, center=self.nominal_joint_positions, scale=self.action_scaling_factor)
+
         self.single_observation_space = BoxSpace(low=-jnp.inf, high=jnp.inf, shape=(34,), dtype=jnp.float32)
 
         self.viewer = None
-        if render:
+        if self.should_render:
             dt = self.mj_model.opt.timestep * self.nr_intermediate_steps
             self.viewer = MujocoViewer(self.mj_model, dt)
             c_model = deepcopy(self.mj_model)
@@ -119,10 +123,11 @@ class Ant:
     @partial(jax.jit, static_argnums=(0,))
     def _step(self, state, action):
         data, _ = jax.lax.scan(
-            f=lambda data, _: (mjx.step(self.mjx_model, data.replace(ctrl=action)), None),
+            f=lambda data, _: (mjx.step(self.mjx_model, data.replace(ctrl=self.nominal_joint_positions + action * self.action_scaling_factor)), None),
             init=state.data,
             xs=(),
-            length=self.nr_intermediate_steps
+            length=self.nr_intermediate_steps,
+            unroll=True
         )
 
         state.info_episode_store["episode_length"] += 1
@@ -151,7 +156,7 @@ class Ant:
 
     def get_observation(self, data):
         global_height = jnp.array([data.qpos[2]])
-        joint_positions = data.qpos[7:]
+        joint_positions = data.qpos[7:] - self.nominal_joint_positions
         joint_velocities = data.qvel[6:]
         local_angular_velocities = data.qvel[3:6]
 
