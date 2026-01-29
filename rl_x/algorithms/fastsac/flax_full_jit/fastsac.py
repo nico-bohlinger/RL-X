@@ -121,10 +121,10 @@ class FastSAC:
         if self.max_grad_norm != -1.0:
             policy_tx = optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay),
+                optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2),
             )
         else:
-            policy_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay)
+            policy_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.policy_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2)
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, env_state.next_observation),
@@ -136,10 +136,10 @@ class FastSAC:
         if self.max_grad_norm != -1.0:
             critic_tx = optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay),
+                optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2),
             )
         else:
-            critic_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay)
+            critic_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.q_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2)
         self.critic_state = RLTrainState.create(
             apply_fn=self.critic.apply,
             params=self.critic.init(critic_key, env_state.next_observation, dummy_action),
@@ -150,10 +150,10 @@ class FastSAC:
         if self.max_grad_norm != -1.0:
             alpha_tx = optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adamw)(learning_rate=self.entropy_learning_rate, weight_decay=self.weight_decay),
+                optax.inject_hyperparams(optax.adamw)(learning_rate=self.entropy_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2),
             )
         else:
-            alpha_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.entropy_learning_rate, weight_decay=self.weight_decay)
+            alpha_tx = optax.inject_hyperparams(optax.adamw)(learning_rate=self.entropy_learning_rate, weight_decay=self.weight_decay, b1=self.adam_beta1, b2=self.adam_beta2)
         self.entropy_coefficient_state = TrainState.create(
             apply_fn=self.entropy_coefficient.apply,
             params=self.entropy_coefficient.init(entropy_key),
