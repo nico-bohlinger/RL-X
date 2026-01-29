@@ -18,11 +18,11 @@ def get_policy(config, env):
     policy_observation_indices = getattr(env, "policy_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        if config.policy_network_type == "fastsac":
+        if config.algorithm.policy_network_type == "fastsac":
             policy = FastSACPolicy(env.single_action_space.shape, config.algorithm.policy_init_scale, config.algorithm.policy_min_scale, policy_observation_indices)
-        elif config.policy_network_type == "fasttd3":
+        elif config.algorithm.policy_network_type == "fasttd3":
             policy = FastTD3Policy(env.single_action_space.shape, config.algorithm.policy_init_scale, config.algorithm.policy_min_scale, policy_observation_indices)
-        elif config.policy_network_type == "mpo":
+        elif config.algorithm.policy_network_type == "mpo":
             policy = MPOPolicy(env.single_action_space.shape, config.algorithm.policy_init_scale, config.algorithm.policy_min_scale, policy_observation_indices)
 
         env_as_scale = env.single_action_space.scale
@@ -128,7 +128,9 @@ def get_processed_action_function(action_clipping, action_rescaling, env_as_low,
     def get_clipped_and_scaled_action(action, env_as_low=env_as_low, env_as_high=env_as_high):
         if action_clipping:
             action = jnp.clip(action, -1, 1)
-        if action_rescaling == "normal":
+        if action_rescaling == "none":
+            pass
+        elif action_rescaling == "normal":
             action = env_as_low + (0.5 * (action + 1.0) * (env_as_high - env_as_low))
         elif action_rescaling == "fastsac":
             action = action * action_scale
