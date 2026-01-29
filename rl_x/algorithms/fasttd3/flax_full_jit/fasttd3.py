@@ -468,7 +468,11 @@ class FastTD3:
 
                                 critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.tau))
 
-                                critic_metrics["lr/learning_rate"] = critic_state.opt_state.hyperparams["learning_rate"]
+                                if self.max_grad_norm != -1.0:
+                                    lr = critic_state.opt_state[1].hyperparams["learning_rate"]
+                                else:
+                                    lr = critic_state.opt_state.hyperparams["learning_rate"]
+                                critic_metrics["lr/learning_rate"] = lr
                                 critic_metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
 
                                 update_idx += 1

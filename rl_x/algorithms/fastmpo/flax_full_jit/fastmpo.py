@@ -582,7 +582,7 @@ class FastMPO:
 
                                 critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.critic_tau))
 
-                                critic_metrics["lr/learning_rate"] = critic_state.opt_state[1].hyperparams["learning_rate"]
+                                critic_metrics["lr/critic_learning_rate"] = critic_state.opt_state[1].hyperparams["learning_rate"]
                                 critic_metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
 
                                 update_idx += 1
@@ -611,6 +611,8 @@ class FastMPO:
                             
                             policy_state = policy_state.replace(target_params=optax.incremental_update(policy_state.params, policy_state.target_params, self.policy_tau))
 
+                            policy_metrics["lr/policy_learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
+                            policy_metrics["lr/dual_variables_learning_rate"] = dual_variables_state.opt_state[1].hyperparams["learning_rate"]
                             policy_metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
                             policy_metrics["gradients/dual_variables_grad_norm"] = optax.global_norm(dual_variables_gradients)
 

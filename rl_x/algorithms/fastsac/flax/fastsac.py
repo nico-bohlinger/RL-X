@@ -309,7 +309,11 @@ class FastSAC:
             (loss, metrics), (policy_grads,) = grad_loss_fn(policy_state.params, states, per_sample_keys)
             policy_state = policy_state.apply_gradients(grads=policy_grads)
 
-            metrics["lr/learning_rate"] = policy_state.opt_state.hyperparams["learning_rate"]
+            if self.max_grad_norm != -1.0:
+                lr = policy_state.opt_state[1].hyperparams["learning_rate"]
+            else:
+                lr = policy_state.opt_state.hyperparams["learning_rate"]
+            metrics["lr/learning_rate"] = lr
             metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_grads)
 
             return policy_state, metrics, key
