@@ -451,10 +451,6 @@ class MPO():
                 if nr_updates % self.target_network_update_period == 0:
                     self.policy_state, self.critic_state = update_target_networks(self.policy_state, self.critic_state)
 
-                # Create metrics
-                optimization_metrics = {
-                }
-
                 for key, value in optimization_metrics.items():
                     optimization_metrics_collection.setdefault(key, []).append(value)
 
