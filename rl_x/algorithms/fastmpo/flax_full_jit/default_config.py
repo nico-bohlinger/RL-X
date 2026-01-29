@@ -26,6 +26,7 @@ def get_config(algorithm_name):
     config.adam_beta1 = 0.9  # default: 0.9
     config.adam_beta2 = 0.95  # default: 0.999
     config.max_grad_norm = 40.0
+    config.collect_data_with_online_policy = False
     config.action_sampling_number = 20
     config.epsilon_non_parametric = 0.1
     config.epsilon_parametric_mu = 0.01
@@ -35,6 +36,9 @@ def get_config(algorithm_name):
     config.init_log_alpha_mean = 10.0
     config.init_log_alpha_stddev = 1000.0
     config.init_log_penalty_temperature = 10.0
+    config.float_epsilon = 1e-8
+    config.min_log_temperature = -18.0
+    config.min_log_alpha = -18.0
     config.policy_init_scale = 0.5
     config.policy_min_scale = 1e-6
     config.batch_size = 8192  # fastsac: 8192, fasttd3: 32768
@@ -42,7 +46,8 @@ def get_config(algorithm_name):
     config.learning_starts = 10  # times nr_envs
     config.v_min = -20.0  # fastsac: -20.0, fasttd3: -10.0
     config.v_max = 20.0  # fastsac: 20.0, fasttd3: 10.0
-    config.tau = 0.125  # fastsac: 0.125, fasttd3: 0.1
+    config.critic_tau = 0.125  # fastsac: 0.125, fasttd3: 0.1
+    config.policy_tau = 0.01
     config.gamma = 0.97
     config.nr_atoms = 101
     config.n_steps = 1
