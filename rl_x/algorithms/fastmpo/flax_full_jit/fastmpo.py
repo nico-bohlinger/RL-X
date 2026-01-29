@@ -140,8 +140,8 @@ class FastMPO:
             fraction = 1.0 - (step / total_steps)
             return self.dual_learning_rate * fraction
         
-        self.q_learning_rate = policy_linear_schedule if self.anneal_policy_learning_rate else self.policy_learning_rate
-        self.policy_learning_rate = critic_linear_schedule if self.anneal_critic_learning_rate else self.critic_learning_rate
+        self.policy_learning_rate = policy_linear_schedule if self.anneal_policy_learning_rate else self.policy_learning_rate
+        self.critic_learning_rate = critic_linear_schedule if self.anneal_critic_learning_rate else self.critic_learning_rate
         self.dual_learning_rate = dual_linear_schedule if self.anneal_dual_learning_rate else self.dual_learning_rate
 
         env_state = self.train_env.reset(reset_key, False)
