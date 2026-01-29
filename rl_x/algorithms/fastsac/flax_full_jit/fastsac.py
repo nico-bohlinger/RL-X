@@ -672,6 +672,7 @@ class FastSAC:
 
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
+        model.entropy_coefficient_state = checkpoint["entropy_coefficient"]
         model.observation_normalizer_state = checkpoint["observation_normalizer"]
 
         shutil.rmtree(checkpoint_dir)
