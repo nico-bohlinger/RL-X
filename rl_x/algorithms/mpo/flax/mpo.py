@@ -273,7 +273,7 @@ class MPO():
                 online_action_mean, online_action_std =  self.policy.apply(policy_params, stacked_states)
 
                 alpha_mean = jax.nn.softplus(log_alpha_mean) + self.float_epsilon
-                alpha_std = (jnp.logaddexp(log_alpha_stddev, jnp.zeros_like(log_alpha_stddev)) + self.float_epsilon)
+                alpha_std = jax.nn.softplus(log_alpha_stddev) + self.float_epsilon
 
                 logprob_mean = jnp.sum(-0.5 * ((((sampled_actions - online_action_mean) / target_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(target_action_std), axis=-1)  # (sampled actions, 2 * batch)
 

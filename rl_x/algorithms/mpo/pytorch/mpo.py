@@ -196,7 +196,10 @@ class MPO:
 
                 online_action_mean, online_action_std = self.actor.get_action(stacked_states)
 
-                alpha_mean = F.softplus(self.duals.log_alpha_mean) + self.float_epsilon
+                # This is the same as:
+                # F.softplus(self.duals.log_alpha_mean) + self.float_epsilon
+                # But softplus in Torch has a threshold value which switches to a linear approximation for large values
+                alpha_mean = (torch.logaddexp(self.duals.log_alpha_stddev, torch.zeros_like(self.duals.log_alpha_stddev)) + self.float_epsilon)
                 alpha_std = (torch.logaddexp(self.duals.log_alpha_stddev, torch.zeros_like(self.duals.log_alpha_stddev)) + self.float_epsilon)
 
                 logprob_mean = torch.sum(-0.5 * ((((sampled_actions - online_action_mean) / target_action_std) ** 2) + self.log_2pi) - torch.log(target_action_std), dim=-1)  # (sampled actions, 2 * batch)
