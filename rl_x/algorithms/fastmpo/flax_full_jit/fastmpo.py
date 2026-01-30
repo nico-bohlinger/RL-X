@@ -455,9 +455,14 @@ class FastMPO:
                             # Create metrics
                             metrics = {
                                 "loss/actor_loss": actor_loss,
+                                "loss/loss_pg_mean": loss_pg_mean,
+                                "loss/loss_pg_std": loss_pg_std,
+                                "loss/loss_kl_mean": loss_kl_mean,
+                                "loss/loss_kl_std": loss_kl_std,
                                 "loss/dual_loss": dual_loss,
+                                "loss/loss_alpha_mean": loss_alpha_mean,
+                                "loss/loss_alpha_std": loss_alpha_std,
                                 "loss/loss_eta": loss_eta,
-                                "loss/loss_alpha": loss_alpha_mean + loss_alpha_std,
                                 "dual/eta": eta_s,
                                 "dual/penalty_temperature": penalty_temperature,
                                 "dual/alpha_mean": jnp.mean(alpha_mean),
