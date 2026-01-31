@@ -435,7 +435,7 @@ class FastMPO:
                             loss_kl_mean = jnp.sum(stop_gradient(alpha_mean) * mean_kl_mean)
                             loss_alpha_mean = jnp.sum(alpha_mean * (self.epsilon_parametric_mu - stop_gradient(mean_kl_mean)))
 
-                            logprob_std = jnp.sum(-0.5 * ((((sampled_actions - target_action_mean) / online_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(online_action_std), axis=-1)  # (sampled actions, 2 * batch)
+                            logprob_std = jnp.sum(-0.5 * ((((sampled_actions_raw - target_action_mean) / online_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(online_action_std), axis=-1)  # (sampled actions, 2 * batch)
 
                             loss_pg_std = -(logprob_std * improvement_dist).sum(axis=0).mean()
 
