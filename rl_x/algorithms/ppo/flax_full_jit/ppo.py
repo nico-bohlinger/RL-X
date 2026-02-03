@@ -164,7 +164,7 @@ class PPO:
                         next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
                         delta = rewards + self.gamma * next_values * (1.0 - terminations) - values
                         init_advantages = delta[-1]
-                        _, advantages = jax.lax.scan(compute_advantages, (init_advantages,), jnp.arange(self.nr_steps - 2, -1, -1))
+                        _, advantages = jax.lax.scan(compute_advantages, (init_advantages,), jnp.arange(self.nr_steps - 2, -1, -1), unroll=True)
                         advantages = jnp.concatenate([advantages[::-1], jnp.array([init_advantages])])
                         returns = advantages + values
                         return advantages, returns

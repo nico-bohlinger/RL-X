@@ -55,7 +55,8 @@ class RandomDRInitialState:
             f=lambda data_, _: (mjx.forward(mjx_model, data_), None),
             init=data,
             xs=(),
-            length=1
+            length=1,
+            unroll=True
         )
         feet_x_pos = data.geom_xpos[self.env.foot_geom_indices, 0]
         feet_y_pos = data.geom_xpos[self.env.foot_geom_indices, 1]

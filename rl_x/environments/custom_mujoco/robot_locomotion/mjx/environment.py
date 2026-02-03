@@ -401,7 +401,8 @@ class LocomotionEnv:
             f=lambda data, _: (mjx.step(state.mjx_model, data.replace(ctrl=target_joint_positions)), None),
             init=state.data,
             xs=(),
-            length=self.nr_substeps
+            length=self.nr_substeps,
+            unroll=True
         )
         max_qvel = 100 * jnp.ones(self.initial_mj_model.nv)
         max_qvel = max_qvel.at[self.actuator_joint_mask_qvel].set(state.internal_state["actuator_joint_max_velocities"])

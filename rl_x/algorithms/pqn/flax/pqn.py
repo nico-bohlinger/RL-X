@@ -123,7 +123,8 @@ class PQN:
                 compute_q_targets,
                 last_target,
                 (rewards, terminations, next_values),
-                reverse=True
+                reverse=True,
+                unroll=True
             )
             return q_targets
 

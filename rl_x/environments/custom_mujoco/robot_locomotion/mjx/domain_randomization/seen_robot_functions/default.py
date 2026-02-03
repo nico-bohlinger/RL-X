@@ -269,7 +269,8 @@ class DefaultDRSeenRobotFunction:
             f=lambda data_, _: (mjx.forward(new_mjx_model, data_), None),
             init=data_tmp,
             xs=(),
-            length=1
+            length=1,
+            unroll=True
         )
         min_feet_z_pos = jnp.min(data_tmp.geom_xpos[self.env.foot_geom_indices, 2])
         offset = internal_state["center_height"] - min_feet_z_pos
@@ -289,7 +290,8 @@ class DefaultDRSeenRobotFunction:
             f=lambda data_, _: (mjx.forward(new_mjx_model, data_), None),
             init=data_tmp,
             xs=(),
-            length=1
+            length=1,
+            unroll=True
         )
         feet_x_pos = data_tmp.geom_xpos[self.env.foot_geom_indices, 0]
         feet_y_pos = data_tmp.geom_xpos[self.env.foot_geom_indices, 1]
