@@ -17,6 +17,7 @@ import wandb
 from rl_x.algorithms.ppo_dtrl.flax_full_jit.general_properties import GeneralProperties
 from rl_x.algorithms.ppo_dtrl.flax_full_jit.policy import get_policy
 from rl_x.algorithms.ppo_dtrl.flax_full_jit.critic import get_critic
+from rl_x.algorithms.ppo_dtrl.flax_full_jit.trust_region_layer import kl_projection, entropy_projection
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -50,6 +51,9 @@ class PPO_DTRL:
         self.critic_coef = config.algorithm.critic_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
+        self.mean_bound = config.algorithm.mean_bound
+        self.cov_bound = config.algorithm.cov_bound
+        self.trust_region_coef = config.algorithm.trust_region_coef
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
@@ -139,7 +143,7 @@ class PPO_DTRL:
                         value = self.critic.apply(critic_state.params, observation).squeeze(-1)
 
                         env_state = self.train_env.step(env_state, processed_action)
-                        transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, env_state.terminated, log_prob, env_state.info)
+                        transition = (observation, env_state.actual_next_observation, action, action_mean, jnp.squeeze(action_logstd, axis=0), env_state.reward, value, env_state.terminated, log_prob, env_state.info)
 
                         if self.render:
                             def render(env_state):
@@ -151,7 +155,8 @@ class PPO_DTRL:
 
                     single_rollout_carry, batch = jax.lax.scan(single_rollout, learning_iteration_carry, None, self.nr_steps)
                     policy_state, critic_state, env_state, key = single_rollout_carry
-                    states, next_states, actions, rewards, values, terminations, log_probs, infos = batch
+                    states, next_states, actions, action_means, action_logstds, rewards, values, terminations, log_probs, infos = batch
+                    action_logstd = action_logstds[-1]
 
 
                     # Calculating advantages and returns
@@ -173,11 +178,30 @@ class PPO_DTRL:
 
 
                     # Optimizing
-                    def loss_fn(policy_params, critic_params, state_b, action_b, log_prob_b, return_b, advantage_b):
+                    def loss_fn(policy_params, critic_params, state_b, old_action_b, old_action_mean_b, old_action_logstd_b, log_prob_b, return_b, advantage_b, global_step):
                         # Policy loss
                         action_mean, action_logstd = self.policy.apply(policy_params, state_b)
+                        old_action_logstd_b = jnp.expand_dims(old_action_logstd_b, axis=0)
                         action_std = jnp.exp(action_logstd)
-                        new_log_prob = -0.5 * ((action_b - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
+                        old_action_std = jnp.exp(old_action_logstd_b)
+                        old_entropy = jnp.sum(old_action_logstd_b + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e))
+                        beta = old_entropy * 0.5 ** (10 * global_step / self.total_timesteps)
+
+                        proj_action_mean, proj_action_std, eta_mu, eta_cov, kl_mean_part, post_proj_kl_mean_part, kl_cov_part, post_proj_kl_cov_part = kl_projection(action_mean, action_std, old_action_mean_b, old_action_std, self.mean_bound, self.cov_bound)
+                        proj_action_logstd = jnp.log(proj_action_std)
+                        proj_action_logstd = entropy_projection(proj_action_logstd, beta, dim=self.as_shape[0])
+
+                        proj_action_mean_det = jax.lax.stop_gradient(proj_action_mean)
+                        proj_action_std_det  = jax.lax.stop_gradient(proj_action_std)
+                        tr_loss_maha = 0.5 * jnp.sum(((proj_action_mean_det - action_mean)/ proj_action_std_det) ** 2, axis=1)
+                        tr_loss_cov_part = 0.5 * jnp.sum(2.0 * (jnp.log(proj_action_std_det) - jnp.log(action_std)) + (action_std/proj_action_std_det)**2 - 1.0, axis=1)
+                        trust_region_loss = tr_loss_maha + tr_loss_cov_part
+
+                        action_mean = proj_action_mean
+                        action_logstd = proj_action_logstd
+                        action_std = jnp.exp(action_logstd)
+
+                        new_log_prob = -0.5 * ((old_action_b - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
                         new_log_prob = new_log_prob.sum(1)
                         entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
                         
@@ -197,15 +221,22 @@ class PPO_DTRL:
                         critic_loss = 0.5 * (new_value - return_b) ** 2
 
                         # Combine losses
-                        loss = pg_loss - self.entropy_coef * entropy_loss + self.critic_coef * critic_loss
+                        loss = pg_loss - self.entropy_coef * entropy_loss + self.trust_region_coef * trust_region_loss + self.critic_coef * critic_loss
 
                         # Create metrics
                         metrics = {
                             "loss/policy_gradient_loss": pg_loss,
                             "loss/critic_loss": critic_loss,
                             "loss/entropy_loss": entropy_loss,
+                            "loss/trust_region_loss": trust_region_loss,
                             "policy_ratio/approx_kl": approx_kl_div,
                             "policy_ratio/clip_fraction": clip_fraction,
+                            "projection/eta_mu": eta_mu,
+                            "projection/eta_cov": eta_cov,
+                            "projection/unprojected_kl_mean": kl_mean_part,
+                            "projection/projected_kl_mean": post_proj_kl_mean_part,
+                            "projection/unprojected_kl_cov": kl_cov_part,
+                            "projection/projected_kl_cov": post_proj_kl_cov_part,
                         }
 
                         return loss, (metrics)
@@ -213,11 +244,16 @@ class PPO_DTRL:
 
                     batch_states = states.reshape((-1,) + self.os_shape)
                     batch_actions = actions.reshape((-1,) + self.as_shape)
+                    batch_action_means = action_means.reshape((-1,) + self.as_shape)
                     batch_advantages = advantages.reshape(-1)
                     batch_returns = returns.reshape(-1)
                     batch_log_probs = log_probs.reshape(-1)
 
-                    vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0), out_axes=0)
+                    combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
+                    global_step_int = combined_learning_iteration_step * self.nr_steps * self.nr_envs
+                    global_step_jnp = jnp.asarray(global_step_int, dtype=jnp.float32)
+
+                    vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, None, 0, 0, 0, None), out_axes=0)
                     safe_mean = lambda x: jnp.mean(x) if x is not None else x
                     mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
                     grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
@@ -238,9 +274,12 @@ class PPO_DTRL:
                             critic_state.params,
                             batch_states[minibatch_indices],
                             batch_actions[minibatch_indices],
+                            batch_action_means[minibatch_indices],
+                            action_logstd,
                             batch_log_probs[minibatch_indices],
                             batch_returns[minibatch_indices],
-                            minibatch_advantages
+                            minibatch_advantages,
+                            global_step_jnp
                         )
 
                         policy_state = policy_state.apply_gradients(grads=policy_gradients)
@@ -263,9 +302,8 @@ class PPO_DTRL:
 
 
                     # Logging
-                    combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
                     steps_metrics = {
-                        "steps/nr_env_steps": combined_learning_iteration_step * self.nr_steps * self.nr_envs,
+                        "steps/nr_env_steps": global_step_int,
                         "steps/nr_updates": combined_learning_iteration_step * self.nr_epochs * self.nr_minibatches,
                     }
 
