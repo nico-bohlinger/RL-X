@@ -270,20 +270,21 @@ class PPO_History_Window:
                     combined_metrics = tree.map_structure(lambda x: jnp.mean(x), combined_metrics)
 
                     def callback(carry):
-                        metrics, combined_learning_iteration_step, parallel_seed_id = carry
+                        metrics, learning_iteration_step, combined_learning_iteration_step, parallel_seed_id = carry
                         current_time = time.time()
                         metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (current_time - self.last_time[parallel_seed_id]))
                         self.last_time[parallel_seed_id] = current_time
                         global_step = combined_learning_iteration_step * self.nr_steps * self.nr_envs
                         metrics["steps/nr_env_steps"] = global_step
                         metrics["steps/nr_updates"] = combined_learning_iteration_step * self.nr_epochs * self.nr_minibatches
+                        is_last_train_update_before_eval = self.evaluation_active and (learning_iteration_step + 1 == self.nr_updates_per_multi_learning_iteration)
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
-                        self.end_logging()
+                        self.end_logging(wandb_commit=not is_last_train_update_before_eval)
 
                     combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
-                    jax.debug.callback(callback, (combined_metrics, combined_learning_iteration_step, parallel_seed_id))
+                    jax.debug.callback(callback, (combined_metrics, learning_iteration_step, combined_learning_iteration_step, parallel_seed_id))
                     
                     return (policy_state, critic_state, env_state, rolling_obs_window, key), None
                     
@@ -353,7 +354,7 @@ class PPO_History_Window:
 
     def log(self, name, value, step):
         if self.track_wandb:
-            wandb.log({"global_step": int(step), name: value})
+            self.wandb_log_cache[name] = value
         if self.track_tb:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
@@ -366,13 +367,17 @@ class PPO_History_Window:
 
 
     def start_logging(self, step):
+        if self.track_wandb:
+            self.wandb_log_cache = {"global_step": int(step)}
         if self.track_console:
             rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐", flush=False)
         else:
             rlx_logger.info(f"Step: {step}")
 
 
-    def end_logging(self):
+    def end_logging(self, wandb_commit=True):
+        if self.track_wandb:
+            wandb.log(self.wandb_log_cache, commit=wandb_commit)
         if self.track_console:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 

@@ -502,7 +502,7 @@ class FastTD3:
                     combined_metrics = tree.map_structure(lambda x: jnp.mean(x), combined_metrics)
 
                     def callback(carry):
-                        metrics, nr_update_iteration, parallel_seed_id = carry
+                        metrics, logging_iteration_step, nr_update_iteration, parallel_seed_id = carry
                         current_time = time.time()
                         metrics["time/sps"] = int((self.nr_envs * self.nr_updates_per_logging_iteration) / (current_time - self.last_time[parallel_seed_id]))
                         self.last_time[parallel_seed_id] = current_time
@@ -510,13 +510,14 @@ class FastTD3:
                         metrics["steps/nr_env_steps"] = global_step
                         metrics["steps/nr_policy_updates"] = nr_update_iteration * self.nr_policy_updates_per_step
                         metrics["steps/nr_critic_updates"] = nr_update_iteration * self.nr_critic_updates_per_policy_update * self.nr_policy_updates_per_step
+                        is_last_logging_before_eval = self.evaluation_active and (logging_iteration_step + 1 == self.nr_loggings_per_eval_save_iteration)
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
-                        self.end_logging()
+                        self.end_logging(wandb_commit=not is_last_logging_before_eval)
 
                     nr_update_iteration = (eval_save_iteration_step * self.nr_loggings_per_eval_save_iteration * self.nr_updates_per_logging_iteration) + (logging_iteration_step+1) * self.nr_updates_per_logging_iteration
-                    jax.debug.callback(callback, (combined_metrics, nr_update_iteration, parallel_seed_id))
+                    jax.debug.callback(callback, (combined_metrics, logging_iteration_step, nr_update_iteration, parallel_seed_id))
 
                     return (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key), None
 
@@ -582,7 +583,7 @@ class FastTD3:
 
     def log(self, name, value, step):
         if self.track_wandb:
-            wandb.log({"global_step": int(step), name: value})
+            self.wandb_log_cache[name] = value
         if self.track_tb:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
@@ -595,13 +596,17 @@ class FastTD3:
 
 
     def start_logging(self, step):
+        if self.track_wandb:
+            self.wandb_log_cache = {"global_step": int(step)}
         if self.track_console:
             rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐", flush=False)
         else:
             rlx_logger.info(f"Step: {step}")
 
 
-    def end_logging(self):
+    def end_logging(self, wandb_commit=True):
+        if self.track_wandb:
+            wandb.log(self.wandb_log_cache, commit=wandb_commit)
         if self.track_console:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 

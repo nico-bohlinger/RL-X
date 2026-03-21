@@ -552,7 +552,7 @@ class MPO():
 
     def log(self, name, value, step):
         if self.track_wandb:
-            wandb.log({"global_step": int(step), name: value})
+            self.wandb_log_cache[name] = value
         if self.track_tb:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
@@ -565,13 +565,17 @@ class MPO():
 
 
     def start_logging(self, step):
+        if self.track_wandb:
+            self.wandb_log_cache = {"global_step": int(step)}
         if self.track_console:
             rlx_logger.info("┌" + "─" * 31 + "┬" + "─" * 16 + "┐", flush=False)
         else:
             rlx_logger.info(f"Step: {step}")
 
 
-    def end_logging(self):
+    def end_logging(self, wandb_commit=True):
+        if self.track_wandb:
+            wandb.log(self.wandb_log_cache, commit=wandb_commit)
         if self.track_console:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
