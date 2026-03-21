@@ -8,7 +8,7 @@ micromamba run -n rlx python ../experiment.py \
     --environment.seed=0 \
     --runner.mode="train" \
     --runner.track_console=False \
-    --runner.track_tb=True \
+    --runner.track_tb=False \
     --runner.track_wandb=True \
     --runner.save_model=True \
     --runner.wandb_entity="placeholder" \

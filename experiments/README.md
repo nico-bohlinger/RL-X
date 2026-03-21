@@ -52,7 +52,7 @@ bash start_experiment.sh
 - Set ```--runner.track_tb=True``` to track the training run with Tensorboard
 
 **Weights and Biases**
-- Set ```--runner.track_tb=True --runner.track_wandb=True```
+- Set ```--runner.track_wandb=True```
 - Set ```--runner.wandb_entity=<your_wandb_entity>``` to your Weights and Biases account name
 - Uses ```--runner.project_name=<your_project_name>``` as the Weights and Biases project name
 - Uses ```--runner.exp_name=<your_exp_name>``` as the Weights and Biases group name in the given project

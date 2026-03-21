@@ -427,6 +427,8 @@ class DroQ:
 
 
     def log(self, name, value, step):
+        if self.track_wandb:
+            wandb.log({"global_step": int(step), name: value})
         if self.track_tb:
             self.writer.add_scalar(name, value, step)
         if self.track_console:

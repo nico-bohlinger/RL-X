@@ -292,11 +292,12 @@ class Runner:
                 group=self._config.runner.exp_name,
                 name=self._config.runner.run_name,
                 notes=self._config.runner.notes,
-                sync_tensorboard=True,
+                sync_tensorboard=False,
                 config=self._config.to_dict(),
                 monitor_gym=True,
                 save_code=True,
             )
+            wandb.define_metric("*", step_metric="global_step")
             # Log python packages
             python_packages = subprocess.check_output(["pip", "freeze"]).decode().split("\n")
             python_packages = [package.split("==") for package in python_packages if package]
