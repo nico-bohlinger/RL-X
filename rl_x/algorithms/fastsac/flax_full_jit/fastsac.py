@@ -522,28 +522,25 @@ class FastSAC:
 
 
                     # Logging
-                    nr_update_iteration = (eval_save_iteration_step * self.nr_loggings_per_eval_save_iteration * self.nr_updates_per_logging_iteration) + (logging_iteration_step+1) * self.nr_updates_per_logging_iteration
-                    steps_metrics = {
-                        "steps/nr_env_steps": nr_update_iteration * self.nr_envs,
-                        "steps/nr_policy_updates": nr_update_iteration * self.nr_policy_updates_per_step,
-                        "steps/nr_critic_updates": nr_update_iteration * self.nr_critic_updates_per_policy_update * self.nr_policy_updates_per_step,
-                    }
-
-                    combined_metrics = {**infos, **steps_metrics, **optimization_metrics}
+                    combined_metrics = {**infos, **optimization_metrics}
                     combined_metrics = tree.map_structure(lambda x: jnp.mean(x), combined_metrics)
 
                     def callback(carry):
-                        metrics, parallel_seed_id = carry
+                        metrics, nr_update_iteration, parallel_seed_id = carry
                         current_time = time.time()
                         metrics["time/sps"] = int((self.nr_envs * self.nr_updates_per_logging_iteration) / (current_time - self.last_time[parallel_seed_id]))
                         self.last_time[parallel_seed_id] = current_time
-                        global_step = int(metrics["steps/nr_env_steps"])
+                        global_step = nr_update_iteration * self.nr_envs
+                        metrics["steps/nr_env_steps"] = global_step
+                        metrics["steps/nr_policy_updates"] = nr_update_iteration * self.nr_policy_updates_per_step
+                        metrics["steps/nr_critic_updates"] = nr_update_iteration * self.nr_critic_updates_per_policy_update * self.nr_policy_updates_per_step
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
                         self.end_logging()
 
-                    jax.debug.callback(callback, (combined_metrics, parallel_seed_id))
+                    nr_update_iteration = (eval_save_iteration_step * self.nr_loggings_per_eval_save_iteration * self.nr_updates_per_logging_iteration) + (logging_iteration_step+1) * self.nr_updates_per_logging_iteration
+                    jax.debug.callback(callback, (combined_metrics, nr_update_iteration, parallel_seed_id))
 
                     return (policy_state, critic_state, entropy_coefficient_state, observation_normalizer_state, replay_buffer, env_state, key), None
 
@@ -576,15 +573,14 @@ class FastSAC:
                     }
 
                     def eval_callback(args):
-                        metrics, global_step = args
-                        global_step = int(global_step)
+                        metrics, eval_save_iteration_step = args
+                        global_step = (eval_save_iteration_step + 1) * self.evaluation_and_save_frequency
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
                         self.end_logging()
 
-                    global_step = (eval_save_iteration_step + 1) * self.evaluation_and_save_frequency
-                    jax.debug.callback(eval_callback, (eval_metrics, global_step))
+                    jax.debug.callback(eval_callback, (eval_metrics, eval_save_iteration_step))
                 
 
                 # Saving

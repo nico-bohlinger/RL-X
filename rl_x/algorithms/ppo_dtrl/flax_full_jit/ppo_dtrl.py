@@ -250,7 +250,7 @@ class PPO_DTRL:
                     batch_log_probs = log_probs.reshape(-1)
 
                     combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
-                    global_step_int = combined_learning_iteration_step * self.nr_steps * self.nr_envs
+                    global_step_int = combined_learning_iteration_step * self.nr_steps * self.nr_envs  # Caution: This will overflow as jax uses 32 bit integers
                     global_step_jnp = jnp.asarray(global_step_int, dtype=jnp.float32)
 
                     vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, None, 0, 0, 0, None), out_axes=0)
@@ -302,26 +302,23 @@ class PPO_DTRL:
 
 
                     # Logging
-                    steps_metrics = {
-                        "steps/nr_env_steps": global_step_int,
-                        "steps/nr_updates": combined_learning_iteration_step * self.nr_epochs * self.nr_minibatches,
-                    }
-
-                    combined_metrics = {**infos, **steps_metrics, **optimization_metrics}
+                    combined_metrics = {**infos, **optimization_metrics}
                     combined_metrics = tree.map_structure(lambda x: jnp.mean(x), combined_metrics)
 
                     def callback(carry):
-                        metrics, parallel_seed_id = carry
+                        metrics, combined_learning_iteration_step, parallel_seed_id = carry
                         current_time = time.time()
                         metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (current_time - self.last_time[parallel_seed_id]))
                         self.last_time[parallel_seed_id] = current_time
-                        global_step = int(metrics["steps/nr_env_steps"])
+                        global_step = combined_learning_iteration_step * self.nr_steps * self.nr_envs
+                        metrics["steps/nr_env_steps"] = global_step
+                        metrics["steps/nr_updates"] = combined_learning_iteration_step * self.nr_epochs * self.nr_minibatches
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
                         self.end_logging()
 
-                    jax.debug.callback(callback, (combined_metrics, parallel_seed_id))
+                    jax.debug.callback(callback, (combined_metrics, combined_learning_iteration_step, parallel_seed_id))
                     
                     return (policy_state, critic_state, env_state, key), None
                     
@@ -354,15 +351,15 @@ class PPO_DTRL:
                     }
 
                     def callback(metrics_and_global_step):
-                        metrics, global_step = metrics_and_global_step
-                        global_step = int(global_step)
+                        metrics, combined_learning_iteration_step = metrics_and_global_step
+                        global_step = combined_learning_iteration_step * self.nr_steps * self.nr_envs
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
                         self.end_logging()
 
-                    global_step = (multi_learning_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration * self.nr_steps * self.nr_envs
-                    jax.debug.callback(callback, (eval_metrics, global_step))
+                    combined_learning_iteration_step = (multi_learning_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration
+                    jax.debug.callback(callback, (eval_metrics, combined_learning_iteration_step))
                 
 
                 # Saving
