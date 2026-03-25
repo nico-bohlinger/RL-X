@@ -1,6 +1,6 @@
 # Robot Locomotion MuJoCo Environments
 
-Contains MuJoCo and MJX environments for a robot locomotion task with the Unitree Go2 quadruped and Unitree G1 humanoid robots.
+Contains MuJoCo and MJX environments for a robot locomotion task with the Unitree Go2 quadruped, MAB Silver Badger quadruped, and Unitree G1 humanoid robots.
 The resulting policies can be directly transferred to the real robots.
 Example deployment code for the Go2 can be found [here](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_mujoco/robot_locomotion/deployment/unitree_go2/).
 
