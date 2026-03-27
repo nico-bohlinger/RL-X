@@ -271,9 +271,9 @@ class PPO:
                         current_time = time.time()
                         metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (current_time - self.last_time[parallel_seed_id]))
                         self.last_time[parallel_seed_id] = current_time
-                        global_step = combined_learning_iteration_step * self.nr_steps * self.nr_envs
+                        global_step = combined_learning_iteration_step.item() * self.nr_steps * self.nr_envs
                         metrics["steps/nr_env_steps"] = global_step
-                        metrics["steps/nr_updates"] = combined_learning_iteration_step * self.nr_epochs * self.nr_minibatches
+                        metrics["steps/nr_updates"] = combined_learning_iteration_step.item() * self.nr_epochs * self.nr_minibatches
                         is_last_train_update_before_eval = self.evaluation_active and (learning_iteration_step + 1 == self.nr_updates_per_multi_learning_iteration)
                         self.start_logging(global_step)
                         for key, value in metrics.items():
@@ -315,7 +315,7 @@ class PPO:
 
                     def callback(metrics_and_global_step):
                         metrics, combined_learning_iteration_step = metrics_and_global_step
-                        global_step = combined_learning_iteration_step * self.nr_steps * self.nr_envs
+                        global_step = combined_learning_iteration_step.item() * self.nr_steps * self.nr_envs
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
