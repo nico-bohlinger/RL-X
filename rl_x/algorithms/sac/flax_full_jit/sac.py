@@ -358,7 +358,7 @@ class SAC:
 
                     def eval_callback(args):
                         metrics, eval_save_iteration_step = args
-                        global_step = (eval_save_iteration_step + 1) * self.evaluation_and_save_frequency
+                        global_step = (eval_save_iteration_step.item() + 1) * self.evaluation_and_save_frequency
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)
