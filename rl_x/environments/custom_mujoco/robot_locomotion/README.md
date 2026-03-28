@@ -6,7 +6,11 @@ Example deployment code for the Go2 can be found [here](https://github.com/nico-
 
 The MuJoCo version is a copy of the MJX version but uses the standard MuJoCo physics engine, which makes it easier and quicker to load, visualize and debug policies trained in MJX.
 Use the MJX version for large-scale training on a GPU.
-The default ```mjx``` version should be used with ```flax_full_jit``` algorithm implementations (e.g. ```fastsac.flax_full_jit```), while the ```mjx_pytorch``` version can be used with algorithms that implement the PyTorch interface (e.g. ```fastsac.pytorch```).
+The default ```mjx``` version should be used with ```flax_full_jit``` algorithm implementations (e.g. ```fastsac.flax_full_jit```).
+The ```mjx_pytorch``` version can be used with algorithms that implement the PyTorch interface (e.g. ```fastsac.pytorch```) but it is not optimized and runs rather slowly.
+
+The default configs from the ```flax_full_jit``` algorithms are optimized for many parallel environments and locomotion tasks, so they will work well out of the box.
+Additionally, when using ```ppo.flax_full_jit```, it is recommended to increase the ```entropy_coef``` to around ```0.002```, especially when using the ```hfield_diverse``` terrain, to continue to encourage exploration in the later stages of training.
 
 The learning environment is written in a way that makes it robot agnostic, so it can be used with different base robots (Go2, G1, etc.). The robots are defined in the ```rl_x/environments/custom_mujoco/robot_locomotion/robots/``` folder.
 The code structure and design decisions are based on a multi-embodiment learning [project](https://github.com/nico-bohlinger/one_policy_to_run_them_all).
