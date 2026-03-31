@@ -13,7 +13,17 @@ How the same policy looks like used in RCSSServerMJ:
 The locomotion environment is a straight copy of the ```rl_x/environments/custom_mujoco/robot_locomotion``` environment.
 For information on the design decisions and general usage refer to its [README file](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_mujoco/robot_locomotion/README.md).
 The differences are:
-- ...
+- Sinusoidal gait phase manager, that adds a reward term and observations, to encourage the policy to learn a smooth gait pattern.
+- Slightly modified foot-related reward terms to improve the gait.
+- Reduced domain randomization ranges, observation noise and perturbations.
+This means the trained policy might not be directly sim-to-real transferable anymore but this can simply be achieved by increasing the respective parameters again (see the ```robot_locomotion``` environment for reference).
+This is done to help training that is focused on the simulation competition.
+- The action delay is fixed to 1 step (20 ms) to match the RCSSServerMJ delay.
+This is more delay than expected on the real robot.
+If sim-to-real transfer is desired, bring back less and also varying action delay (see the ```robot_locomotion``` environment for reference)
+- The ```robots``` folder only contains the Booster T1 with the XML and assets as specified by the RCSSServerMJ codebase.
+Because the codebase is written in a way to easily add more robots (see the ```robot_locomotion``` environment for reference), it is possible to add different bipedal robots by just adding their config, XML, assets etc. to the ```robots``` folder.
+
 
 ## Training
 The training is designed and tuned for the MJX version of the environment and the ```ppo_gru.flax_full_jit``` algorithm, so it is recommended to use this combination for training.
