@@ -49,15 +49,18 @@ class PPO_GRU:
         self.critic_coef = config.algorithm.critic_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
-        self.nr_hidden_units = config.algorithm.nr_hidden_units
+        self.gru_hidden_dim = config.algorithm.gru_hidden_dim
         self.evaluation_frequency = config.algorithm.evaluation_frequency
         self.evaluation_episodes = config.algorithm.evaluation_episodes
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
         self.nr_updates = config.algorithm.total_timesteps // self.batch_size
         self.nr_minibatches = self.batch_size // self.minibatch_size
+        self.nr_minibatch_envs = self.minibatch_size // self.nr_steps
 
         if self.evaluation_frequency % (self.nr_steps * self.nr_envs) != 0 and self.evaluation_frequency != -1:
             raise ValueError("Evaluation frequency must be a multiple of the number of steps and environments.")
+        if self.minibatch_size % self.nr_steps != 0:
+            raise ValueError("Minibatch size must be a multiple of nr_steps for PPO_GRU.")
 
         rlx_logger.info(f"Using device: {jax.default_backend()}")
         
@@ -70,7 +73,6 @@ class PPO_GRU:
         self.policy, self.get_processed_action = get_policy(config, self.train_env)
         self.critic = get_critic(config, self.train_env)
 
-        self.policy.apply = jax.jit(self.policy.apply)
         self.critic.apply = jax.jit(self.critic.apply)
 
         def linear_schedule(count):
@@ -80,10 +82,11 @@ class PPO_GRU:
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
 
         state = jnp.array([self.train_env.single_observation_space.sample()])
+        dummy_policy_gru_carry = self.policy.initialize_carry(1)
 
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
-            params=self.policy.init(policy_key, state),
+            params=self.policy.init(policy_key, state, dummy_policy_gru_carry, method=self.policy.apply_one_step),
             tx=optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
                 optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
@@ -108,15 +111,15 @@ class PPO_GRU:
     
     def train(self):
         @jax.jit
-        def get_action_and_value(policy_state: TrainState, critic_state: TrainState, state: np.ndarray, key: jax.random.PRNGKey):
-            action_mean, action_logstd = self.policy.apply(policy_state.params, state)
+        def get_action_and_value(policy_state: TrainState, critic_state: TrainState, state: np.ndarray, policy_gru_carry: np.ndarray, key: jax.random.PRNGKey):
+            action_mean, action_logstd, next_policy_gru_carry = self.policy.apply(policy_state.params, state, policy_gru_carry, method=self.policy.apply_one_step)
             action_std = jnp.exp(action_logstd)
             key, subkey = jax.random.split(key)
             action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
             log_prob = -0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
             value = self.critic.apply(critic_state.params, state)
             processed_action = self.get_processed_action(action)
-            return processed_action, action, value.reshape(-1), log_prob.sum(1), key
+            return processed_action, action, value.reshape(-1), log_prob.sum(1), next_policy_gru_carry, key
         
 
         @jax.jit
@@ -136,31 +139,31 @@ class PPO_GRU:
         
 
         @jax.jit
-        def update(policy_state: TrainState, critic_state: TrainState,
-                   states: np.ndarray, actions: np.ndarray, advantages: np.ndarray, returns: np.ndarray, values: np.ndarray, log_probs: np.ndarray,
+        def update(policy_state: TrainState, critic_state: TrainState, init_policy_carry: np.ndarray,
+                   states: np.ndarray, actions: np.ndarray, advantages: np.ndarray, returns: np.ndarray, values: np.ndarray, dones: np.ndarray, log_probs: np.ndarray,
                    key: jax.random.PRNGKey):
-            def loss_fn(policy_params, critic_params, state_b, action_b, log_prob_b, return_b, advantage_b):
+            def loss_fn(policy_params, critic_params, state_seq, action_seq, log_prob_seq, return_seq, advantage_seq, done_seq, init_carry):
                 # Policy loss
-                action_mean, action_logstd = self.policy.apply(policy_params, state_b)
+                action_mean, action_logstd = self.policy.apply(policy_params, state_seq, done_seq, init_carry, method=self.policy.forward_sequence)
                 action_std = jnp.exp(action_logstd)
-                new_log_prob = -0.5 * ((action_b - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
-                new_log_prob = new_log_prob.sum(1)
+                new_log_prob = -0.5 * ((action_seq - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
+                new_log_prob = new_log_prob.sum(-1)
                 entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
                 
-                logratio = new_log_prob - log_prob_b
+                logratio = new_log_prob - log_prob_seq
                 ratio = jnp.exp(logratio)
                 approx_kl_div = (ratio - 1) - logratio
                 clip_fraction = jnp.float32((jnp.abs(ratio - 1) > self.clip_range))
 
-                pg_loss1 = -advantage_b * ratio
-                pg_loss2 = -advantage_b * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range)
+                pg_loss1 = -advantage_seq * ratio
+                pg_loss2 = -advantage_seq * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range)
                 pg_loss = jnp.maximum(pg_loss1, pg_loss2)
                 
-                entropy_loss = entropy.sum(1)
+                entropy_loss = entropy.sum(-1)
                 
                 # Critic loss
-                new_value = self.critic.apply(critic_params, state_b)
-                critic_loss = 0.5 * (new_value - return_b) ** 2
+                new_value = self.critic.apply(critic_params, state_seq).squeeze(-1)
+                critic_loss = 0.5 * (new_value - return_seq) ** 2
 
                 # Combine losses
                 loss = pg_loss - self.entropy_coef * entropy_loss + self.critic_coef * critic_loss
@@ -177,36 +180,32 @@ class PPO_GRU:
                 return loss, (metrics)
             
 
-            batch_states = states.reshape((-1,) + self.os_shape)
-            batch_actions = actions.reshape((-1,) + self.as_shape)
-            batch_advantages = advantages.reshape(-1)
-            batch_returns = returns.reshape(-1)
-            batch_log_probs = log_probs.reshape(-1)
-
-            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0), out_axes=0)
+            vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 1, 1, 1, 1, 1, 1, 0), out_axes=0)
             safe_mean = lambda x: jnp.mean(x) if x is not None else x
             mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
             grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
             key, subkey = jax.random.split(key)
-            batch_indices = jnp.tile(jnp.arange(self.batch_size), (self.nr_epochs, 1))
-            batch_indices = jax.random.permutation(subkey, batch_indices, axis=1, independent=True)
-            batch_indices = batch_indices.reshape((self.nr_epochs * self.nr_minibatches, self.minibatch_size))
+            batch_env_indices = jnp.tile(jnp.arange(self.nr_envs), (self.nr_epochs, 1))
+            batch_env_indices = jax.random.permutation(subkey, batch_env_indices, axis=1, independent=True)
+            batch_env_indices = batch_env_indices.reshape((self.nr_epochs * self.nr_minibatches, self.nr_minibatch_envs))
 
-            def minibatch_update(carry, minibatch_indices):
+            def minibatch_update(carry, minibatch_env_indices):
                 policy_state, critic_state = carry
 
-                minibatch_advantages = batch_advantages[minibatch_indices]
+                minibatch_advantages = advantages[:, minibatch_env_indices]
                 minibatch_advantages = (minibatch_advantages - jnp.mean(minibatch_advantages)) / (jnp.std(minibatch_advantages) + 1e-8)
 
                 (loss, (metrics)), (policy_gradients, critic_gradients) = grad_loss_fn(
                     policy_state.params,
                     critic_state.params,
-                    batch_states[minibatch_indices],
-                    batch_actions[minibatch_indices],
-                    batch_log_probs[minibatch_indices],
-                    batch_returns[minibatch_indices],
-                    minibatch_advantages
+                    states[:, minibatch_env_indices],
+                    actions[:, minibatch_env_indices],
+                    log_probs[:, minibatch_env_indices],
+                    returns[:, minibatch_env_indices],
+                    minibatch_advantages,
+                    dones[:, minibatch_env_indices],
+                    init_policy_carry[minibatch_env_indices]
                 )
 
                 policy_state = policy_state.apply_gradients(grads=policy_gradients)
@@ -220,7 +219,7 @@ class PPO_GRU:
                 return carry, (metrics)
             
             init_carry = (policy_state, critic_state)
-            carry, (metrics) = jax.lax.scan(minibatch_update, init_carry, batch_indices)
+            carry, (metrics) = jax.lax.scan(minibatch_update, init_carry, batch_env_indices)
             policy_state, critic_state = carry
 
             # Calculate mean metrics
@@ -233,9 +232,9 @@ class PPO_GRU:
 
 
         @jax.jit
-        def get_deterministic_action(policy_state: TrainState, state: np.ndarray):
-            action_mean, action_logstd = self.policy.apply(policy_state.params, state)
-            return self.get_processed_action(action_mean)
+        def get_deterministic_action(policy_state: TrainState, state: np.ndarray, policy_gru_carry: np.ndarray):
+            action_mean, action_logstd, next_policy_gru_carry = self.policy.apply(policy_state.params, state, policy_gru_carry, method=self.policy.apply_one_step)
+            return self.get_processed_action(action_mean), next_policy_gru_carry
         
 
         self.set_train_mode()
@@ -247,14 +246,17 @@ class PPO_GRU:
             rewards=np.zeros((self.nr_steps, self.nr_envs)),
             values=np.zeros((self.nr_steps, self.nr_envs)),
             terminations=np.zeros((self.nr_steps, self.nr_envs)),
+            dones=np.zeros((self.nr_steps, self.nr_envs)),
             log_probs=np.zeros((self.nr_steps, self.nr_envs)),
             advantages=np.zeros((self.nr_steps, self.nr_envs)),
             returns=np.zeros((self.nr_steps, self.nr_envs)),
+            init_policy_carry=np.zeros((self.nr_envs, self.gru_hidden_dim)),
         )
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
 
         state, _ = self.train_env.reset()
+        policy_gru_carry = self.policy.initialize_carry(self.nr_envs)
         global_step = 0
         nr_updates = 0
         nr_episodes = 0
@@ -272,10 +274,12 @@ class PPO_GRU:
             # Acting
             dones_this_rollout = 0
             step_info_collection = {}
+            batch.init_policy_carry = np.array(policy_gru_carry)
             for step in range(self.nr_steps):
-                processed_action, action, value, log_prob, self.key = get_action_and_value(self.policy_state, self.critic_state, state, self.key)
+                processed_action, action, value, log_prob, next_policy_gru_carry, self.key = get_action_and_value(self.policy_state, self.critic_state, state, policy_gru_carry, self.key)
                 next_state, reward, terminated, truncated, info = self.train_env.step(jax.device_get(processed_action))
                 done = terminated | truncated
+                next_policy_gru_carry = next_policy_gru_carry * (1.0 - jnp.array(done)[:, None])
                 actual_next_state = next_state.copy()
                 for i, single_done in enumerate(done):
                     if single_done:
@@ -291,8 +295,10 @@ class PPO_GRU:
                 batch.rewards[step] = reward
                 batch.values[step] = value
                 batch.terminations[step] = terminated
+                batch.dones[step] = done
                 batch.log_probs[step] = log_prob
                 state = next_state
+                policy_gru_carry = next_policy_gru_carry
                 global_step += self.nr_envs
             nr_episodes += dones_this_rollout
             
@@ -309,8 +315,8 @@ class PPO_GRU:
 
             # Optimizing
             self.policy_state, self.critic_state, optimization_metrics, self.key = update(
-                self.policy_state, self.critic_state,
-                batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs,
+                self.policy_state, self.critic_state, batch.init_policy_carry,
+                batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.dones, batch.log_probs,
                 self.key
             )
             optimization_metrics = {key: value.item() for key, value in optimization_metrics.items()}
@@ -325,12 +331,14 @@ class PPO_GRU:
             if global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1:
                 self.set_eval_mode()
                 eval_state, _ = self.eval_env.reset()
+                eval_policy_gru_carry = self.policy.initialize_carry(eval_state.shape[0])
                 eval_nr_episodes = 0
                 evaluation_metrics = {"eval/episode_return": [], "eval/episode_length": []}
                 while True:
-                    eval_processed_action = get_deterministic_action(self.policy_state, eval_state)
+                    eval_processed_action, next_eval_policy_gru_carry = get_deterministic_action(self.policy_state, eval_state, eval_policy_gru_carry)
                     eval_state, eval_reward, eval_terminated, eval_truncated, eval_info = self.eval_env.step(jax.device_get(eval_processed_action))
                     eval_done = eval_terminated | eval_truncated
+                    eval_policy_gru_carry = next_eval_policy_gru_carry * (1.0 - np.array(eval_done)[:, None])
                     for i, single_done in enumerate(eval_done):
                         if single_done:
                             eval_nr_episodes += 1
@@ -468,19 +476,21 @@ class PPO_GRU:
 
     def test(self, episodes):
         @jax.jit
-        def get_action(policy_state: TrainState, state: np.ndarray):
-            action_mean, action_logstd = self.policy.apply(policy_state.params, state)
-            return self.get_processed_action(action_mean)
+        def get_action(policy_state: TrainState, state: np.ndarray, policy_gru_carry: np.ndarray):
+            action_mean, action_logstd, next_policy_gru_carry = self.policy.apply(policy_state.params, state, policy_gru_carry, method=self.policy.apply_one_step)
+            return self.get_processed_action(action_mean), next_policy_gru_carry
         
         self.set_eval_mode()
         for i in range(episodes):
             done = False
             episode_return = 0
             state, _ = self.eval_env.reset()
+            policy_gru_carry = self.policy.initialize_carry(state.shape[0])
             while not done:
-                processed_action = get_action(self.policy_state, state)
+                processed_action, next_policy_gru_carry = get_action(self.policy_state, state, policy_gru_carry)
                 state, reward, terminated, truncated, info = self.eval_env.step(jax.device_get(processed_action))
                 done = terminated | truncated
+                policy_gru_carry = next_policy_gru_carry * (1.0 - np.array(done)[:, None])
                 episode_return += reward
             rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
     
