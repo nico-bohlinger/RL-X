@@ -18,9 +18,10 @@ A framework for Reinforcement Learning research.
 - ⚒️ **Known DL libraries**: Implementations in PyTorch and mainly JAX
 - ⚡ **Maximum speed**: Just-In-Time (JIT) compilation and parallel environments
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
-- ⛰️​ **Custom environments**: Examples for MuJoCo, Isaac Lab, ManiSkill or pure socket communication
+- ⛰️​ **Custom environments**: Examples for MuJoCo, Isaac Lab, ManiSkill or custom socket communication
 - 🚀​ **GPU environments**: MJX, Isaac Lab and ManiSkill can run thousands of parallel environments
 - 🤖​ **Robot learning**: Training and deployment for the Unitree Go2 (quadruped) and G1 (humanoid) robots
+- ⚽ **RoboCup**: Training for the RoboCup soccer competition in MuJoCo and MJX
 - 📈 **Experiments**: Checkpoints, Evaluation, Console log, Tensorboard, Weights & Biases, SLURM, Docker
 
 
@@ -69,6 +70,8 @@ A framework for Reinforcement Learning research.
     - Example of a custom MuJoCo XLA (MJX) environment
 - [Custom Robot Learning](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion)
     - Example of custom MuJoCo and MJX environments for quadruped and humanoid locomotion learning and real robot deployment
+- [Custom RoboCup Soccer](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robocup_soccer)
+    - Example of custom MuJoCo and MJX environments for the RoboCup soccer simulation 3D league and other humanoid soccer leagues
 - [Custom Isaac Lab](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_isaac_lab)
     - Example of a custom Isaac Lab environment
 - [Custom ManiSkill](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_maniskill)

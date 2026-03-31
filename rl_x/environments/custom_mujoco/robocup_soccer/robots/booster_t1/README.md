@@ -1,0 +1,1 @@
+Adapted from: https://github.com/google-deepmind/mujoco_menagerie/tree/main/booster_t1
