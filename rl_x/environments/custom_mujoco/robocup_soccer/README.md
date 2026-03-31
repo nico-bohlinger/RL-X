@@ -2,13 +2,11 @@
 
 Contains MuJoCo and MJX environments for the official [MuJoCo-based RoboCup Soccer Simulation Server (RCSSServerMJ)](https://gitlab.com/robocup-sim/rcssservermj).
 
-How a trained locomotion policy looks like in the MuJoCo training environment:
+How a trained locomotion policy looks like in RCSSServerMJ:
 
-[![RoboCup Soccer MuJoCo Environment](https://img.youtube.com/vi/iYWw7vATQU4/0.jpg)](https://www.youtube.com/watch?v=iYWw7vATQU4)
+![locomotion](game.gif)
+The full video sequence can be found [here](https://youtu.be/f6MvmqiiU6Q).
 
-How the same policy looks like used in RCSSServerMJ:
-
-[![RCSSServerMJ](https://img.youtube.com/vi/iYWw7vATQU4/0.jpg)](https://www.youtube.com/watch?v=iYWw7vATQU4)
 
 The locomotion environment is a straight copy of the ```rl_x/environments/custom_mujoco/robot_locomotion``` environment.
 For information on the design decisions and general usage refer to its [README file](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_mujoco/robot_locomotion/README.md).
