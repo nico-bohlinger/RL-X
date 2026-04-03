@@ -72,7 +72,7 @@ python experiment.py \
     --environment.name=custom_mujoco.robocup_soccer.locomotion.mujoco \
     --environment.render=True \
     --runner.mode=test \
-    --runner.load_model="latest.model"
+    --runner.load_model="pretrained.model"
 ```
 4. Run the test.sh script
 ```bash
@@ -99,7 +99,7 @@ Or connect a **Xbox 360** controller and control the target x,y velocity with th
 2. Run the ```convert.py``` script to convert the model to PyTorch-based weights
 ```bash
 cd rcssserver_deployment
-python convert.py --model latest.model --output locomotion_nn.pth --meta-output locomotion_nn_meta.json --obs-dim 82 --action-dim 23
+python convert.py --model pretrained.model --output locomotion_nn.pth --meta-output locomotion_nn_meta.json --obs-dim 82 --action-dim 23
 ```
 3. A locomotion policy trained exactly with the above training configuration is already part of the RCSSServerMJ codebase as an example [here](https://gitlab.com/robocup-sim/rcssservermj/-/tree/master/example/nn_client?ref_type=heads).
 You can simply copy / overwrite the converted policy and meta files in the ```nn_client``` folder.
