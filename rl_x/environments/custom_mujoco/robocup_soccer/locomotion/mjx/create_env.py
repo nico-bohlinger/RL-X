@@ -6,8 +6,8 @@ from rl_x.environments.custom_mujoco.robocup_soccer.locomotion.mjx.general_prope
 
 
 def create_train_and_eval_env(config):
-    robot_config = importlib.import_module(f"rl_x.environments.custom_mujoco.robot_locomotion.robots.{config.environment.train_robot}.robot_config").robot_config
-    robot_config["directory_path"] = Path(__file__).parent.parent / "robots" / config.environment.train_robot
+    robot_config = importlib.import_module(f"rl_x.environments.custom_mujoco.robocup_soccer.robots.{config.environment.train_robot}.robot_config").robot_config
+    robot_config["directory_path"] = Path(__file__).parent.parent.parent / "robots" / config.environment.train_robot
 
     train_env = LocomotionEnv(
         robot_config=robot_config,

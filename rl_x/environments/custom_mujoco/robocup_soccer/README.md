@@ -59,6 +59,7 @@ bash train.sh
 ### In RL-X
 0. If you trained with ```ppo_gru.flax_full_jit``` and now want to test and visualize with ```ppo_gru.flax```, change the policy and critic architectures to match the full_jit version, i.e. simply copy the policy and critic architecture definitions from ```ppo_gru.flax_full_jit``` to the ```ppo_gru.flax``` files.
 1. Copy or download the saved model from your training run to the ```rl_x/experiments``` folder.
+You can also use the ```pretrained.model``` for testing, which is a model trained with the above configuration.
 2. Create test.sh file in the experiments folder (all .sh files besides slurm_experiment.sh are ignored by git)
 ```bash
 cd rl_x/experiments
