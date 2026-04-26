@@ -1,0 +1,8 @@
+from rl_x.environments.environment_manager import extract_environment_name_from_file, register_environment
+from rl_x.environments.custom_mujoco.ant.mjx_warp.create_env import create_train_and_eval_env
+from rl_x.environments.custom_mujoco.ant.mjx_warp.default_config import get_config
+from rl_x.environments.custom_mujoco.ant.mjx_warp.general_properties import GeneralProperties
+
+
+CUSTOM_MUJOCO_ANT_MJX_WARP = extract_environment_name_from_file(__file__)
+register_environment(CUSTOM_MUJOCO_ANT_MJX_WARP, get_config, create_train_and_eval_env, GeneralProperties)

@@ -6,3 +6,4 @@ class SimulationType(Enum):
     JAX_BASED = 1
     ISAAC_LAB = 2
     MANISKILL = 3
+    WARP = 4

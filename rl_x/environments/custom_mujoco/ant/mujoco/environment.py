@@ -97,6 +97,9 @@ class Ant(gym.Env):
             projected_gravity_vector,
             current_action
         ])
+
+        observation = np.nan_to_num(observation, nan=0.0, posinf=0.0, neginf=0.0)
+        observation = np.clip(observation, -100.0, 100.0)
         
         return observation
 
@@ -111,6 +114,9 @@ class Ant(gym.Env):
         tracking_xy_velocity_command_reward = np.exp(-xy_velocity_difference_norm / 0.25)
 
         reward = tracking_xy_velocity_command_reward
+
+        reward = np.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
+        reward = np.clip(reward, -10.0, 10.0)
 
         info = {
             "reward_xy_vel_cmd": tracking_xy_velocity_command_reward,

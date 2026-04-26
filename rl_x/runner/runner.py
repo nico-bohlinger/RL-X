@@ -99,7 +99,7 @@ class Runner:
         algorithm_uses_torch = DeepLearningFrameworkType.TORCH == algorithm_general_properties.deep_learning_framework_type
         algorithm_uses_jax = DeepLearningFrameworkType.JAX == algorithm_general_properties.deep_learning_framework_type
         environment_uses_jax = SimulationType.JAX_BASED == environment_general_properties.simulation_type
-        environment_uses_torch = SimulationType.ISAAC_LAB == environment_general_properties.simulation_type or SimulationType.MANISKILL == environment_general_properties.simulation_type
+        environment_uses_torch = SimulationType.ISAAC_LAB == environment_general_properties.simulation_type or SimulationType.MANISKILL == environment_general_properties.simulation_type or SimulationType.WARP == environment_general_properties.simulation_type
 
         import gymnasium as gym
         # Silences the box bound precision warning for cartpole
