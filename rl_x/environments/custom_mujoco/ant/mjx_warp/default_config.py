@@ -13,8 +13,8 @@ def get_config(environment_name):
     # CUDA graph capture mode: "jax", "warp", "warp_staged", "warp_staged_ex"
     # "jax" avoids Warp's own CUDA graph capture entirely, using JAX/XLA as the outer JIT layer instead
     # The Warp/CUDA conditional graph nodes (used inside the solver) are only supported from driver 12.4+.
-    # On driver 12.4+, "warp_staged" is generally the fastest option.
-    config.graph_mode = "jax"
+    # On driver 12.4+, "warp" is generally the fastest option.
+    config.graph_mode = "warp"
     config.naconmax = 8 * 4096
     config.njmax = 64
     config.horizon = 1000
