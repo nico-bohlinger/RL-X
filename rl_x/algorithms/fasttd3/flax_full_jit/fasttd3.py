@@ -39,6 +39,7 @@ class FastTD3:
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.render = config.environment.render
+        self.render_callback_type = getattr(config.environment, 'render_callback_type', 'io_callback')
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.weight_decay = config.algorithm.weight_decay
@@ -219,10 +220,12 @@ class FastTD3:
                 )
 
                 if self.render:
-                    def render(env_state):
-                        return self.train_env.render(env_state)
-                    
-                    env_state = jax.experimental.io_callback(render, env_state, env_state)
+                    if self.render_callback_type == "debug_callback":
+                        jax.debug.callback(self.train_env.render, env_state)
+                    else:
+                        def render(env_state):
+                            return self.train_env.render(env_state)
+                        env_state = jax.experimental.io_callback(render, env_state, env_state)
 
                 return (policy_state, critic_state, observation_normalizer_state, replay_buffer, env_state, noise_scales, key), None
             
@@ -272,10 +275,12 @@ class FastTD3:
                         )
 
                         if self.render:
-                            def render(env_state):
-                                return self.train_env.render(env_state)
-                            
-                            env_state = jax.experimental.io_callback(render, env_state, env_state)
+                            if self.render_callback_type == "debug_callback":
+                                jax.debug.callback(self.train_env.render, env_state)
+                            else:
+                                def render(env_state):
+                                    return self.train_env.render(env_state)
+                                env_state = jax.experimental.io_callback(render, env_state, env_state)
 
 
                         # Optimizing - Critic and Policy
@@ -506,7 +511,7 @@ class FastTD3:
                         current_time = time.time()
                         metrics["time/sps"] = int((self.nr_envs * self.nr_updates_per_logging_iteration) / (current_time - self.last_time[parallel_seed_id]))
                         self.last_time[parallel_seed_id] = current_time
-                        global_step = nr_update_iteration.item() * self.nr_envs
+                        global_step = int(nr_update_iteration.item() * self.nr_envs)
                         metrics["steps/nr_env_steps"] = global_step
                         metrics["steps/nr_policy_updates"] = nr_update_iteration.item() * self.nr_policy_updates_per_step
                         metrics["steps/nr_critic_updates"] = nr_update_iteration.item() * self.nr_critic_updates_per_policy_update * self.nr_policy_updates_per_step
@@ -551,7 +556,7 @@ class FastTD3:
 
                     def eval_callback(args):
                         metrics, eval_save_iteration_step = args
-                        global_step = (eval_save_iteration_step.item() + 1) * self.evaluation_and_save_frequency
+                        global_step = int((eval_save_iteration_step.item() + 1) * self.evaluation_and_save_frequency)
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)

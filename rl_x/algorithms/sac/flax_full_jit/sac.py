@@ -41,6 +41,7 @@ class SAC:
         self.nr_parallel_seeds = config.algorithm.nr_parallel_seeds
         self.nr_envs = config.environment.nr_envs
         self.render = config.environment.render
+        self.render_callback_type = getattr(config.environment, 'render_callback_type', 'io_callback')
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.buffer_size = config.algorithm.buffer_size
@@ -204,10 +205,12 @@ class SAC:
                         replay_buffer["size"] = jnp.minimum(replay_buffer["size"] + 1, capacity)
 
                         if self.render:
-                            def render(env_state):
-                                return self.train_env.render(env_state)
-                            
-                            env_state = jax.experimental.io_callback(render, env_state, env_state)
+                            if self.render_callback_type == "debug_callback":
+                                jax.debug.callback(self.train_env.render, env_state)
+                            else:
+                                def render(env_state):
+                                    return self.train_env.render(env_state)
+                                env_state = jax.experimental.io_callback(render, env_state, env_state)
 
 
                         # Optimizing
@@ -358,7 +361,7 @@ class SAC:
 
                     def eval_callback(args):
                         metrics, eval_save_iteration_step = args
-                        global_step = (eval_save_iteration_step.item() + 1) * self.evaluation_and_save_frequency
+                        global_step = int((eval_save_iteration_step.item() + 1) * self.evaluation_and_save_frequency)
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)

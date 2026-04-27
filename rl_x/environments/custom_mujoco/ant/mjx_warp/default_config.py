@@ -9,6 +9,7 @@ def get_config(environment_name):
     config.seed = 1
     config.nr_envs = 4096
     config.render = False
+    config.render_callback_type = "debug_callback"
     config.device = "gpu"
     # CUDA graph capture mode: "jax", "warp", "warp_staged", "warp_staged_ex"
     # "jax" avoids Warp's own CUDA graph capture entirely, using JAX/XLA as the outer JIT layer instead

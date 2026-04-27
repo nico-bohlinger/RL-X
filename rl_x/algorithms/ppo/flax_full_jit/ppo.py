@@ -38,6 +38,7 @@ class PPO:
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.render = config.environment.render
+        self.render_callback_type = getattr(config.environment, 'render_callback_type', 'io_callback')
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.nr_steps = config.algorithm.nr_steps
@@ -142,10 +143,12 @@ class PPO:
                         transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, env_state.terminated, log_prob, env_state.info)
 
                         if self.render:
-                            def render(env_state):
-                                return self.train_env.render(env_state)
-                            
-                            env_state = jax.experimental.io_callback(render, env_state, env_state)
+                            if self.render_callback_type == "debug_callback":
+                                jax.debug.callback(self.train_env.render, env_state)
+                            else:
+                                def render(env_state):
+                                    return self.train_env.render(env_state)
+                                env_state = jax.experimental.io_callback(render, env_state, env_state)
 
                         return (policy_state, critic_state, env_state, key), transition
 
@@ -271,7 +274,7 @@ class PPO:
                         current_time = time.time()
                         metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (current_time - self.last_time[parallel_seed_id]))
                         self.last_time[parallel_seed_id] = current_time
-                        global_step = combined_learning_iteration_step.item() * self.nr_steps * self.nr_envs
+                        global_step = int(combined_learning_iteration_step.item() * self.nr_steps * self.nr_envs)
                         metrics["steps/nr_env_steps"] = global_step
                         metrics["steps/nr_updates"] = combined_learning_iteration_step.item() * self.nr_epochs * self.nr_minibatches
                         is_last_train_update_before_eval = self.evaluation_active and (learning_iteration_step + 1 == self.nr_updates_per_multi_learning_iteration)
@@ -315,7 +318,7 @@ class PPO:
 
                     def callback(metrics_and_global_step):
                         metrics, combined_learning_iteration_step = metrics_and_global_step
-                        global_step = combined_learning_iteration_step.item() * self.nr_steps * self.nr_envs
+                        global_step = int(combined_learning_iteration_step.item() * self.nr_steps * self.nr_envs)
                         self.start_logging(global_step)
                         for key, value in metrics.items():
                             self.log(f"{key}", np.asarray(value), global_step)

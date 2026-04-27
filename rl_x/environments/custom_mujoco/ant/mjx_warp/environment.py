@@ -110,16 +110,18 @@ class Ant:
             mujoco.mj_step(c_model, c_data, 1)
             self.light_xdir = c_data.light_xdir
             self.light_xpos = c_data.light_xpos
+            self.render_data = mujoco.MjData(self.mj_model)
             del c_model, c_data
 
 
     def render(self, state):
         env_id = 0
-        data = mjx.get_data(self.mj_model, state.data)[env_id]
-        data.light_xdir = self.light_xdir
-        data.light_xpos = self.light_xpos
-        self.viewer.render(data)
-        return state
+        self.render_data.qpos[:] = np.array(state.data.qpos[env_id])
+        self.render_data.qvel[:] = np.array(state.data.qvel[env_id])
+        mujoco.mj_forward(self.mj_model, self.render_data)
+        self.render_data.light_xdir = self.light_xdir
+        self.render_data.light_xpos = self.light_xpos
+        self.viewer.render(self.render_data)
 
 
     def reset(self, keys, eval_mode):
@@ -151,10 +153,6 @@ class Ant:
     def step(self, state, action):
         ctrl = self.nominal_joint_positions + action * self.action_scaling_factor
         data = jax.lax.fori_loop(0, self.nr_intermediate_steps, lambda _, d: mjx.step(self.mjx_model, d), state.data.replace(ctrl=ctrl))
-
-        if self.viewer is not None:
-            state_with_new_data = jax.experimental.io_callback(self.render, state.replace(data=data), state.replace(data=data))
-            data = state_with_new_data.data
 
         obs = self.get_observation(data)
         reward, r_info = self.get_reward(data)
