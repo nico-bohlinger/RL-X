@@ -5,6 +5,10 @@
   <option timestep="0.005" solver="Newton" iterations="1" ls_iterations="4">
     <flag eulerdamp="disable"/>
   </option>
+  <!-- Improve speed on mujoco warp -->
+  <custom>
+    <numeric name="ls_parallel" data="1"/>
+  </custom>
   <default>
     <joint armature="0.02" damping="0.1" frictionloss="0.1"/>
     <geom contype="0" conaffinity="0" condim="3" density="5.0" friction="1 0.5 0.5" margin="0.01" rgba="0.8 0.6 0.4 1"/>
