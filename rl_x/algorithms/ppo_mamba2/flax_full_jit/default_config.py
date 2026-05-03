@@ -24,7 +24,7 @@ def get_config(algorithm_name):
     config.mamba_obs_combine_method = "concat"  # concat, film
     config.share_mamba_obs_encoder = False
     config.mamba_d_model = 128
-    config.mamba_num_layers = 2
+    config.mamba_num_layers = 1
     config.mamba_expand = 2
     config.mamba_state_dim = 16
     config.mamba_conv_kernel = 4
