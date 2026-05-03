@@ -14,14 +14,14 @@ import orbax.checkpoint
 import optax
 import wandb
 
-from rl_x.algorithms.ppo_gru.flax_full_jit.general_properties import GeneralProperties
-from rl_x.algorithms.ppo_gru.flax_full_jit.policy import get_policy
-from rl_x.algorithms.ppo_gru.flax_full_jit.critic import get_critic
+from rl_x.algorithms.ppo_mamba2.flax_full_jit.general_properties import GeneralProperties
+from rl_x.algorithms.ppo_mamba2.flax_full_jit.policy import get_policy
+from rl_x.algorithms.ppo_mamba2.flax_full_jit.critic import get_critic
 
 rlx_logger = logging.getLogger("rl_x")
 
 
-class PPO_MAMBA2:
+class PPO_Mamba2:
     def __init__(self, config, train_env, eval_env, run_path, writer):
         self.config = config
         self.train_env = train_env
@@ -38,7 +38,7 @@ class PPO_MAMBA2:
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.render = config.environment.render
-        self.render_callback_type = getattr(config.environment, 'render_callback_type', 'io_callback')
+        self.render_callback_type = getattr(config.environment, "render_callback_type", "io_callback")
         self.learning_rate = config.algorithm.learning_rate
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.nr_steps = config.algorithm.nr_steps
@@ -67,7 +67,10 @@ class PPO_MAMBA2:
 
         if self.evaluation_and_save_frequency % self.batch_size != 0:
             raise ValueError("Evaluation and save frequency must be a multiple of batch size")
-        
+
+        if self.minibatch_size % self.nr_steps != 0:
+            raise ValueError("For recurrent Mamba PPO, minibatch_size must be a multiple of nr_steps")
+
         if self.nr_parallel_seeds > 1:
             raise ValueError("Parallel seeds are not supported yet. This is mainly limited by not being able to log mutliple wandb runs at the same time.")
 
@@ -88,11 +91,11 @@ class PPO_MAMBA2:
 
         env_state = self.train_env.reset(reset_keys, False)
 
-        dummy_hidden = self.policy.initialize_carry(self.nr_envs)
+        dummy_carry = self.policy.initialize_carry(self.nr_envs)
 
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
-            params=self.policy.init(policy_key, env_state.next_observation, dummy_hidden, method=self.policy.apply_one_step),
+            params=self.policy.init(policy_key, env_state.next_observation, dummy_carry, method=self.policy.apply_one_step),
             tx=optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
                 optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
@@ -113,7 +116,13 @@ class PPO_MAMBA2:
             self.latest_model_file_name = "latest.model"
             self.latest_model_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
- 
+    def _reset_policy_mamba_carry(self, carry, done):
+        done = done.astype(jnp.float32)
+        return {
+            "ssm": carry["ssm"] * (1.0 - done[:, None, None, None]),
+            "conv": carry["conv"] * (1.0 - done[:, None, None, None]),
+        }
+
     def train(self):
         def jitable_train_function(key, parallel_seed_id):
             key, reset_key = jax.random.split(key, 2)
@@ -123,21 +132,21 @@ class PPO_MAMBA2:
             policy_state = self.policy_state
             critic_state = self.critic_state
 
-            policy_gru_carry = self.policy.initialize_carry(self.nr_envs)
+            policy_mamba_carry = self.policy.initialize_carry(self.nr_envs)
 
             def multi_learning_and_eval_save_iteration(multi_learning_and_eval_save_iteration_carry, multi_learning_iteration_step):
-                policy_state, critic_state, env_state, policy_gru_carry, key = multi_learning_and_eval_save_iteration_carry
+                policy_state, critic_state, env_state, policy_mamba_carry, key = multi_learning_and_eval_save_iteration_carry
 
                 def learning_iteration(learning_iteration_carry, learning_iteration_step):
-                    policy_state, critic_state, env_state, policy_gru_carry, key = learning_iteration_carry
+                    policy_state, critic_state, env_state, policy_mamba_carry, key = learning_iteration_carry
 
                     # Acting
                     def single_rollout(single_rollout_carry, _):
-                        policy_state, critic_state, env_state, policy_gru_carry, key = single_rollout_carry
+                        policy_state, critic_state, env_state, policy_mamba_carry, key = single_rollout_carry
 
                         key, subkey = jax.random.split(key)
                         observation = env_state.next_observation
-                        action_mean, action_logstd, next_policy_gru_carry = self.policy.apply(policy_state.params, observation, policy_gru_carry, method=self.policy.apply_one_step)
+                        action_mean, action_logstd, next_policy_mamba_carry = self.policy.apply(policy_state.params, observation, policy_mamba_carry, method=self.policy.apply_one_step)
                         action_std = jnp.exp(action_logstd)
                         action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
                         log_prob = (-0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd).sum(1)
@@ -146,7 +155,7 @@ class PPO_MAMBA2:
 
                         env_state = self.train_env.step(env_state, processed_action)
                         done = env_state.terminated | env_state.truncated
-                        next_policy_gru_carry = next_policy_gru_carry * (1.0 - done[:, None])
+                        next_policy_mamba_carry = self._reset_policy_mamba_carry(next_policy_mamba_carry, done)
                         transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, env_state.terminated, done, log_prob, env_state.info)
 
                         if self.render:
@@ -157,13 +166,12 @@ class PPO_MAMBA2:
                                     return self.train_env.render(env_state)
                                 env_state = jax.experimental.io_callback(render, env_state, env_state)
 
-                        return (policy_state, critic_state, env_state, next_policy_gru_carry, key), transition
+                        return (policy_state, critic_state, env_state, next_policy_mamba_carry, key), transition
 
-                    rollout_init_policy_carry = policy_gru_carry
-                    single_rollout_carry, batch = jax.lax.scan(single_rollout, (policy_state, critic_state, env_state, policy_gru_carry, key), None, self.nr_steps)
-                    policy_state, critic_state, env_state, policy_gru_carry, key = single_rollout_carry
+                    rollout_init_policy_mamba_carry = policy_mamba_carry
+                    single_rollout_carry, batch = jax.lax.scan(single_rollout, (policy_state, critic_state, env_state, policy_mamba_carry, key), None, self.nr_steps)
+                    policy_state, critic_state, env_state, policy_mamba_carry, key = single_rollout_carry
                     states, next_states, actions, rewards, values, terminations, dones, log_probs, infos = batch
-
 
                     # Calculating advantages and returns
                     def calculate_gae_advantages(critic_state, next_states, rewards, values, terminations):
@@ -182,7 +190,6 @@ class PPO_MAMBA2:
 
                     advantages, returns = calculate_gae_advantages(critic_state, next_states, rewards, values, terminations)
 
-
                     # Optimizing
                     def loss_fn(policy_params, critic_params, state_seq, action_seq, log_prob_seq, return_seq, advantage_seq, done_seq, init_carry):
                         # Policy loss
@@ -191,7 +198,7 @@ class PPO_MAMBA2:
                         new_log_prob = -0.5 * ((action_seq - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
                         new_log_prob = new_log_prob.sum(-1)
                         entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
-                        
+
                         logratio = new_log_prob - log_prob_seq
                         ratio = jnp.exp(logratio)
                         approx_kl_div = (ratio - 1) - logratio
@@ -200,9 +207,9 @@ class PPO_MAMBA2:
                         pg_loss1 = -advantage_seq * ratio
                         pg_loss2 = -advantage_seq * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range)
                         pg_loss = jnp.maximum(pg_loss1, pg_loss2)
-                        
+
                         entropy_loss = entropy.sum(-1)
-                        
+
                         # Critic loss
                         new_value = self.critic.apply(critic_params, state_seq).squeeze(-1)
                         critic_loss = 0.5 * (new_value - return_seq) ** 2
@@ -220,8 +227,8 @@ class PPO_MAMBA2:
                         }
 
                         return loss, (metrics)
-                    
-                    vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 1, 1, 1, 1, 1, 1, 0), out_axes=0)
+
+                    vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 1, 1, 1, 1, 1, 1, {"ssm": 0, "conv": 0}), out_axes=0)
                     safe_mean = lambda x: jnp.mean(x) if x is not None else x
                     mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
                     grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
@@ -237,6 +244,11 @@ class PPO_MAMBA2:
                         minibatch_advantages = advantages[:, minibatch_env_indices]
                         minibatch_advantages = (minibatch_advantages - jnp.mean(minibatch_advantages)) / (jnp.std(minibatch_advantages) + 1e-8)
 
+                        minibatch_init_policy_mamba_carry = {
+                            "ssm": rollout_init_policy_mamba_carry["ssm"][minibatch_env_indices],
+                            "conv": rollout_init_policy_mamba_carry["conv"][minibatch_env_indices],
+                        }
+
                         (loss, (metrics)), (policy_gradients, critic_gradients) = grad_loss_fn(
                             policy_state.params,
                             critic_state.params,
@@ -246,7 +258,7 @@ class PPO_MAMBA2:
                             returns[:, minibatch_env_indices],
                             minibatch_advantages,
                             dones[:, minibatch_env_indices],
-                            rollout_init_policy_carry[minibatch_env_indices],
+                            minibatch_init_policy_mamba_carry,
                         )
 
                         policy_state = policy_state.apply_gradients(grads=policy_gradients)
@@ -258,7 +270,7 @@ class PPO_MAMBA2:
                         carry = (policy_state, critic_state)
 
                         return carry, (metrics)
-                    
+
                     init_carry = (policy_state, critic_state)
                     carry, (optimization_metrics) = jax.lax.scan(minibatch_update, init_carry, batch_env_indices)
                     policy_state, critic_state = carry
@@ -266,7 +278,6 @@ class PPO_MAMBA2:
                     optimization_metrics["lr/learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
                     optimization_metrics["v_value/explained_variance"] = 1 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
                     optimization_metrics["policy/std_dev"] = jnp.mean(jnp.exp(policy_state.params["params"]["policy_logstd"]))
-
 
                     # Logging
                     combined_metrics = {**infos, **optimization_metrics}
@@ -288,33 +299,32 @@ class PPO_MAMBA2:
 
                     combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
                     jax.debug.callback(callback, (combined_metrics, learning_iteration_step, combined_learning_iteration_step, parallel_seed_id))
-                    
-                    return (policy_state, critic_state, env_state, policy_gru_carry, key), None
-                    
-                key, subkey = jax.random.split(key)
-                learning_iteration_carry, _ = jax.lax.scan(learning_iteration, (policy_state, critic_state, env_state, policy_gru_carry, subkey), jnp.arange(self.nr_updates_per_multi_learning_iteration))
-                policy_state, critic_state, env_state, policy_gru_carry, key = learning_iteration_carry
 
+                    return (policy_state, critic_state, env_state, policy_mamba_carry, key), None
+
+                key, subkey = jax.random.split(key)
+                learning_iteration_carry, _ = jax.lax.scan(learning_iteration, (policy_state, critic_state, env_state, policy_mamba_carry, subkey), jnp.arange(self.nr_updates_per_multi_learning_iteration))
+                policy_state, critic_state, env_state, policy_mamba_carry, key = learning_iteration_carry
 
                 # Evaluating
                 if self.evaluation_active:
                     def single_eval_rollout(single_eval_rollout_carry, _):
-                        policy_state, eval_env_state, eval_policy_gru_carry = single_eval_rollout_carry
+                        policy_state, eval_env_state, eval_policy_mamba_carry = single_eval_rollout_carry
 
-                        eval_action_mean, _, eval_policy_gru_carry = self.policy.apply(policy_state.params, eval_env_state.next_observation, eval_policy_gru_carry, method=self.policy.apply_one_step)
+                        eval_action_mean, _, eval_policy_mamba_carry = self.policy.apply(policy_state.params, eval_env_state.next_observation, eval_policy_mamba_carry, method=self.policy.apply_one_step)
                         eval_action = eval_action_mean
                         eval_processed_action = self.get_processed_action(eval_action)
                         eval_env_state = self.eval_env.step(eval_env_state, eval_processed_action)
                         eval_done = eval_env_state.terminated | eval_env_state.truncated
-                        eval_policy_gru_carry = eval_policy_gru_carry * (1.0 - eval_done[:, None])
+                        eval_policy_mamba_carry = self._reset_policy_mamba_carry(eval_policy_mamba_carry, eval_done)
 
-                        return (policy_state, eval_env_state, eval_policy_gru_carry), None
+                        return (policy_state, eval_env_state, eval_policy_mamba_carry), None
 
                     key, reset_key = jax.random.split(key)
                     reset_keys = jax.random.split(reset_key, self.nr_envs)
                     eval_env_state = self.eval_env.reset(reset_keys, True)
-                    eval_policy_gru_carry = self.policy.initialize_carry(self.nr_envs)
-                    single_eval_rollout_carry, _ = jax.lax.scan(single_eval_rollout, (policy_state, eval_env_state, eval_policy_gru_carry), jnp.arange(self.horizon))
+                    eval_policy_mamba_carry = self.policy.initialize_carry(self.nr_envs)
+                    single_eval_rollout_carry, _ = jax.lax.scan(single_eval_rollout, (policy_state, eval_env_state, eval_policy_mamba_carry), jnp.arange(self.horizon))
                     _, eval_env_state, _ = single_eval_rollout_carry
 
                     eval_metrics = {
@@ -332,7 +342,6 @@ class PPO_MAMBA2:
 
                     combined_learning_iteration_step = (multi_learning_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration
                     jax.debug.callback(callback, (eval_metrics, combined_learning_iteration_step))
-                
 
                 # Saving
                 if self.save_model:
@@ -340,11 +349,9 @@ class PPO_MAMBA2:
                         self.save(policy_state, critic_state)
                     jax.debug.callback(save_with_check, policy_state, critic_state)
 
-                
-                return (policy_state, critic_state, env_state, policy_gru_carry, key), None
+                return (policy_state, critic_state, env_state, policy_mamba_carry, key), None
 
-            jax.lax.scan(multi_learning_and_eval_save_iteration, (policy_state, critic_state, env_state, policy_gru_carry, key), jnp.arange(self.nr_multi_learning_and_eval_save_iterations))
-            
+            jax.lax.scan(multi_learning_and_eval_save_iteration, (policy_state, critic_state, env_state, policy_mamba_carry, key), jnp.arange(self.nr_multi_learning_and_eval_save_iterations))
 
         self.key, subkey = jax.random.split(self.key)
         seed_keys = jax.random.split(subkey, self.nr_parallel_seeds)
@@ -353,7 +360,6 @@ class PPO_MAMBA2:
         self.start_time = deepcopy(self.last_time)
         jax.block_until_ready(train_function(seed_keys, jnp.arange(self.nr_parallel_seeds)))
         rlx_logger.info(f"Average time: {max([time.time() - t for t in self.start_time]):.2f} s")
-    
 
     def log(self, name, value, step):
         if self.track_wandb:
@@ -362,12 +368,10 @@ class PPO_MAMBA2:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
             self.log_console(name, value)
-    
 
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
         rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │", flush=False)
-
 
     def start_logging(self, step):
         if self.track_wandb:
@@ -377,13 +381,11 @@ class PPO_MAMBA2:
         else:
             rlx_logger.info(f"Step: {step}")
 
-
     def end_logging(self, wandb_commit=True):
         if self.track_wandb:
             wandb.log(self.wandb_log_cache, commit=wandb_commit)
         if self.track_console:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
-
 
     def save(self, policy_state, critic_state):
         checkpoint = {
@@ -400,7 +402,6 @@ class PPO_MAMBA2:
 
         if self.track_wandb:
             wandb.save(f"{self.save_path}/{self.latest_model_file_name}", base_path=self.save_path)
-    
 
     def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         splitted_path = config.runner.load_model.split("/")
@@ -408,12 +409,12 @@ class PPO_MAMBA2:
         checkpoint_file_name = splitted_path[-1]
         shutil.unpack_archive(f"{checkpoint_dir}/{checkpoint_file_name}", f"{checkpoint_dir}/tmp", "zip")
         checkpoint_dir = f"{checkpoint_dir}/tmp"
-        
+
         loaded_algorithm_config = json.load(open(f"{checkpoint_dir}/config_algorithm.json", "r"))
         for key, value in loaded_algorithm_config.items():
             if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
                 config.algorithm[key] = value
-        model = PPO_MAMBA2(config, train_env, eval_env, run_path, writer)
+        model = PPO_Mamba2(config, train_env, eval_env, run_path, writer)
 
         target = {
             "policy": model.policy_state,
@@ -430,31 +431,29 @@ class PPO_MAMBA2:
 
         return model
 
-
     def test(self, episodes):
         rlx_logger.info("Testing runs infinitely. The episodes parameter is ignored.")
 
         @jax.jit
-        def rollout(env_state, policy_gru_carry, key):
+        def rollout(env_state, policy_mamba_carry, key):
             # key, subkey = jax.random.split(key)
-            action_mean, action_logstd, policy_gru_carry = self.policy.apply(self.policy_state.params, env_state.next_observation, policy_gru_carry, method=self.policy.apply_one_step)
+            action_mean, action_logstd, policy_mamba_carry = self.policy.apply(self.policy_state.params, env_state.next_observation, policy_mamba_carry, method=self.policy.apply_one_step)
             # action_std = jnp.exp(action_logstd)
-            action = action_mean # + action_std * jax.random.normal(subkey, shape=action_mean.shape)
+            action = action_mean  # + action_std * jax.random.normal(subkey, shape=action_mean.shape)
             processed_action = self.get_processed_action(action)
             env_state = self.train_env.step(env_state, processed_action)
             done = env_state.terminated | env_state.truncated
-            policy_gru_carry = policy_gru_carry * (1.0 - done[:, None])
-            return env_state, policy_gru_carry, key
+            policy_mamba_carry = self._reset_policy_mamba_carry(policy_mamba_carry, done)
+            return env_state, policy_mamba_carry, key
 
         self.key, subkey = jax.random.split(self.key)
         reset_keys = jax.random.split(subkey, self.nr_envs)
         env_state = self.train_env.reset(reset_keys, True)
-        policy_gru_carry = self.policy.initialize_carry(self.nr_envs)
+        policy_mamba_carry = self.policy.initialize_carry(self.nr_envs)
         while True:
-            env_state, policy_gru_carry, self.key = rollout(env_state, policy_gru_carry, self.key)
+            env_state, policy_mamba_carry, self.key = rollout(env_state, policy_mamba_carry, self.key)
             if self.render:
                 env_state = self.train_env.render(env_state)
-
 
     def general_properties():
         return GeneralProperties
