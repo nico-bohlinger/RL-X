@@ -31,6 +31,7 @@ A framework for Reinforcement Learning research.
 - [Proximal Policy Optimization + Gated Recurrent Unit (PPO+GRU)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_gru) in Flax
 - [Proximal Policy Optimization + Transformer (PPO+Transformer)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_transformer) in Flax
 - [Proximal Policy Optimization + History Window (PPO+HistoryWindow)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_history_window) in Flax
+- [Proximal Policy Optimization + Mamba-2 (PPO+Mamba-2)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_mamba2) in Flax
 - [Proximal Policy Optimization + Memory Actions (PPO+MemoryActions)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_memory_actions) in Flax
 - [Early Stopping Policy Optimization (ESPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/espo) in PyTorch, Flax
 - [Deep Deterministic Policy Gradient (DDPG)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ddpg) in Flax
