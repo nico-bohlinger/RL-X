@@ -89,7 +89,7 @@ pip install -e .[all] --config-settings editable_mode=compat
 For Linux, MacOS and Windows, PyTorch has to be installed separately to use the CUDA 11.8 version such that there are no conflicts with JAX.
 If PyTorch was previously installed with CUDA 12.X (potentially even through pip install -e .) then it is necessary to uninstall the related packages.
 ```
-pip uninstall $(pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
+pip uninstall $(pip freeze | grep -E '\-cu12|\-cu13' | cut -d '=' -f 1) -y
 ```
 Afterwards, PyTorch can be installed with the following command:
 ```

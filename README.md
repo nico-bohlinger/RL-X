@@ -95,7 +95,7 @@ conda activate rlx
 git clone git@github.com:nico-bohlinger/RL-X.git
 cd RL-X
 pip install -e .[all] --config-settings editable_mode=compat
-pip uninstall $(pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
+pip uninstall $(pip freeze | grep -E '\-cu12|\-cu13' | cut -d '=' -f 1) -y
 pip install "torch>=2.7.0" --index-url https://download.pytorch.org/whl/cu118 --upgrade
 pip install "jax[cuda12]"
 ```
