@@ -14,7 +14,7 @@ RUN git clone https://github.com/nico-bohlinger/RL-X.git
 WORKDIR /RL-X_ws/RL-X
 RUN micromamba run -n ${MAMBA_ENV} python -m pip install pip -U
 RUN micromamba run -n ${MAMBA_ENV} pip install -e .[all]
-RUN micromamba run -n ${MAMBA_ENV} pip uninstall $(micromamba run -n ${MAMBA_ENV} pip freeze | grep -i '\-cu12' | cut -d '=' -f 1) -y
+RUN PACKAGES=$(micromamba run -n ${MAMBA_ENV} pip freeze | grep -E '\-cu12|\-cu13' | cut -d '=' -f 1) && if [ -n "$PACKAGES" ]; then micromamba run -n ${MAMBA_ENV} pip uninstall -y $PACKAGES; fi
 RUN micromamba run -n ${MAMBA_ENV} pip install "torch>=2.7.0" --index-url https://download.pytorch.org/whl/cu118 --upgrade
 RUN micromamba run -n ${MAMBA_ENV} pip install "jax[cuda12]"
 
