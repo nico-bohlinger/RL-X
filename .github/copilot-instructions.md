@@ -16,3 +16,6 @@
 
 ## Cluster experiments
 1. Look into the .github/cluster-experiments.md file for instructions on how to run experiments on the cluster. If the file does not exist, there are not instructions yet.
+
+## Evaluating experiments
+1. Look into the .github/evaluate-experiments.md file for instructions on how to evaluate experiments. If the file does not exist, there are not instructions yet.
