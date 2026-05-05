@@ -38,17 +38,6 @@ def get_policy(config, env):
 
 
 class Mamba2Block(nn.Module):
-    """Small, full-JAX selective SSM block inspired by Mamba-2.
-
-    This is intentionally dependency-free. It keeps the useful PPO property that
-    action selection is recurrent and O(1) per environment step, while PPO updates
-    can replay contiguous rollout sequences from their saved initial recurrent state.
-
-    Carry shapes for batched one-step calls:
-      ssm:  [B, inner_dim, state_dim]
-      conv: [B, conv_kernel - 1, inner_dim]
-    """
-
     d_model: int
     state_dim: int
     expand: int
@@ -65,7 +54,6 @@ class Mamba2Block(nn.Module):
         self.x_proj = nn.Dense(self.inner_dim + 2 * self.state_dim, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))
         self.out_proj = nn.Dense(self.d_model, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))
 
-        # Depthwise causal convolution parameters. Shape [K, C].
         self.conv_kernel_param = self.param(
             "conv_kernel",
             nn.initializers.normal(stddev=0.02),
@@ -73,14 +61,11 @@ class Mamba2Block(nn.Module):
         )
         self.conv_bias = self.param("conv_bias", constant(0.0), (self.inner_dim,))
 
-        # Diagonal SSM parameters. A is negative for stability.
         a_init = jnp.log(jnp.arange(1, self.state_dim + 1, dtype=jnp.float32))[None, :]
         a_init = jnp.tile(a_init, (self.inner_dim, 1))
         self.A_log = self.param("A_log", lambda key, shape: a_init, (self.inner_dim, self.state_dim))
         self.D = self.param("D", constant(1.0), (self.inner_dim,))
 
-        # Bias dt toward a reasonable initial range. The random draw must live
-        # inside the parameter initializer so apply() does not require a params RNG.
         def dt_bias_init(key, shape):
             dt = jnp.exp(
                 jax.random.uniform(
@@ -94,7 +79,8 @@ class Mamba2Block(nn.Module):
 
         self.dt_bias = self.param("dt_bias", dt_bias_init, (self.inner_dim,))
 
-    def _causal_conv_one_step(self, x, conv_state):
+
+    def causal_conv_one_step(self, x, conv_state):
         """Depthwise causal conv for one token.
 
         x:          [B, inner_dim]
@@ -110,7 +96,8 @@ class Mamba2Block(nn.Module):
         y = jnp.sum(conv_in * self.conv_kernel_param[None, :, :], axis=1) + self.conv_bias[None, :]
         return y, next_conv_state
 
-    def _ssm_one_step(self, u, ssm_state):
+
+    def ssm_one_step(self, u, ssm_state):
         """Selective diagonal SSM update.
 
         u:         [B, inner_dim]
@@ -122,14 +109,15 @@ class Mamba2Block(nn.Module):
         c_t = params[..., self.inner_dim + self.state_dim:]
 
         dt = nn.softplus(dt_raw + self.dt_bias[None, :])  # [B, inner_dim]
-        A = -jnp.exp(self.A_log)                          # [inner_dim, state_dim]
+        A = -jnp.exp(self.A_log)  # [inner_dim, state_dim]
 
-        dA = jnp.exp(dt[..., None] * A[None, :, :])        # [B, inner_dim, state_dim]
+        dA = jnp.exp(dt[..., None] * A[None, :, :])  # [B, inner_dim, state_dim]
         dB_u = dt[..., None] * b_t[:, None, :] * u[..., None]
         next_ssm_state = dA * ssm_state + dB_u
 
         y = jnp.sum(next_ssm_state * c_t[:, None, :], axis=-1) + self.D[None, :] * u
         return y, next_ssm_state
+
 
     def apply_one_step(self, x, carry):
         """x: [B, d_model]."""
@@ -139,10 +127,10 @@ class Mamba2Block(nn.Module):
         projected = self.in_proj(x)
         u, z = jnp.split(projected, 2, axis=-1)
 
-        u, next_conv_state = self._causal_conv_one_step(u, carry["conv"])
+        u, next_conv_state = self.causal_conv_one_step(u, carry["conv"])
         u = nn.silu(u)
 
-        y, next_ssm_state = self._ssm_one_step(u, carry["ssm"])
+        y, next_ssm_state = self.ssm_one_step(u, carry["ssm"])
         y = y * nn.silu(z)
         y = self.out_proj(y)
 
@@ -151,6 +139,7 @@ class Mamba2Block(nn.Module):
             "conv": next_conv_state,
         }
         return residual + y, next_carry
+
 
     def forward_sequence(self, x_seq, done_seq, init_carry):
         """Replay one environment sequence.
@@ -241,15 +230,15 @@ class Policy(nn.Module):
         self.mean_head = nn.Dense(act_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))
         self.logstd = self.param("policy_logstd", constant(jnp.log(self.std_dev)), (1, act_dim))
 
+
     def initialize_carry(self, batch_size: int):
-        # This method is intentionally independent of setup(), because the
-        # algorithm calls it before policy.init().
         inner_dim = int(self.mamba_d_model * self.mamba_expand)
         conv_len = max(self.mamba_conv_kernel - 1, 0)
         return {
             "ssm": jnp.zeros((batch_size, self.mamba_num_layers, inner_dim, self.mamba_state_dim), dtype=jnp.float32),
             "conv": jnp.zeros((batch_size, self.mamba_num_layers, conv_len, inner_dim), dtype=jnp.float32),
         }
+
 
     def obs_encode(self, obs):
         if self.share_mamba_obs_encoder:
@@ -260,12 +249,14 @@ class Policy(nn.Module):
         x = nn.elu(x)
         return x
 
+
     def mamba_obs_encode(self, obs):
         x = obs[..., self.policy_observation_indices]
         x = self.mamba_obs_enc_dense(x)
         x = self.mamba_obs_enc_ln(x)
         x = nn.elu(x)
         return x
+
 
     def decode(self, obs_latent, mamba_latent):
         mamba_latent = self.mamba_out_ln(mamba_latent)
@@ -293,6 +284,7 @@ class Policy(nn.Module):
         mean = self.mean_head(h)
         return mean, self.logstd
 
+
     def apply_one_step(self, obs, carry):
         x = self.mamba_obs_encode(obs)
 
@@ -315,6 +307,7 @@ class Policy(nn.Module):
         obs_latent = self.mamba_obs_encode(obs) if self.share_mamba_obs_encoder else self.obs_encode(obs)
         mean, log_std = self.decode(obs_latent, x)
         return mean, log_std, next_carry
+
 
     def forward_sequence(self, obs_seq, done_seq, init_carry):
         """

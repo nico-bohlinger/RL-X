@@ -26,7 +26,7 @@ def get_config(algorithm_name):
     config.mamba_d_model = 128
     config.mamba_num_layers = 1
     config.mamba_expand = 2
-    config.mamba_state_dim = 16
+    config.mamba_state_dim = 8
     config.mamba_conv_kernel = 4
     config.mamba_down_projection_dim = 16
     config.mamba_layer_norm_eps = 1e-5

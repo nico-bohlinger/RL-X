@@ -116,12 +116,6 @@ class PPO_Mamba2:
             self.latest_model_file_name = "latest.model"
             self.latest_model_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
-    def _reset_policy_mamba_carry(self, carry, done):
-        done = done.astype(jnp.float32)
-        return {
-            "ssm": carry["ssm"] * (1.0 - done[:, None, None, None]),
-            "conv": carry["conv"] * (1.0 - done[:, None, None, None]),
-        }
 
     def train(self):
         def jitable_train_function(key, parallel_seed_id):
@@ -155,7 +149,10 @@ class PPO_Mamba2:
 
                         env_state = self.train_env.step(env_state, processed_action)
                         done = env_state.terminated | env_state.truncated
-                        next_policy_mamba_carry = self._reset_policy_mamba_carry(next_policy_mamba_carry, done)
+                        next_policy_mamba_carry = {
+                            "ssm": next_policy_mamba_carry["ssm"] * (1.0 - done[:, None, None, None]),
+                            "conv": next_policy_mamba_carry["conv"] * (1.0 - done[:, None, None, None]),
+                        }
                         transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, env_state.terminated, done, log_prob, env_state.info)
 
                         if self.render:
@@ -173,6 +170,7 @@ class PPO_Mamba2:
                     policy_state, critic_state, env_state, policy_mamba_carry, key = single_rollout_carry
                     states, next_states, actions, rewards, values, terminations, dones, log_probs, infos = batch
 
+
                     # Calculating advantages and returns
                     def calculate_gae_advantages(critic_state, next_states, rewards, values, terminations):
                         def compute_advantages(carry, t):
@@ -189,6 +187,7 @@ class PPO_Mamba2:
                         return advantages, returns
 
                     advantages, returns = calculate_gae_advantages(critic_state, next_states, rewards, values, terminations)
+
 
                     # Optimizing
                     def loss_fn(policy_params, critic_params, state_seq, action_seq, log_prob_seq, return_seq, advantage_seq, done_seq, init_carry):
@@ -279,6 +278,7 @@ class PPO_Mamba2:
                     optimization_metrics["v_value/explained_variance"] = 1 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
                     optimization_metrics["policy/std_dev"] = jnp.mean(jnp.exp(policy_state.params["params"]["policy_logstd"]))
 
+
                     # Logging
                     combined_metrics = {**infos, **optimization_metrics}
                     combined_metrics = tree.map_structure(lambda x: jnp.mean(x), combined_metrics)
@@ -306,6 +306,7 @@ class PPO_Mamba2:
                 learning_iteration_carry, _ = jax.lax.scan(learning_iteration, (policy_state, critic_state, env_state, policy_mamba_carry, subkey), jnp.arange(self.nr_updates_per_multi_learning_iteration))
                 policy_state, critic_state, env_state, policy_mamba_carry, key = learning_iteration_carry
 
+
                 # Evaluating
                 if self.evaluation_active:
                     def single_eval_rollout(single_eval_rollout_carry, _):
@@ -316,7 +317,10 @@ class PPO_Mamba2:
                         eval_processed_action = self.get_processed_action(eval_action)
                         eval_env_state = self.eval_env.step(eval_env_state, eval_processed_action)
                         eval_done = eval_env_state.terminated | eval_env_state.truncated
-                        eval_policy_mamba_carry = self._reset_policy_mamba_carry(eval_policy_mamba_carry, eval_done)
+                        eval_policy_mamba_carry = {
+                            "ssm": eval_policy_mamba_carry["ssm"] * (1.0 - eval_done[:, None, None, None]),
+                            "conv": eval_policy_mamba_carry["conv"] * (1.0 - eval_done[:, None, None, None]),
+                        }
 
                         return (policy_state, eval_env_state, eval_policy_mamba_carry), None
 
@@ -343,15 +347,18 @@ class PPO_Mamba2:
                     combined_learning_iteration_step = (multi_learning_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration
                     jax.debug.callback(callback, (eval_metrics, combined_learning_iteration_step))
 
+
                 # Saving
                 if self.save_model:
                     def save_with_check(policy_state, critic_state):
                         self.save(policy_state, critic_state)
                     jax.debug.callback(save_with_check, policy_state, critic_state)
 
+
                 return (policy_state, critic_state, env_state, policy_mamba_carry, key), None
 
             jax.lax.scan(multi_learning_and_eval_save_iteration, (policy_state, critic_state, env_state, policy_mamba_carry, key), jnp.arange(self.nr_multi_learning_and_eval_save_iterations))
+
 
         self.key, subkey = jax.random.split(self.key)
         seed_keys = jax.random.split(subkey, self.nr_parallel_seeds)
@@ -361,6 +368,7 @@ class PPO_Mamba2:
         jax.block_until_ready(train_function(seed_keys, jnp.arange(self.nr_parallel_seeds)))
         rlx_logger.info(f"Average time: {max([time.time() - t for t in self.start_time]):.2f} s")
 
+
     def log(self, name, value, step):
         if self.track_wandb:
             self.wandb_log_cache[name] = value
@@ -369,9 +377,11 @@ class PPO_Mamba2:
         if self.track_console:
             self.log_console(name, value)
 
+
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
         rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │", flush=False)
+
 
     def start_logging(self, step):
         if self.track_wandb:
@@ -381,11 +391,13 @@ class PPO_Mamba2:
         else:
             rlx_logger.info(f"Step: {step}")
 
+
     def end_logging(self, wandb_commit=True):
         if self.track_wandb:
             wandb.log(self.wandb_log_cache, commit=wandb_commit)
         if self.track_console:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
+
 
     def save(self, policy_state, critic_state):
         checkpoint = {
@@ -402,6 +414,7 @@ class PPO_Mamba2:
 
         if self.track_wandb:
             wandb.save(f"{self.save_path}/{self.latest_model_file_name}", base_path=self.save_path)
+
 
     def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         splitted_path = config.runner.load_model.split("/")
@@ -431,6 +444,7 @@ class PPO_Mamba2:
 
         return model
 
+
     def test(self, episodes):
         rlx_logger.info("Testing runs infinitely. The episodes parameter is ignored.")
 
@@ -443,7 +457,10 @@ class PPO_Mamba2:
             processed_action = self.get_processed_action(action)
             env_state = self.train_env.step(env_state, processed_action)
             done = env_state.terminated | env_state.truncated
-            policy_mamba_carry = self._reset_policy_mamba_carry(policy_mamba_carry, done)
+            policy_mamba_carry = {
+                "ssm": policy_mamba_carry["ssm"] * (1.0 - done[:, None, None, None]),
+                "conv": policy_mamba_carry["conv"] * (1.0 - done[:, None, None, None]),
+            }
             return env_state, policy_mamba_carry, key
 
         self.key, subkey = jax.random.split(self.key)
@@ -454,6 +471,7 @@ class PPO_Mamba2:
             env_state, policy_mamba_carry, self.key = rollout(env_state, policy_mamba_carry, self.key)
             if self.render:
                 env_state = self.train_env.render(env_state)
+
 
     def general_properties():
         return GeneralProperties
