@@ -13,9 +13,10 @@
 ## READMEs
 Most documentation is available in the ```README.md``` files in the respective directories:
 - [```/```](https://github.com/nico-bohlinger/RL-X/blob/master/README.md): Overview, Getting Started and Citation sections
+- [```/.github/```](https://github.com/nico-bohlinger/RL-X/blob/master/.github/README.md): Information on the Copilot instructions file and AI-assisted workflows in general
 - [```/experiments/```](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/README.md): Information on the different ways to run experiments, experiment tracking and saving/loading of models
 - [```/experiments/docker/```](https://github.com/nico-bohlinger/RL-X/blob/master/experiments/docker/README.md): Information on how to run experiments in a Docker container
-- [```/rl_x/algorithms/```](https://github.com/nico-bohlinger/RL-X/blob/master/algorithms/README.md): Information on the folder structure of algorithms, how to add new algorithms and how to mix and match them with environments
+- [```/rl_x/algorithms/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/README.md): Information on the folder structure of algorithms, how to add new algorithms and how to mix and match them with environments
 - [```/rl_x/algorithms/aqe/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/aqe/README.md): Implementation details of the Aggressive Q-Learning with Ensembles (AQE) algorithm
 - [```/rl_x/algorithms/c51/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/c51/README.md): Implementation details of the Categorical Deep Q-Network (C51) algorithm
 - [```/rl_x/algorithms/crossq/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/crossq/README.md): Implementation details of the CrossQ algorithm
@@ -33,6 +34,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/ppo_dtrl/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl/README.md): Implementation details of Differentiable Trust Region Layers in combination with the Proximal Policy Optimization (PPO+DTRL) algorithm
 - [```/rl_x/algorithms/ppo_gru/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_gru/README.md): Implementation details of the Proximal Policy Optimization + Gated Recurrent Unit (PPO+GRU) algorithm
 - [```/rl_x/algorithms/ppo_history_window/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_history_window/README.md): Implementation details of the Proximal Policy Optimization + History Window (PPO+HistoryWindow) algorithm
+- [```/rl_x/algorithms/ppo_mamba2/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_mamba2/README.md): Implementation details of the Proximal Policy Optimization + Mamba-2 (PPO+Mamba-2) algorithm
 - [```/rl_x/algorithms/ppo_memory_actions/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_memory_actions/README.md): Implementation details of the Proximal Policy Optimization + Memory Actions (PPO+MemoryActions) algorithm
 - [```/rl_x/algorithms/ppo_transformer/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_transformer/README.md): Implementation details of the Proximal Policy Optimization + Transformer (PPO+Transformer) algorithm
 - [```/rl_x/algorithms/pqn/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/pqn/README.md): Implementation details of the Parallelized Q-Network (PQN) algorithm

@@ -9,3 +9,7 @@ experiments/*.sh
 !experiments/slurm_experiment.sh
 !experiments/start_experiment.sh
 !experiments/stop_experiment.sh
+.github/conda-env-name.txt
+.github/cluster-experiments.md
+.github/evaluate-experiments.md
+experiments/plotting/
