@@ -22,7 +22,7 @@ A framework for Reinforcement Learning research.
 - 🚀​ **GPU environments**: MJX, Warp, Isaac Lab and ManiSkill can run thousands of parallel environments
 - 🤖​ **Robot learning**: Training and deployment for the Unitree Go2 (quadruped) and G1 (humanoid) robots
 - ⚽ **RoboCup**: Training for the RoboCup soccer competition in MuJoCo and MJX
-- 🕰️ **Memory architectures**: PPO with GRU, LSTM, Transformer, History Window, Mamba-2, or Memory Actions
+- 🕰️ **Memory architectures**: PPO with GRU, LSTM, Transformer, History Window, Mamba-2, Memory Actions
 - 📈 **Experiments**: Checkpoints, Evaluation, Console log, Tensorboard, Weights & Biases, SLURM, Docker
 
 
