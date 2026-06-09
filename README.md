@@ -74,7 +74,7 @@ A framework for Reinforcement Learning research.
     - Example of a custom MuJoCo XLA (MJX) with Warp backend environment
     - Example of a custom MuJoCo Warp with PyTorch environment
 - [Custom Robot Learning](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion)
-    - Example of custom MuJoCo and MJX environments for quadruped and humanoid locomotion learning and real robot deployment
+    - Example of custom MuJoCo, MJX and MJX + Warp environments for quadruped and humanoid locomotion learning and real robot deployment
 - [Custom RoboCup Soccer](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robocup_soccer)
     - Example of custom MuJoCo and MJX environments for the RoboCup soccer simulation 3D league and other humanoid soccer leagues
 - [Custom Isaac Lab](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_isaac_lab)

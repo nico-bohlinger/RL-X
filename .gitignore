@@ -13,3 +13,4 @@ experiments/*.sh
 .github/cluster-experiments.md
 .github/evaluate-experiments.md
 experiments/plotting/
+.claude/

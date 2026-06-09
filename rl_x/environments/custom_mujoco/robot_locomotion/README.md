@@ -1,6 +1,6 @@
 # Robot Locomotion MuJoCo Environments
 
-Contains MuJoCo and MJX environments for a robot locomotion task with the Unitree Go2 quadruped and Unitree G1 humanoid robots.
+Contains MuJoCo, MJX and MJX + Warp environments for a robot locomotion task with the Unitree Go2 quadruped and Unitree G1 humanoid robots.
 The resulting policies can be directly transferred to the real robots.
 Example deployment code for the Go2 can be found [here](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_mujoco/robot_locomotion/deployment/unitree_go2/).
 
@@ -8,6 +8,8 @@ The MuJoCo version is a copy of the MJX version but uses the standard MuJoCo phy
 Use the MJX version for large-scale training on a GPU.
 The default ```mjx``` version should be used with ```flax_full_jit``` algorithm implementations (e.g. ```fastsac.flax_full_jit```).
 The ```mjx_pytorch``` version can be used with algorithms that implement the PyTorch interface (e.g. ```fastsac.pytorch```) but it is not optimized and runs rather slowly.
+The ```mjx_warp``` version uses the MuJoCo Warp physics backend through MJX (still a JAX environment, used with ```flax_full_jit``` algorithms).
+On machines with a CUDA driver older than 12.4, the ```mjx_warp``` version must be run with ```--environment.graph_mode=jax``` (Warp's conditional CUDA graph nodes used by the solver are only available from driver 12.4+).
 
 The default configs from the ```flax_full_jit``` algorithms are optimized for many parallel environments and locomotion tasks, so they will work well out of the box.
 Additionally, when using ```ppo.flax_full_jit```, it is recommended to increase the ```entropy_coef``` to around ```0.002```, especially when using the ```hfield_diverse``` terrain, to continue to encourage exploration in the later stages of training.
