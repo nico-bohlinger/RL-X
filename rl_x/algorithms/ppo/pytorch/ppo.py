@@ -101,7 +101,7 @@ class PPO:
                 delta = rewards + gamma * next_values * (1 - terminations) - values
                 advantages = torch.zeros_like(rewards)
                 lastgaelam = torch.zeros_like(rewards[0])
-                for t in range(values.shape[0] - 2, -1, -1):
+                for t in range(values.shape[0] - 1, -1, -1):
                     lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
                 returns = advantages + values
                 return advantages, returns
@@ -112,7 +112,7 @@ class PPO:
             delta = rewards + gamma * next_values * (1 - terminations) - values
             advantages = torch.zeros_like(rewards)
             lastgaelam = torch.zeros_like(rewards[0])
-            for t in range(values.shape[0] - 2, -1, -1):
+            for t in range(values.shape[0] - 1, -1, -1):
                 lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
             returns = advantages + values
             return advantages, returns
