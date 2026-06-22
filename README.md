@@ -69,6 +69,7 @@ A framework for Reinforcement Learning research.
 - [MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground)
     - Locomotion
 - [Custom MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco)
+    - [MuJoCo Benchmarks](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/gym) Ant, Half Cheetah, Hopper, Walker2D, Humanoid, and Point Maze.
     - Example of a custom MuJoCo environment
     - Example of a custom MuJoCo XLA (MJX) environment
     - Example of a custom MuJoCo XLA (MJX) with Warp backend environment
