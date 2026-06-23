@@ -20,6 +20,7 @@ A framework for Reinforcement Learning research.
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
 - ⛰️​ **Custom environments**: Examples for MuJoCo, Isaac Lab, ManiSkill or custom socket communication
 - 🚀​ **GPU environments**: MJX, Warp, Isaac Lab and ManiSkill can run thousands of parallel environments
+- ​🦾 **MuJoCo Benchmarks**: Ant, Half Cheetah, Hopper, Walker2D, Humanoid, and Point Maze environments
 - 🤖​ **Robot learning**: Training and deployment for the Unitree Go2 (quadruped) and G1 (humanoid) robots
 - ⚽ **RoboCup**: Training for the RoboCup soccer competition in MuJoCo and MJX
 - 🕰️ **Memory architectures**: PPO with GRU, LSTM, Transformer, History Window, Mamba-2, Memory Actions
@@ -27,6 +28,8 @@ A framework for Reinforcement Learning research.
 
 
 ### Implemented Algorithms
+
+#### Reinforcement Learning
 - [Proximal Policy Optimization (PPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo) in PyTorch, Flax
 - [Proximal Policy Optimization + Differentiable Trust Region Layers (PPO+DTRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl) in Flax
 - [Proximal Policy Optimization + Gated Recurrent Unit (PPO+GRU)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_gru) in Flax
@@ -54,6 +57,14 @@ A framework for Reinforcement Learning research.
 - [Categorical Deep Q-Network (C51)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/c51) in Flax
 - [Parallelized Q-Network (PQN)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/pqn) in Flax
 
+#### Imitation Learning & Inverse RL
+- [Generative Adversarial Imitation Learning (GAIL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/gail_ppo) in Flax
+- [Adversarial Inverse Reinforcement Learning (AIRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/airl_ppo) in Flax
+- [Adversarial Motion Priors (AMP)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/amp_ppo) in Flax
+- [Noise Conditioned Energy Based Annealed Rewards (NEAR)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/near_ppo) in Flax
+- [Inverse Soft Q-Learning (IQ-Learn)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/iq_sac) in Flax
+- [Trust Region Inverse Reinforcement Learning + Trust Region Loss (TRIRL+PPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trirl_ppo) in Flax
+- [Trust Region Inverse Reinforcement Learning + Differentiable Trust Region Layers (TRIRL+DTRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trirl_dtrl) in Flax
 
 ### Usable Environments
 - [Gymnasium](https://github.com/Farama-Foundation/Gymnasium)
