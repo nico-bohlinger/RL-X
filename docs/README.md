@@ -43,6 +43,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/sac/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/sac/README.md): Implementation details of the Soft Actor Critic (SAC) algorithm
 - [```/rl_x/algorithms/td3/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/td3/README.md): Implementation details of the Twin Delayed Deep Deterministic Gradient (TD3) algorithm
 - [```/rl_x/algorithms/tqc/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/tqc/README.md): Implementation details of the Truncated Quantile Critics (TQC) algorithm
+- [```/rl_x/algorithms/xqc/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/xqc/README.md): Implementation details of the XQC algorithm
 - [```/rl_x/environments/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/README.md): Information on the folder structure of environments, how to add new environments and how to mix and match them with algorithms
 - [```/rl_x/environments/custom_interface/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_interface/README.md): Implementation details of the custom environment interface with simple socket communication
 - [```/rl_x/environments/custom_isaac_lab/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/custom_isaac_lab/README.md): Implementation details of the custom Isaac Lab environment examples

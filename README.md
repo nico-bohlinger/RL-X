@@ -44,6 +44,7 @@ A framework for Reinforcement Learning research.
 - [Randomized Ensembled Double Q-Learning (REDQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/redq) in Flax
 - [Dropout Q-Functions (DroQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/droq) in Flax
 - [CrossQ](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/crossq) in Flax
+- [XQC](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/xqc) in Flax
 - [Truncated Quantile Critics (TQC)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/tqc) in Flax
 - [Aggressive Q-Learning with Ensembles (AQE)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/aqe) in Flax
 - [Maximum a Posteriori Policy Optimization (MPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/mpo) in PyTorch, Flax
