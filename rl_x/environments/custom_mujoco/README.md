@@ -1,3 +1,6 @@
+# MuJoCo Benchmarks
+Contains [MuJoCo benchmark environments](https://gymnasium.farama.org/environments/mujoco/) Ant, Half Cheetah, Hopper, Walker2D, Humanoid, and Point Maze implemented using MuJoCo XLA for parallelization. 
+
 # Custom MuJoCo Environments
 
 Contains three examples for custom MuJoCo environments: a minimal Ant tracking task, a more complete Robot Locomotion setup, and a RoboCup Soccer locomotion variant.
