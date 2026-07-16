@@ -30,6 +30,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/fastmpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fastmpo/README.md): Implementation details of the Fast Maximum a Posteriori Policy Optimization (FastMPO) algorithm
 - [```/rl_x/algorithms/fastsac/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fastsac/README.md): Implementation details of the Fast Soft Actor-Critic (FastSAC) algorithm
 - [```/rl_x/algorithms/fasttd3/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fasttd3/README.md): Implementation details of the Fast Twin Delayed Deep Deterministic Gradient (FastTD3) algorithm
+- [```/rl_x/algorithms/flashsac/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/flashsac/README.md): Implementation details of the Flash Soft Actor-Critic (FlashSAC) algorithm
 - [```/rl_x/algorithms/mpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/mpo/README.md): Implementation details of the Maximum a Posteriori Policy Optimization (MPO) algorithm
 - [```/rl_x/algorithms/ppo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo/README.md): Implementation details of the Proximal Policy Optimization (PPO) algorithm
 - [```/rl_x/algorithms/ppo_dtrl/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl/README.md): Implementation details of Differentiable Trust Region Layers in combination with the Proximal Policy Optimization (PPO+DTRL) algorithm

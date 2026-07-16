@@ -41,6 +41,7 @@ A framework for Reinforcement Learning research.
 - [Fast Twin Delayed Deep Deterministic Gradient (FastTD3)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fasttd3) in PyTorch, Flax
 - [Soft Actor Critic (SAC)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/sac) in PyTorch, Flax
 - [Fast Soft Actor Critic (FastSAC)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fastsac) in PyTorch, Flax
+- [Flash Soft Actor Critic (FlashSAC)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/flashsac) in PyTorch, Flax
 - [Randomized Ensembled Double Q-Learning (REDQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/redq) in Flax
 - [Dropout Q-Functions (DroQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/droq) in Flax
 - [Bigger, Regularized, Optimistic (BRO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/bro) in Flax
