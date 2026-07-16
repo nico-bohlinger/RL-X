@@ -7,7 +7,7 @@ def get_config(algorithm_name):
     config.name = algorithm_name
 
     config.device = "gpu"  # cpu, gpu
-    config.total_timesteps = 1e6
+    config.total_timesteps = 1000000
     config.policy_learning_rate = 3e-4
     config.critic_learning_rate = 3e-4
     config.entropy_coefficient_learning_rate = 3e-4

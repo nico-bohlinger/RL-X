@@ -41,7 +41,7 @@ class FlashSAC:
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
         self.nr_parallel_seeds = config.algorithm.nr_parallel_seeds
-        self.total_timesteps = int(config.algorithm.total_timesteps)
+        self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.render = config.environment.render
         self.render_callback_type = getattr(config.environment, 'render_callback_type', 'io_callback')
@@ -49,7 +49,7 @@ class FlashSAC:
         self.learning_rate_peak = config.algorithm.learning_rate_peak
         self.learning_rate_end = config.algorithm.learning_rate_end
         self.learning_rate_warmup_steps = config.algorithm.learning_rate_warmup_steps
-        self.buffer_size = int(config.algorithm.buffer_size)
+        self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
         self.updates_per_step = config.algorithm.updates_per_step

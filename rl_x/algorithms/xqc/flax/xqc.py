@@ -39,14 +39,14 @@ class XQC:
         self.track_tb = config.runner.track_tb
         self.track_wandb = config.runner.track_wandb
         self.seed = config.environment.seed
-        self.total_timesteps = int(config.algorithm.total_timesteps)
+        self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.policy_learning_rate = config.algorithm.policy_learning_rate
         self.critic_learning_rate = config.algorithm.critic_learning_rate
         self.entropy_coefficient_learning_rate = config.algorithm.entropy_coefficient_learning_rate
         self.learning_rate_end = config.algorithm.learning_rate_end
         self.weight_decay = config.algorithm.weight_decay
-        self.buffer_size = int(config.algorithm.buffer_size)
+        self.buffer_size = config.algorithm.buffer_size
         self.learning_starts = config.algorithm.learning_starts
         self.batch_size = config.algorithm.batch_size
         self.updates_per_step = config.algorithm.updates_per_step
