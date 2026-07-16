@@ -26,7 +26,7 @@ def get_config(algorithm_name):
     config.share_gru_obs_encoder = False
     config.action_clipping_and_rescaling = True
     config.nr_hidden_units = 256
-    config.evaluation_frequency = 204800  # -1 to disable
+    config.evaluation_frequency = -1
     config.evaluation_episodes = 10
 
     return config

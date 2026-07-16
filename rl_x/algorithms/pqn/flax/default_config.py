@@ -20,7 +20,7 @@ def get_config(algorithm_name):
     config.epsilon_decay_fraction = 0.1
     config.max_grad_norm = 10.0
     config.nr_hidden_units = 512
-    config.evaluation_frequency = 204800  # -1 to disable
+    config.evaluation_frequency = -1
     config.evaluation_episodes = 10
 
     return config

@@ -35,7 +35,7 @@ def get_config(algorithm_name):
     config.noise_zeta_mu = 2.0
     config.noise_zeta_max = 16
     config.logging_frequency = 40960
-    config.evaluation_and_save_frequency = -1
-    config.evaluation_active = True
+    config.evaluation_and_save_frequency = 18350080
+    config.evaluation_active = False
 
     return config

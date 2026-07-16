@@ -32,7 +32,7 @@ def get_config(algorithm_name):
     config.tf_dropout = 0.0
     config.tf_layer_norm_eps = 1e-5
     config.action_clipping_and_rescaling = False
-    config.evaluation_and_save_frequency = 17301504  # -1 to disable
-    config.evaluation_active = True
+    config.evaluation_and_save_frequency = 17301504
+    config.evaluation_active = False
 
     return config

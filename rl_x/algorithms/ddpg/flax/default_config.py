@@ -18,7 +18,7 @@ def get_config(algorithm_name):
     config.epsilon = 0.1
     config.nr_hidden_units = 256
     config.logging_frequency = 3000
-    config.evaluation_frequency = 200000  # -1 to disable
+    config.evaluation_frequency = -1
     config.evaluation_episodes = 10
 
     return config

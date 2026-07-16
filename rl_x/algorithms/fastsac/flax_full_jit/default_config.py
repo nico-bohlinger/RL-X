@@ -34,7 +34,7 @@ def get_config(algorithm_name):
     config.enable_observation_normalization = True
     config.normalizer_epsilon = 1e-8
     config.logging_frequency = 40960
-    config.evaluation_and_save_frequency = 18350080  # -1 to disable
-    config.evaluation_active = True
+    config.evaluation_and_save_frequency = 18350080
+    config.evaluation_active = False
 
     return config

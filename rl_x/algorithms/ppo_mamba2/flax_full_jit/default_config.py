@@ -33,7 +33,7 @@ def get_config(algorithm_name):
     config.mamba_dt_min = 1e-3
     config.mamba_dt_max = 1e-1
     config.action_clipping_and_rescaling = False
-    config.evaluation_and_save_frequency = 17301504  # -1 to disable
-    config.evaluation_active = True
+    config.evaluation_and_save_frequency = 17301504
+    config.evaluation_active = False
 
     return config

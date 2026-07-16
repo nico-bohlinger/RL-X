@@ -24,7 +24,7 @@ def get_config(algorithm_name):
     config.cov_bound = 0.001
     config.trust_region_coef = 0.1
     config.nr_hidden_units = 256
-    config.evaluation_frequency = 204800  # -1 to disable
+    config.evaluation_frequency = -1
     config.evaluation_episodes = 10
 
     return config

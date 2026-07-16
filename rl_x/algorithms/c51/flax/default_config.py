@@ -24,7 +24,7 @@ def get_config(algorithm_name):
     config.target_update_frequency = 8000
     config.nr_hidden_units = 512
     config.logging_frequency = 1000
-    config.evaluation_frequency = 200000  # -1 to disable
+    config.evaluation_frequency = -1
     config.evaluation_episodes = 10
 
     return config

@@ -26,7 +26,7 @@ def get_config(algorithm_name):
     config.gru_obs_combine_method = "concat"  # concat, film
     config.share_gru_obs_encoder = False
     config.action_clipping_and_rescaling = False
-    config.evaluation_and_save_frequency = 17301504  # -1 to disable
-    config.evaluation_active = True
+    config.evaluation_and_save_frequency = 17301504
+    config.evaluation_active = False
 
     return config

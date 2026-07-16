@@ -30,7 +30,7 @@ def get_config(algorithm_name):
     config.auxiliary_loss_coefficient = 1.0
     config.nr_kl_samples = 16
     config.normalize_observation = True
-    config.evaluation_and_save_frequency = 17301504  # -1 to disable
-    config.evaluation_active = True
+    config.evaluation_and_save_frequency = 17301504
+    config.evaluation_active = False
 
     return config
