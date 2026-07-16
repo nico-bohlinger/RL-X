@@ -36,6 +36,7 @@ A framework for Reinforcement Learning research.
 - [Proximal Policy Optimization + Mamba-2 (PPO+Mamba-2)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_mamba2) in Flax
 - [Proximal Policy Optimization + Memory Actions (PPO+MemoryActions)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_memory_actions) in Flax
 - [Early Stopping Policy Optimization (ESPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/espo) in PyTorch, Flax
+- [Relative Entropy Pathwise Policy Optimization (REPPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/reppo) in PyTorch, Flax
 - [Deep Deterministic Policy Gradient (DDPG)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ddpg) in Flax
 - [Twin Delayed Deep Deterministic Gradient (TD3)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/td3) in Flax
 - [Fast Twin Delayed Deep Deterministic Gradient (FastTD3)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fasttd3) in PyTorch, Flax

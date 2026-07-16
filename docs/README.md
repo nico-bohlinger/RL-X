@@ -42,6 +42,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/ppo_transformer/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_transformer/README.md): Implementation details of the Proximal Policy Optimization + Transformer (PPO+Transformer) algorithm
 - [```/rl_x/algorithms/pqn/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/pqn/README.md): Implementation details of the Parallelized Q-Network (PQN) algorithm
 - [```/rl_x/algorithms/redq/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/redq/README.md): Implementation details of the Randomized Ensembled Double Q-Learning (REDQ) algorithm
+- [```/rl_x/algorithms/reppo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/reppo/README.md): Implementation details of the Relative Entropy Pathwise Policy Optimization (REPPO) algorithm
 - [```/rl_x/algorithms/sac/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/sac/README.md): Implementation details of the Soft Actor Critic (SAC) algorithm
 - [```/rl_x/algorithms/simba/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simba/README.md): Implementation details of the Simplicity Bias (SimBa) algorithm
 - [```/rl_x/algorithms/simbav2/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simbav2/README.md): Implementation details of the Simplicity Bias V2 (SimBaV2) algorithm
