@@ -43,6 +43,7 @@ A framework for Reinforcement Learning research.
 - [Fast Soft Actor Critic (FastSAC)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fastsac) in PyTorch, Flax
 - [Randomized Ensembled Double Q-Learning (REDQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/redq) in Flax
 - [Dropout Q-Functions (DroQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/droq) in Flax
+- [Bigger, Regularized, Optimistic (BRO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/bro) in Flax
 - [CrossQ](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/crossq) in Flax
 - [XQC](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/xqc) in Flax
 - [Truncated Quantile Critics (TQC)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/tqc) in Flax
