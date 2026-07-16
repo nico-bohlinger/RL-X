@@ -27,6 +27,7 @@ class DefaultReward:
         self.action_rate_coeff = env.env_config["reward"]["action_rate_coeff"] * env.dt
         self.action_smoothness_coeff = env.env_config["reward"]["action_smoothness_coeff"] * env.dt
         self.collision_coeff = env.env_config["reward"]["collision_coeff"] * env.dt
+        self.ground_penetration_coeff = env.env_config["reward"]["ground_penetration_coeff"] * env.dt
         self.base_height_coeff = env.env_config["reward"]["base_height_coeff"] * env.dt
         self.foot_air_time_coeff = env.env_config["reward"]["foot_air_time_coeff"] * env.dt
         self.foot_air_time_per_robot_size_m = env.env_config["reward"]["foot_air_time_per_robot_size_m"]
@@ -34,6 +35,7 @@ class DefaultReward:
         self.foot_slip_coeff = env.env_config["reward"]["foot_slip_coeff"] * env.dt
         self.foot_z_velocity_coeff = env.env_config["reward"]["foot_z_velocity_coeff"] * env.dt
         self.foot_flat_contact_coeff = env.env_config["reward"]["foot_flat_contact_coeff"] * env.dt
+        self.feet_orientation_coeff = env.env_config["reward"]["feet_orientation_coeff"] * env.dt * env.foot_type_int
 
         self.feet_symmetry_pairs = env.feet_symmetry_pairs
 
@@ -80,13 +82,14 @@ class DefaultReward:
         desired_imu_linear_velocity_xy = internal_state["goal_velocities"][:2]
         xy_difference = desired_imu_linear_velocity_xy - current_imu_linear_velocity[:2]
         xy_velocity_difference_norm = jnp.sum(jnp.square(xy_difference))
-        tracking_xy_velocity_command_reward = self.tracking_xy_velocity_command_coeff * jnp.exp(-xy_velocity_difference_norm / self.tracking_xy_temperature)
+        tracking_temperature_scale = jnp.maximum(jnp.square(internal_state["max_command_velocity"]), 1e-6)
+        tracking_xy_velocity_command_reward = self.tracking_xy_velocity_command_coeff * jnp.exp(-xy_velocity_difference_norm / (self.tracking_xy_temperature * tracking_temperature_scale))
 
         # Tracking angular velocity command reward
         current_imu_angular_velocity = data.sensordata[self.env.imu_angular_velocity_sensor_adr:self.env.imu_angular_velocity_sensor_adr + self.env.imu_angular_velocity_sensor_dim]
         desired_imu_yaw_velocity = internal_state["goal_velocities"][2]
         yaw_velocity_difference_norm = jnp.square(current_imu_angular_velocity[2] - desired_imu_yaw_velocity)
-        tracking_yaw_velocity_command_reward = self.tracking_yaw_velocity_command_coeff * jnp.exp(-yaw_velocity_difference_norm / self.tracking_yaw_temperature)
+        tracking_yaw_velocity_command_reward = self.tracking_yaw_velocity_command_coeff * jnp.exp(-yaw_velocity_difference_norm / (self.tracking_yaw_temperature * tracking_temperature_scale))
 
         # Alive clipped reward
         alive_clipped_reward = curriculum_coeff * self.alive_clipped_coeff * 1.0
@@ -135,11 +138,17 @@ class DefaultReward:
         acceleration_reward = curriculum_coeff * self.joint_acceleration_coeff * -acceleration_norm
 
         # Joint torque reward
-        torque_norm = jnp.mean(jnp.square(data.qfrc_actuator[self.env.actuator_joint_mask_qvel]))
+        joint_torques = data.qfrc_actuator[self.env.actuator_joint_mask_qvel]
+        joint_velocities = data.qvel[self.env.actuator_joint_mask_qvel]
+        joint_actuator_force_capacity = jnp.abs(mjx_model.actuator_forcerange).max(axis=1)
+        joint_actuator_force_capacity = jnp.where(joint_actuator_force_capacity > 0.0, joint_actuator_force_capacity, 1.0)
+        force_fraction = joint_torques / joint_actuator_force_capacity
+        power_fraction = jnp.maximum(joint_torques * joint_velocities, 0.0) / (joint_actuator_force_capacity * internal_state["actuator_joint_max_velocities"])
+        torque_norm = jnp.mean(jnp.square(force_fraction))
         torque_reward = curriculum_coeff * self.joint_torque_coeff * -torque_norm
 
         # Power draw penalty reward
-        power_draw = jnp.mean(jnp.maximum(data.qfrc_actuator[self.env.actuator_joint_mask_qvel] * data.qvel[self.env.actuator_joint_mask_qvel], 0.0))
+        power_draw = jnp.mean(power_fraction)
         power_draw_penalty_reward = curriculum_coeff * self.power_draw_penalty_coeff * -power_draw
 
         # Action rate reward
@@ -158,6 +167,11 @@ class DefaultReward:
         nr_collisions = (jnp.sum(contact_between_geoms) - self.env.reward_collision_sphere_geom_ids.shape[0]) // 2
         nr_collisions = jnp.maximum(nr_collisions - internal_state["nr_collisions_in_nominal"], 0)
         collision_reward = curriculum_coeff * self.collision_coeff * -nr_collisions
+
+        # Ground penetration reward
+        sphere_ground_height = self.env.terrain_function.ground_height_at(internal_state, all_contact_relevant_geom_xpos[:, 0], all_contact_relevant_geom_xpos[:, 1])
+        ground_penetration = jnp.sum(jnp.maximum(sphere_ground_height + all_contact_relevant_geom_sizes - all_contact_relevant_geom_xpos[:, 2] - internal_state["nr_ground_penetrations_in_nominal"], 0.0))
+        ground_penetration_reward = curriculum_coeff * self.ground_penetration_coeff * -ground_penetration
 
         # Walking height
         height_difference_squared = (internal_state["robot_imu_height_over_ground"] - internal_state["robot_nominal_imu_height_over_ground"]) ** 2
@@ -192,12 +206,18 @@ class DefaultReward:
         contact_filtered_missing_lower_feet_contacts = jnp.mean(feet_floor_contacts * missing_lower_feet_contacts)
         foot_flat_contact_reward = curriculum_coeff * self.foot_flat_contact_coeff * -contact_filtered_missing_lower_feet_contacts
 
+        # Feet orientation reward
+        feet_rotations = data.xmat[self.env.body_ids_of_feet].reshape(-1, 3, 3)
+        feet_tilt = jnp.sqrt(jnp.square(feet_rotations[:, 2, 0]) + jnp.square(feet_rotations[:, 2, 1]) + 1e-12)
+        feet_orientation_penalty = jnp.mean(jnp.maximum(feet_tilt - internal_state["nominal_feet_tilt"], 0.0))
+        feet_orientation_reward = curriculum_coeff * self.feet_orientation_coeff * -feet_orientation_penalty
+
         # Total reward
         tracking_reward = tracking_xy_velocity_command_reward + tracking_yaw_velocity_command_reward
         reward_penalty = z_velocity_reward + imu_acceleration_reward + angular_velocity_reward + angular_position_reward + \
                          actuator_joint_nominal_diff_reward +  joint_position_limit_reward + joint_velocity_limit_reward + joint_velocity_reward + \
                          acceleration_reward + torque_reward + power_draw_penalty_reward + action_rate_reward + action_smoothness_reward + \
-                         collision_reward + base_height_reward + foot_air_time_reward + symmetry_air_reward + foot_slip_reward + foot_z_velocity_reward + foot_flat_contact_reward
+                         collision_reward + ground_penetration_reward + base_height_reward + foot_air_time_reward + symmetry_air_reward + foot_slip_reward + foot_z_velocity_reward + foot_flat_contact_reward + feet_orientation_reward
         reward = tracking_reward + reward_penalty + alive_clipped_reward
         reward = jnp.maximum(reward, 0.0) + alive_unclipped_reward
         reward = jnp.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
@@ -221,13 +241,16 @@ class DefaultReward:
         info[f"reward/action_rate"] = action_rate_reward
         info[f"reward/action_smoothness"] = action_smoothness_reward
         info[f"reward/collision"] = collision_reward
+        info[f"reward/ground_penetration"] = ground_penetration_reward
         info[f"reward/base_height"] = base_height_reward
         info[f"reward/foot_air_time"] = foot_air_time_reward
         info[f"reward/symmetry_air"] = symmetry_air_reward
         info[f"reward/foot_slip"] = foot_slip_reward
         info[f"reward/foot_z_velocity"] = foot_z_velocity_reward
         info[f"reward/foot_flat_contact"] = foot_flat_contact_reward
+        info[f"reward/feet_orientation"] = feet_orientation_reward
         info[f"reward/total"] = reward
         info[f"env_info/xy_vel_diff_abs"] = jnp.nan_to_num(jnp.mean(jnp.minimum(jnp.abs(xy_difference), 2*internal_state["max_command_velocity"])), nan=2*internal_state["max_command_velocity"], posinf=2*internal_state["max_command_velocity"], neginf=2*internal_state["max_command_velocity"])
+        info[f"env_info/xy_vel_diff_abs_normalized"] = info[f"env_info/xy_vel_diff_abs"] / jnp.maximum(internal_state["max_command_velocity"], 1e-6)
 
         return reward

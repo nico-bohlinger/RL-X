@@ -1,3 +1,6 @@
+import jax.numpy as jnp
+
+
 class NoneActionDelay:
     def __init__(self, env):
         self.env = env
@@ -15,5 +18,5 @@ class NoneActionDelay:
         pass
 
 
-    def delay_action(self, action, internal_state, key):
-        return action
+    def delay_action(self, action, internal_state):
+        return jnp.broadcast_to(action, (self.env.nr_substeps, action.shape[0]))

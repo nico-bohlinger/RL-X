@@ -144,7 +144,8 @@ class LocomotionEnv:
         self.robot_dimensions_mean = 0.5  # This can be calculated smartly...
 
         self.env_curriculum_nr_levels = env_config["env_curriculum_nr_levels"]
-        self.env_curriculum_level_success_episode_return = env_config["env_curriculum_level_success_episode_return"]
+        self.env_curriculum_level_success_normalized_xy_vel_diff = env_config["env_curriculum_level_success_normalized_xy_vel_diff"]
+        self.env_curriculum_level_success_episode_length = env_config["env_curriculum_level_success_episode_length"]
 
         self.control_function = get_control_function(env_config["control_type"], self)
         self.control_frequency_hz = self.control_function.control_frequency_hz
@@ -292,6 +293,7 @@ class LocomotionEnv:
             "robot_dimensions_mean": self.robot_dimensions_mean,
             "max_command_velocity": jnp.minimum(self.robot_dimensions_mean * self.command_function.max_velocity_per_m_factor, self.command_function.clip_max_velocity),
             "nr_collisions_in_nominal": 0,
+            "nr_ground_penetrations_in_nominal": jnp.zeros(self.reward_collision_sphere_geom_ids.shape[0]),
         }
         self.gait_manager_function.init(internal_state)
         self.command_function.init(internal_state)
@@ -326,7 +328,7 @@ class LocomotionEnv:
 
     @partial(jax.jit, static_argnums=(0,))
     def _reset(self, state):
-        key, initial_state_key, terrain_key, domain_randomization_key, observation_key, gait_manager_key = jax.random.split(state.key, 6)
+        key, initial_state_key, terrain_key, domain_randomization_key, command_sampling_key, command_key, observation_key, gait_manager_key = jax.random.split(state.key, 8)
         state = state.replace(key=key)
 
         mjx_model = self.terrain_function.sample(state.mjx_model, state.internal_state, terrain_key)
@@ -338,7 +340,9 @@ class LocomotionEnv:
 
         new_state = state
 
-        episode_success = new_state.info_episode_store["episode_return"] >= self.env_curriculum_level_success_episode_return
+        mean_xy_velocity_diff_abs = new_state.info_episode_store["episode_total_xy_velocity_diff_abs"] / jnp.maximum(new_state.info_episode_store["episode_step"], 1)
+        mean_normalized_xy_velocity_diff_abs = mean_xy_velocity_diff_abs / jnp.maximum(new_state.internal_state["max_command_velocity"], 1e-6)
+        episode_success = (mean_normalized_xy_velocity_diff_abs <= self.env_curriculum_level_success_normalized_xy_vel_diff) & (new_state.info_episode_store["episode_step"] >= self.env_curriculum_level_success_episode_length)
         new_state.internal_state["env_curriculum_levels_in_a_row"] = jnp.where(episode_success,
             jnp.where(new_state.internal_state["env_curriculum_levels_in_a_row"] >= 0,
                 new_state.internal_state["env_curriculum_levels_in_a_row"] + 1,
@@ -361,6 +365,8 @@ class LocomotionEnv:
         self.reward_function.setup(new_state.internal_state)
         self.domain_randomization_action_delay_function.setup(new_state.internal_state)
         data, mjx_model = self.handle_domain_randomization(new_state.internal_state, mjx_model, data, domain_randomization_key, is_episode_start=True)
+        should_sample_commands = self.command_sampling_function.setup(command_sampling_key)
+        self.command_function.get_next_command(new_state.internal_state, should_sample_commands, command_key)
 
         next_observation = self.get_observation(data, mjx_model, new_state.internal_state, observation_key, jnp.zeros(self.nr_actuator_joints))
         reward = 0.0
@@ -393,19 +399,16 @@ class LocomotionEnv:
 
     @partial(jax.jit, static_argnums=(0,))
     def _step(self, state, action):
-        key, action_delay_key, domain_randomization_key, command_sampling_key, command_key, observation_key, terrain_key = jax.random.split(state.key, 7)
+        key, domain_randomization_key, command_sampling_key, command_key, observation_key, terrain_key = jax.random.split(state.key, 6)
         state = state.replace(key=key)
 
         chosen_action = action[:self.nr_actuator_joints]
-        delayed_action = self.domain_randomization_action_delay_function.delay_action(chosen_action, state.internal_state, action_delay_key)
-
-        target_joint_positions = self.control_function.process_action(delayed_action, state.internal_state)
+        delayed_actions = self.domain_randomization_action_delay_function.delay_action(chosen_action, state.internal_state)
 
         data, _ = jax.lax.scan(
-            f=lambda data, _: (mjx.step(state.mjx_model, data.replace(ctrl=target_joint_positions)), None),
+            f=lambda data, delayed_action: (mjx.step(state.mjx_model, data.replace(ctrl=self.control_function.process_action(delayed_action, state.internal_state))), None),
             init=state.data,
-            xs=(),
-            length=self.nr_substeps,
+            xs=delayed_actions,
             unroll=True
         )
         max_qvel = 100 * jnp.ones(self.initial_mj_model.nv)

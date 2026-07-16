@@ -1,3 +1,6 @@
+import numpy as np
+
+
 class NoneActionDelay:
     def __init__(self, env):
         self.env = env
@@ -11,9 +14,9 @@ class NoneActionDelay:
         pass
 
 
-    def sample(self, should_randomize):
+    def sample(self):
         pass
 
 
     def delay_action(self, action):
-        return action
+        return np.broadcast_to(action, (self.env.nr_substeps, action.shape[0]))

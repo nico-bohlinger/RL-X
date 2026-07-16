@@ -9,8 +9,8 @@ class DefaultDRMuJoCoModel:
         self.friction_tangential_factor = env.env_config["domain_randomization"]["mujoco_model"]["friction_tangential_factor"]
         self.friction_torsional_factor = env.env_config["domain_randomization"]["mujoco_model"]["friction_torsional_factor"]
         self.friction_rolling_factor = env.env_config["domain_randomization"]["mujoco_model"]["friction_rolling_factor"]
-        self.stiffness_factor = env.env_config["domain_randomization"]["mujoco_model"]["stiffness_factor"]
-        self.damping_factor = env.env_config["domain_randomization"]["mujoco_model"]["damping_factor"]
+        self.timeconst_log_range = env.env_config["domain_randomization"]["mujoco_model"]["timeconst_log_range"]
+        self.dampratio_factor = env.env_config["domain_randomization"]["mujoco_model"]["dampratio_factor"]
         self.foot_solimp_factor = env.env_config["domain_randomization"]["mujoco_model"]["foot_solimp_factor"]
         self.add_impratio = env.env_config["domain_randomization"]["mujoco_model"]["add_impratio"]
         self.xy_gravity = env.env_config["domain_randomization"]["mujoco_model"]["xy_gravity"]
@@ -21,19 +21,14 @@ class DefaultDRMuJoCoModel:
         self.default_friction_tangential = self.env.initial_mjx_model.geom_friction[self.env.foot_geom_indices, 0]
         self.default_friction_torsional = self.env.initial_mjx_model.geom_friction[self.env.foot_geom_indices, 1]
         self.default_friction_rolling = self.env.initial_mjx_model.geom_friction[self.env.foot_geom_indices, 2]
-        self.default_stiffness = self.env.initial_mjx_model.geom_solref[:, 0]
-        self.default_damping = self.env.initial_mjx_model.geom_solref[:, 1]
+        self.default_timeconst = self.env.initial_mjx_model.geom_solref[self.env.foot_geom_indices, 0]
+        self.default_dampratio = self.env.initial_mjx_model.geom_solref[self.env.foot_geom_indices, 1]
+        self.min_timeconst = 2 * env.env_config["timestep"]
         self.default_foot_solimp = self.env.initial_mjx_model.geom_solimp[self.env.foot_geom_indices]
         self.default_impratio = self.env.initial_mjx_model.opt.impratio
         self.default_gravity = self.env.initial_mjx_model.opt.gravity[2]
         self.default_density = self.env.initial_mjx_model.opt.density
         self.default_viscosity = self.env.initial_mjx_model.opt.viscosity
-
-        if self.env.foot_type == "sphere":
-            self.foot_size_height_index = 0
-        elif self.env.foot_type == "box":
-            self.foot_size_height_index = 2
-
 
     def sample(self, internal_state, mjx_model, should_randomize, key):
         keys = jax.random.split(key, 11)
@@ -43,14 +38,13 @@ class DefaultDRMuJoCoModel:
         sampled_friction_rolling = self.default_friction_rolling * (1 + internal_state["env_curriculum_coeff"] * jax.random.uniform(keys[2], minval=-self.friction_rolling_factor, maxval=self.friction_rolling_factor, shape=self.default_friction_rolling.shape))
         geom_friction = mjx_model.geom_friction.at[self.env.foot_geom_indices].set(jnp.array([sampled_friction_tangential, sampled_friction_torsional, sampled_friction_rolling]).T)
 
-        sampled_stiffness = self.default_stiffness * (1 + internal_state["env_curriculum_coeff"] * jax.random.uniform(keys[3], minval=-self.stiffness_factor, maxval=self.stiffness_factor))
-        sampled_damping = self.default_damping * (1 + internal_state["env_curriculum_coeff"] * jax.random.uniform(keys[4], minval=-self.damping_factor, maxval=self.damping_factor))
-        geom_solref = mjx_model.geom_solref.at[:, 0].set(sampled_stiffness)
-        geom_solref = geom_solref.at[:, 1].set(sampled_damping)
+        sampled_timeconst = jnp.maximum(self.default_timeconst * jnp.exp(internal_state["env_curriculum_coeff"] * jax.random.uniform(keys[3], minval=-self.timeconst_log_range, maxval=self.timeconst_log_range, shape=self.default_timeconst.shape)), self.min_timeconst)
+        sampled_dampratio = self.default_dampratio * (1 + internal_state["env_curriculum_coeff"] * jax.random.uniform(keys[4], minval=-self.dampratio_factor, maxval=self.dampratio_factor, shape=self.default_dampratio.shape))
+        geom_solref = mjx_model.geom_solref.at[self.env.foot_geom_indices, 0].set(sampled_timeconst)
+        geom_solref = geom_solref.at[self.env.foot_geom_indices, 1].set(sampled_dampratio)
 
-        foot_solimp = self.default_foot_solimp.at[:, 2].set(mjx_model.geom_size[self.env.foot_geom_indices, self.foot_size_height_index])
-        foot_solimp = jnp.clip(foot_solimp * (1 + internal_state["env_curriculum_coeff"] * jax.random.uniform(keys[5], minval=-self.foot_solimp_factor, maxval=self.foot_solimp_factor, shape=self.default_foot_solimp.shape)), jnp.array([0.0, 0.0, 0.0, 0.0, 1.0]), jnp.array([1.0, 1.0, 1.0, 1.0, 6.0]))
-        geom_solimp = mjx_model.geom_solimp.at[self.env.foot_geom_indices].set(foot_solimp)
+        sampled_solimp_dmin = jnp.clip(self.default_foot_solimp[:, 0] * (1 + internal_state["env_curriculum_coeff"] * jax.random.uniform(keys[5], minval=-self.foot_solimp_factor, maxval=self.foot_solimp_factor, shape=self.default_foot_solimp[:, 0].shape)), 0.1, self.default_foot_solimp[:, 1])
+        geom_solimp = mjx_model.geom_solimp.at[self.env.foot_geom_indices, 0].set(sampled_solimp_dmin)
 
         opt_impratio = jnp.maximum(self.default_impratio + (internal_state["env_curriculum_coeff"] * jax.random.uniform(keys[6], minval=-self.add_impratio, maxval=self.add_impratio)), 1.0)
 

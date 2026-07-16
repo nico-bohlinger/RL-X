@@ -263,6 +263,8 @@ class DefaultDRSeenRobotFunction:
         contact_between_geoms = distance_between_geoms <= (all_contact_relevant_geom_sizes[:, None] + all_contact_relevant_geom_sizes[None])
         nr_collisions = (np.sum(contact_between_geoms) - len(self.env.reward_collision_sphere_geom_ids)) // 2
         self.env.internal_state["nr_collisions_in_nominal"] = nr_collisions
+        sphere_ground_height = self.env.terrain_function.ground_height_at(all_contact_relevant_geom_xpos[:, 0], all_contact_relevant_geom_xpos[:, 1])
+        self.env.internal_state["nr_ground_penetrations_in_nominal"] = np.maximum(sphere_ground_height + all_contact_relevant_geom_sizes - all_contact_relevant_geom_xpos[:, 2], 0.0)
 
         data.qpos = self.env.internal_state["data"].qpos
         mujoco.mj_forward(self.env.internal_state["mj_model"], data)

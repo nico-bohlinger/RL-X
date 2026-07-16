@@ -5,38 +5,38 @@ class DefaultActionDelay:
     def __init__(self, env):
         self.env = env
 
-        self.max_nr_delay_steps = env.env_config["domain_randomization"]["action_delay"]["max_nr_delay_steps"]
-        self.mixed_chance = env.env_config["domain_randomization"]["action_delay"]["mixed_chance"]
-
-        self.current_mixed = False
-        self.current_nr_delay_steps = 0
+        self.min_delay_substeps = round(env.env_config["domain_randomization"]["action_delay"]["min_delay_s"] / env.env_config["timestep"])
+        self.max_delay_substeps = round(env.env_config["domain_randomization"]["action_delay"]["max_delay_s"] / env.env_config["timestep"])
+        self.buffer_length = self.max_delay_substeps + 1
 
 
     def init(self):
-        self.env.internal_state["action_current_mixed"] = False
-        self.env.internal_state["action_current_nr_delay_steps"] = 0
+        self.env.internal_state["action_delay_buffer"] = np.zeros((self.buffer_length, self.env.nr_actuator_joints))
+        self.env.internal_state["action_delay_buffer_ptr"] = 0
+        self.env.internal_state["action_delay_steps"] = self.min_delay_substeps
 
 
     def setup(self):
-        self.env.internal_state["action_history"] = np.zeros((self.max_nr_delay_steps + 1, self.env.nr_actuator_joints))
+        self.env.internal_state["action_delay_buffer"] = np.zeros((self.buffer_length, self.env.nr_actuator_joints))
+        self.env.internal_state["action_delay_buffer_ptr"] = 0
 
 
     def sample(self):
-        self.env.internal_state["action_current_mixed"] = self.env.np_rng.uniform() < self.mixed_chance
-        self.env.internal_state["action_current_nr_delay_steps"] = 0
+        effective_max_delay_substeps = self.min_delay_substeps + int(self.env.internal_state["env_curriculum_coeff"] * (self.max_delay_substeps - self.min_delay_substeps))
+        self.env.internal_state["action_delay_steps"] = self.env.np_rng.integers(self.min_delay_substeps, effective_max_delay_substeps + 1)
 
 
     def delay_action(self, action):
-        # current_nr_delay_steps = np.ceil(np.where(
-        #     self.env.internal_state["action_current_mixed"],
-        #     self.env.np_rng.integers(low=0, high=self.max_nr_delay_steps+1),
-        #     self.env.internal_state["action_current_nr_delay_steps"]
-        # ) * self.env.internal_state["env_curriculum_coeff"]).astype(np.int32)
-        current_nr_delay_steps = 1
+        buffer = self.env.internal_state["action_delay_buffer"]
+        buffer_ptr = self.env.internal_state["action_delay_buffer_ptr"]
+        delay_steps = self.env.internal_state["action_delay_steps"]
 
-        self.env.internal_state["action_history"] = np.roll(self.env.internal_state["action_history"], -1, axis=0)
-        self.env.internal_state["action_history"][-1] = action.copy()
+        substep_indices = np.arange(self.env.nr_substeps)
+        read_indices = (buffer_ptr + substep_indices - delay_steps) % self.buffer_length
+        delayed_actions = np.where((substep_indices >= delay_steps).reshape(-1, 1), action, buffer[read_indices])
 
-        chosen_action = self.env.internal_state["action_history"][-1-current_nr_delay_steps]
+        write_indices = (buffer_ptr + substep_indices) % self.buffer_length
+        buffer[write_indices] = action
+        self.env.internal_state["action_delay_buffer_ptr"] = (buffer_ptr + self.env.nr_substeps) % self.buffer_length
 
-        return chosen_action
+        return delayed_actions

@@ -81,6 +81,7 @@ class DefaultDRSeenRobotFunction:
         self.env.internal_state["partial_actuator_biasprm_without_dropout"] = self.env.initial_mj_model.actuator_biasprm[:, 1:3]
         self.env.internal_state["robot_nominal_qpos_height_over_ground"] = self.env.initial_qpos[2]
         self.env.internal_state["robot_nominal_imu_height_over_ground"] = self.env.initial_imu_height
+        self.env.internal_state["nominal_feet_tilt"] = self.env.nominal_feet_tilt
 
 
     def sample(self):
@@ -257,12 +258,16 @@ class DefaultDRSeenRobotFunction:
         robot_nominal_imu_height_over_ground = data.site_xpos[self.env.imu_site_id, 2] - self.env.internal_state["center_height"] + offset
         self.env.internal_state["robot_nominal_qpos_height_over_ground"] = robot_nominal_qpos_height_over_ground
         self.env.internal_state["robot_nominal_imu_height_over_ground"] = robot_nominal_imu_height_over_ground
+        nominal_feet_rotations = data.xmat[self.env.body_ids_of_feet].reshape(-1, 3, 3)
+        self.env.internal_state["nominal_feet_tilt"] = np.sqrt(nominal_feet_rotations[:, 2, 0] ** 2 + nominal_feet_rotations[:, 2, 1] ** 2)
         all_contact_relevant_geom_xpos = data.geom_xpos[self.env.reward_collision_sphere_geom_ids]
         all_contact_relevant_geom_sizes = self.env.internal_state["mj_model"].geom_size[self.env.reward_collision_sphere_geom_ids, 0]
         distance_between_geoms = np.linalg.norm(all_contact_relevant_geom_xpos[:, None] - all_contact_relevant_geom_xpos[None], axis=-1)
         contact_between_geoms = distance_between_geoms <= (all_contact_relevant_geom_sizes[:, None] + all_contact_relevant_geom_sizes[None])
         nr_collisions = (np.sum(contact_between_geoms) - len(self.env.reward_collision_sphere_geom_ids)) // 2
         self.env.internal_state["nr_collisions_in_nominal"] = nr_collisions
+        sphere_ground_height = self.env.terrain_function.ground_height_at(all_contact_relevant_geom_xpos[:, 0], all_contact_relevant_geom_xpos[:, 1])
+        self.env.internal_state["nr_ground_penetrations_in_nominal"] = np.maximum(sphere_ground_height + all_contact_relevant_geom_sizes - all_contact_relevant_geom_xpos[:, 2], 0.0)
 
         data.qpos = self.env.internal_state["data"].qpos
         mujoco.mj_forward(self.env.internal_state["mj_model"], data)

@@ -128,7 +128,8 @@ class LocomotionEnv(gym.Env):
         self.robot_dimensions_mean = 0.5  # This can be calculated smartly...
 
         self.env_curriculum_nr_levels = env_config["env_curriculum_nr_levels"]
-        self.env_curriculum_level_success_episode_return = env_config["env_curriculum_level_success_episode_return"]
+        self.env_curriculum_level_success_normalized_xy_vel_diff = env_config["env_curriculum_level_success_normalized_xy_vel_diff"]
+        self.env_curriculum_level_success_episode_length = env_config["env_curriculum_level_success_episode_length"]
 
         self.control_function = get_control_function(env_config["control_type"], self)
         self.control_frequency_hz = self.control_function.control_frequency_hz
@@ -184,6 +185,7 @@ class LocomotionEnv(gym.Env):
             "robot_dimensions_mean": self.robot_dimensions_mean,
             "max_command_velocity": np.minimum(self.robot_dimensions_mean * self.command_function.max_velocity_per_m_factor, self.command_function.clip_max_velocity),
             "nr_collisions_in_nominal": 0,
+            "nr_ground_penetrations_in_nominal": np.zeros(self.reward_collision_sphere_geom_ids.shape[0]),
             "info": {
                 "rollout/episode_return": 0.0,
                 "rollout/episode_length": 0,
@@ -275,7 +277,9 @@ class LocomotionEnv(gym.Env):
         self.internal_state["data"].ctrl = np.zeros(self.nr_actuator_joints)
         mujoco.mj_forward(self.internal_state["mj_model"], self.internal_state["data"])
 
-        episode_success = self.internal_state["info_episode_store"]["episode_return"] >= 10.0
+        mean_xy_velocity_diff_abs = self.internal_state["info_episode_store"]["episode_total_xy_velocity_diff_abs"] / max(self.internal_state["info_episode_store"]["episode_step"], 1)
+        mean_normalized_xy_velocity_diff_abs = mean_xy_velocity_diff_abs / max(self.internal_state["max_command_velocity"], 1e-6)
+        episode_success = (mean_normalized_xy_velocity_diff_abs <= self.env_curriculum_level_success_normalized_xy_vel_diff) & (self.internal_state["info_episode_store"]["episode_step"] >= self.env_curriculum_level_success_episode_length)
         self.internal_state["env_curriculum_levels_in_a_row"] = np.where(episode_success,
             np.where(self.internal_state["env_curriculum_levels_in_a_row"] >= 0,
                 self.internal_state["env_curriculum_levels_in_a_row"] + 1,
@@ -298,6 +302,8 @@ class LocomotionEnv(gym.Env):
         self.reward_function.setup()
         self.domain_randomization_action_delay_function.setup()
         self.handle_domain_randomization(is_episode_start=True)
+        if self.command_sampling_function.setup():
+            self.command_function.get_next_command()
 
         next_observation = self.get_observation(np.zeros(self.nr_actuator_joints))
         self.internal_state["info_episode_store"] = {
@@ -311,12 +317,11 @@ class LocomotionEnv(gym.Env):
 
     def step(self, action):
         chosen_action = action[:self.nr_actuator_joints]
-        delayed_action = self.domain_randomization_action_delay_function.delay_action(chosen_action)
+        delayed_actions = self.domain_randomization_action_delay_function.delay_action(chosen_action)
 
-        target_joint_positions = self.control_function.process_action(delayed_action)
-
-        self.internal_state["data"].ctrl = target_joint_positions
-        mujoco.mj_step(self.internal_state["mj_model"], self.internal_state["data"], self.nr_substeps)
+        for delayed_action in delayed_actions:
+            self.internal_state["data"].ctrl = self.control_function.process_action(delayed_action)
+            mujoco.mj_step(self.internal_state["mj_model"], self.internal_state["data"], 1)
         max_qvel = 100 * np.ones(self.initial_mj_model.nv)
         max_qvel[self.actuator_joint_mask_qvel] = self.internal_state["actuator_joint_max_velocities"]
         self.internal_state["data"].qvel = np.clip(self.internal_state["data"].qvel, -max_qvel, max_qvel)

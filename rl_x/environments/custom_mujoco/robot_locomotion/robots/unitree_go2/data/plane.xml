@@ -1,7 +1,7 @@
 <mujoco model="go2">
   <compiler angle="radian" assetdir="assets" autolimits="true"/>
 
-  <option cone="pyramidal" impratio="1" solver="Newton" iterations="1" ls_iterations="4" density="1.2" viscosity="0.00002">
+  <option cone="pyramidal" impratio="1" solver="Newton" iterations="2" ls_iterations="4" density="1.2" viscosity="0.00002">
     <flag eulerdamp="disable"/>
   </option>
 
@@ -18,7 +18,7 @@
       <default class="collision">
         <geom group="3"/>
         <default class="foot">
-          <geom size="0.022" pos="-0.002 0 -0.213" priority="1" solimp="0.015 1 0.022" condim="6" friction="0.8 0.02 0.01"/>
+          <geom size="0.022" pos="-0.002 0 -0.213" margin="0" gap="0" contype="1" conaffinity="0" solref="0.02 1" solimp="0.8 0.95 0.001" priority="1" condim="6" friction="0.8 0.02 0.01"/>
           <site pos="-0.002 0 -0.213"/>
         </default>
       </default>
@@ -57,7 +57,7 @@
   </asset>
 
   <worldbody>
-    <geom name="floor" pos="0 0 0" material="MatPlane" size="100 100 0.125" type="plane" group="0"/>
+    <geom name="floor" pos="0 0 0" material="MatPlane" size="100 100 0.125" type="plane" contype="0" conaffinity="1" group="0"/>
     <light name="toplight1" directional="true" dir="1 0 -0.5" diffuse="0.2 0.2 0.2" specular="0.3 0.3 0.3" ambient="0.01 0.01 0.01" castshadow="true"/>
     <light name="toplight2" directional="true" dir="-1 0 -0.5" diffuse="0.2 0.2 0.2" specular="0.3 0.3 0.3" ambient="0.01 0.01 0.01" castshadow="true"/>
     <light name="toplight3" directional="true" dir="0 1 -0.5" diffuse="0.2 0.2 0.2" specular="0.3 0.3 0.3" ambient="0.01 0.01 0.01" castshadow="true"/>
@@ -213,13 +213,6 @@
       </body>
     </body>
   </worldbody>
-
-  <contact>
-    <pair geom1="FR_foot" geom2="floor"/>
-    <pair geom1="FL_foot" geom2="floor"/>
-    <pair geom1="RR_foot" geom2="floor"/>
-    <pair geom1="RL_foot" geom2="floor"/>
-  </contact>
 
   <actuator>
     <position name="FR_hip" joint="FR_hip_joint" forcerange="-23.7 23.7"/>

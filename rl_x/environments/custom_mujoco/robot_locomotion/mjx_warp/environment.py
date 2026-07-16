@@ -204,6 +204,8 @@ class LocomotionEnv:
         feet_symmetry_set = set([(min(i, min_dist_indices[i]), max(i, min_dist_indices[i])) for i in range(len(min_dist_indices)) if min_dist_indices[min_dist_indices[i]] == i])
         self.feet_symmetry_pairs = jnp.array([list(pair) for pair in feet_symmetry_set])
         self.body_ids_of_feet = jnp.array([self.initial_mj_model.geom(geom_id).bodyid[0] for geom_id in self.foot_geom_indices])
+        nominal_feet_rotations = self.c_data.xmat[np.asarray(self.body_ids_of_feet)].reshape(-1, 3, 3)
+        self.nominal_feet_tilt = jnp.array(np.sqrt(nominal_feet_rotations[:, 2, 0] ** 2 + nominal_feet_rotations[:, 2, 1] ** 2))
         all_feet_are_sphere = jnp.all(self.initial_mjx_model.geom_type[self.foot_geom_indices] == 2)
         all_feet_are_box = jnp.all(self.initial_mjx_model.geom_type[self.foot_geom_indices] == 6)
         if not all_feet_are_sphere | all_feet_are_box:
@@ -228,7 +230,8 @@ class LocomotionEnv:
         self.robot_dimensions_mean = 0.5  # This can be calculated smartly...
 
         self.env_curriculum_nr_levels = env_config["env_curriculum_nr_levels"]
-        self.env_curriculum_level_success_episode_return = env_config["env_curriculum_level_success_episode_return"]
+        self.env_curriculum_level_success_normalized_xy_vel_diff = env_config["env_curriculum_level_success_normalized_xy_vel_diff"]
+        self.env_curriculum_level_success_episode_length = env_config["env_curriculum_level_success_episode_length"]
 
         self.control_function = get_control_function(env_config["control_type"], self)
         self.control_frequency_hz = self.control_function.control_frequency_hz
@@ -386,6 +389,8 @@ class LocomotionEnv:
             "robot_dimensions_mean": jnp.full(nr_envs, self.robot_dimensions_mean),
             "max_command_velocity": jnp.full(nr_envs, jnp.minimum(self.robot_dimensions_mean * self.command_function.max_velocity_per_m_factor, self.command_function.clip_max_velocity)),
             "nr_collisions_in_nominal": jnp.zeros(nr_envs),
+            "nr_ground_penetrations_in_nominal": jnp.zeros((nr_envs, self.reward_collision_sphere_geom_ids.shape[0])),
+            "nominal_feet_tilt": jnp.tile(self.nominal_feet_tilt[None], (nr_envs, 1)),
         }
         self.command_function.init(internal_state)
         self.reward_function.init(internal_state, mjx_model)
@@ -413,7 +418,7 @@ class LocomotionEnv:
 
     def _reset(self, state):
         nr_envs = self.nr_envs
-        key, initial_state_key, terrain_key, domain_randomization_key, observation_key = jax.random.split(state.key, 5)
+        key, initial_state_key, terrain_key, domain_randomization_key, command_sampling_key, command_key, observation_key = jax.random.split(state.key, 7)
         state = state.replace(key=key)
 
         mjx_model = self.terrain_function.sample(state.mjx_model, state.internal_state, terrain_key)
@@ -424,7 +429,9 @@ class LocomotionEnv:
 
         new_state = state
 
-        episode_success = new_state.info_episode_store["episode_return"] >= self.env_curriculum_level_success_episode_return
+        mean_xy_velocity_diff_abs = new_state.info_episode_store["episode_total_xy_velocity_diff_abs"] / jnp.maximum(new_state.info_episode_store["episode_step"], 1)
+        mean_normalized_xy_velocity_diff_abs = mean_xy_velocity_diff_abs / jnp.maximum(new_state.internal_state["max_command_velocity"], 1e-6)
+        episode_success = (mean_normalized_xy_velocity_diff_abs <= self.env_curriculum_level_success_normalized_xy_vel_diff) & (new_state.info_episode_store["episode_step"] >= self.env_curriculum_level_success_episode_length)
         new_state.internal_state["env_curriculum_levels_in_a_row"] = jnp.where(episode_success,
             jnp.where(new_state.internal_state["env_curriculum_levels_in_a_row"] >= 0,
                 new_state.internal_state["env_curriculum_levels_in_a_row"] + 1,
@@ -446,6 +453,8 @@ class LocomotionEnv:
         self.reward_function.setup(new_state.internal_state)
         self.domain_randomization_action_delay_function.setup(new_state.internal_state)
         data, mjx_model = self.handle_domain_randomization(new_state.internal_state, mjx_model, data, domain_randomization_key, is_episode_start=True)
+        should_sample_commands = self.command_sampling_function.setup(command_sampling_key)
+        self.command_function.get_next_command(new_state.internal_state, should_sample_commands, command_key)
 
         next_observation = self.get_observation(data, mjx_model, new_state.internal_state, observation_key, jnp.zeros((nr_envs, self.nr_actuator_joints)))
         reward = jnp.zeros(nr_envs, dtype=jnp.float32)
@@ -472,16 +481,15 @@ class LocomotionEnv:
 
     def step(self, state, action):
         nr_envs = self.nr_envs
-        key, action_delay_key, domain_randomization_key, command_sampling_key, command_key, observation_key, terrain_key = jax.random.split(state.key, 7)
+        key, domain_randomization_key, command_sampling_key, command_key, observation_key, terrain_key = jax.random.split(state.key, 6)
         state = state.replace(key=key)
 
         chosen_action = action[:, :self.nr_actuator_joints]
-        delayed_action = self.domain_randomization_action_delay_function.delay_action(chosen_action, state.internal_state, action_delay_key)
+        delayed_actions = self.domain_randomization_action_delay_function.delay_action(chosen_action, state.internal_state)
 
-        target_joint_positions = self.control_function.process_action(delayed_action, state.internal_state)
-
-        data = state.data.replace(ctrl=target_joint_positions)
-        for _ in range(self.nr_substeps):
+        data = state.data
+        for delayed_action in delayed_actions:
+            data = data.replace(ctrl=self.control_function.process_action(delayed_action, state.internal_state))
             data = mjx.step(state.mjx_model, data)
         max_qvel = 100 * jnp.ones(self.initial_mj_model.nv)
         max_qvel = jnp.tile(max_qvel[None], (nr_envs, 1))

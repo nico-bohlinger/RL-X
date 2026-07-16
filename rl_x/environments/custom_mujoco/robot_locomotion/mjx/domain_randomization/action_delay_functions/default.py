@@ -6,37 +6,39 @@ class DefaultActionDelay:
     def __init__(self, env):
         self.env = env
 
-        self.max_nr_delay_steps = env.env_config["domain_randomization"]["action_delay"]["max_nr_delay_steps"]
-        self.mixed_chance = env.env_config["domain_randomization"]["action_delay"]["mixed_chance"]
-
-        self.current_mixed = False
-        self.current_nr_delay_steps = 0
+        self.min_delay_substeps = round(env.env_config["domain_randomization"]["action_delay"]["min_delay_s"] / env.env_config["timestep"])
+        self.max_delay_substeps = round(env.env_config["domain_randomization"]["action_delay"]["max_delay_s"] / env.env_config["timestep"])
+        self.buffer_length = self.max_delay_substeps + 1
 
 
     def init(self, internal_state):
-        internal_state["action_current_mixed"] = False
-        internal_state["action_current_nr_delay_steps"] = 0
+        internal_state["action_delay_buffer"] = jnp.zeros((self.buffer_length, self.env.nr_actuator_joints))
+        internal_state["action_delay_buffer_ptr"] = jnp.array(0, dtype=jnp.int32)
+        internal_state["action_delay_steps"] = jnp.array(self.min_delay_substeps, dtype=jnp.int32)
 
 
     def setup(self, internal_state):
-        internal_state["action_history"] = jnp.zeros((self.max_nr_delay_steps + 1, self.env.nr_actuator_joints))
+        internal_state["action_delay_buffer"] = jnp.zeros((self.buffer_length, self.env.nr_actuator_joints))
+        internal_state["action_delay_buffer_ptr"] = jnp.array(0, dtype=jnp.int32)
 
 
     def sample(self, internal_state, should_randomize, key):
-        internal_state["action_current_mixed"] = jnp.where(should_randomize, jax.random.uniform(key) < self.mixed_chance, internal_state["action_current_mixed"])
-        internal_state["action_current_nr_delay_steps"] = jnp.where(should_randomize, 0, internal_state["action_current_nr_delay_steps"])
+        effective_max_delay_substeps = self.min_delay_substeps + jnp.floor(internal_state["env_curriculum_coeff"] * (self.max_delay_substeps - self.min_delay_substeps)).astype(jnp.int32)
+        sampled_delay_steps = jax.random.randint(key, (), self.min_delay_substeps, effective_max_delay_substeps + 1)
+        internal_state["action_delay_steps"] = jnp.where(should_randomize, sampled_delay_steps, internal_state["action_delay_steps"])
 
 
-    def delay_action(self, action, internal_state, key):
-        current_nr_delay_steps = jnp.ceil(jnp.where(
-            internal_state["action_current_mixed"],
-            jax.random.randint(key, (1,), 0, self.max_nr_delay_steps+1)[0],
-            internal_state["action_current_nr_delay_steps"]
-        ) * internal_state["env_curriculum_coeff"]).astype(jnp.int32)
+    def delay_action(self, action, internal_state):
+        buffer = internal_state["action_delay_buffer"]
+        buffer_ptr = internal_state["action_delay_buffer_ptr"]
+        delay_steps = internal_state["action_delay_steps"]
 
-        internal_state["action_history"] = jnp.roll(internal_state["action_history"], -1, axis=0)
-        internal_state["action_history"] = internal_state["action_history"].at[-1].set(action)
+        substep_indices = jnp.arange(self.env.nr_substeps)
+        read_indices = (buffer_ptr + substep_indices - delay_steps) % self.buffer_length
+        delayed_actions = jnp.where((substep_indices >= delay_steps).reshape(-1, 1), action, buffer[read_indices])
 
-        chosen_action = internal_state["action_history"][-1-current_nr_delay_steps]
+        write_indices = (buffer_ptr + substep_indices) % self.buffer_length
+        internal_state["action_delay_buffer"] = buffer.at[write_indices].set(action)
+        internal_state["action_delay_buffer_ptr"] = (buffer_ptr + self.env.nr_substeps) % self.buffer_length
 
-        return chosen_action
+        return delayed_actions

@@ -83,6 +83,8 @@ class DefaultDRSeenRobotFunction:
         internal_state["robot_nominal_qpos_height_over_ground"] = self.env.initial_qpos[2]
         internal_state["robot_nominal_imu_height_over_ground"] = self.env.initial_imu_height
         internal_state["nr_collisions_in_nominal"] = 0
+        internal_state["nr_ground_penetrations_in_nominal"] = jnp.zeros(self.env.reward_collision_sphere_geom_ids.shape[0])
+        internal_state["nominal_feet_tilt"] = self.env.nominal_feet_tilt
 
 
     def sample(self, internal_state, mjx_model, data, should_randomize, key):
@@ -278,12 +280,18 @@ class DefaultDRSeenRobotFunction:
         robot_nominal_imu_height_over_ground = data_tmp.site_xpos[self.env.imu_site_id, 2] - internal_state["center_height"] + offset
         internal_state["robot_nominal_qpos_height_over_ground"] = jnp.where(should_randomize, robot_nominal_qpos_height_over_ground, internal_state["robot_nominal_qpos_height_over_ground"])
         internal_state["robot_nominal_imu_height_over_ground"] = jnp.where(should_randomize, robot_nominal_imu_height_over_ground, internal_state["robot_nominal_imu_height_over_ground"])
+        nominal_feet_rotations = data_tmp.xmat[self.env.body_ids_of_feet].reshape(-1, 3, 3)
+        nominal_feet_tilt = jnp.sqrt(nominal_feet_rotations[:, 2, 0] ** 2 + nominal_feet_rotations[:, 2, 1] ** 2)
+        internal_state["nominal_feet_tilt"] = jnp.where(should_randomize, nominal_feet_tilt, internal_state["nominal_feet_tilt"])
         all_contact_relevant_geom_xpos = data_tmp.geom_xpos[self.env.reward_collision_sphere_geom_ids]
         all_contact_relevant_geom_sizes = new_mjx_model.geom_size[self.env.reward_collision_sphere_geom_ids, 0]
         distance_between_geoms = jnp.linalg.norm(all_contact_relevant_geom_xpos[:, None] - all_contact_relevant_geom_xpos[None], axis=-1)
         contact_between_geoms = distance_between_geoms <= (all_contact_relevant_geom_sizes[:, None] + all_contact_relevant_geom_sizes[None])
         nr_collisions = (jnp.sum(contact_between_geoms) - self.env.reward_collision_sphere_geom_ids.shape[0]) // 2
         internal_state["nr_collisions_in_nominal"] = jnp.where(should_randomize, nr_collisions, internal_state["nr_collisions_in_nominal"])
+        sphere_ground_height = self.env.terrain_function.ground_height_at(internal_state, all_contact_relevant_geom_xpos[:, 0], all_contact_relevant_geom_xpos[:, 1])
+        nr_ground_penetrations_in_nominal = jnp.maximum(sphere_ground_height + all_contact_relevant_geom_sizes - all_contact_relevant_geom_xpos[:, 2], 0.0)
+        internal_state["nr_ground_penetrations_in_nominal"] = jnp.where(should_randomize, nr_ground_penetrations_in_nominal, internal_state["nr_ground_penetrations_in_nominal"])
 
         data_tmp = data_tmp.replace(qpos=data.qpos)
         data_tmp, _ = jax.lax.scan(

@@ -83,6 +83,7 @@ class DefaultDRSeenRobotFunction:
         internal_state["robot_nominal_qpos_height_over_ground"] = self.env.initial_qpos[2]
         internal_state["robot_nominal_imu_height_over_ground"] = self.env.initial_imu_height
         internal_state["nr_collisions_in_nominal"] = 0
+        internal_state["nr_ground_penetrations_in_nominal"] = jnp.zeros(self.env.reward_collision_sphere_geom_ids.shape[0])
 
 
     def sample(self, internal_state, mjx_model, data, should_randomize, key):
@@ -284,6 +285,9 @@ class DefaultDRSeenRobotFunction:
         contact_between_geoms = distance_between_geoms <= (all_contact_relevant_geom_sizes[:, None] + all_contact_relevant_geom_sizes[None])
         nr_collisions = (jnp.sum(contact_between_geoms) - self.env.reward_collision_sphere_geom_ids.shape[0]) // 2
         internal_state["nr_collisions_in_nominal"] = jnp.where(should_randomize, nr_collisions, internal_state["nr_collisions_in_nominal"])
+        sphere_ground_height = self.env.terrain_function.ground_height_at(internal_state, all_contact_relevant_geom_xpos[:, 0], all_contact_relevant_geom_xpos[:, 1])
+        nr_ground_penetrations_in_nominal = jnp.maximum(sphere_ground_height + all_contact_relevant_geom_sizes - all_contact_relevant_geom_xpos[:, 2], 0.0)
+        internal_state["nr_ground_penetrations_in_nominal"] = jnp.where(should_randomize, nr_ground_penetrations_in_nominal, internal_state["nr_ground_penetrations_in_nominal"])
 
         data_tmp = data_tmp.replace(qpos=data.qpos)
         data_tmp, _ = jax.lax.scan(
