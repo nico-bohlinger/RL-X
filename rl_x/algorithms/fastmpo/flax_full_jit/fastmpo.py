@@ -538,7 +538,12 @@ class FastMPO:
                         grad_critic_loss_fn = jax.value_and_grad(mean_vmapped_critic_loss_fn, argnums=(1,), has_aux=True)
 
                         vmap_policy_and_dual_loss_fn = jax.vmap(policy_and_dual_loss_fn, in_axes=(None, None, None, None, 0, 0, 0, 0), out_axes=0)
-                        mean_vmapped_policy_and_dual_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_policy_and_dual_loss_fn(*a, **k))
+                        def mean_vmapped_policy_and_dual_loss_fn(*args, **kwargs):
+                            losses, policy_metrics = vmap_policy_and_dual_loss_fn(*args, **kwargs)
+                            mean_kl_mean_for_update = policy_metrics.pop("dual/mean_kl_mean_for_update")
+                            policy_metrics = tree.map_structure(safe_mean, policy_metrics)
+                            return jnp.mean(losses), (policy_metrics, jnp.mean(mean_kl_mean_for_update, axis=0))
+
                         grad_policy_and_dual_loss_fn = jax.value_and_grad(mean_vmapped_policy_and_dual_loss_fn, argnums=(0, 3), has_aux=True)
 
                         # Sample batch from replay buffer and handling n-step returns
@@ -650,11 +655,10 @@ class FastMPO:
                             normalized_states_for_policy = normalized_states
                             normalized_next_states_for_policy = normalized_next_states
                             
-                            (loss, (policy_metrics)), (policy_gradients, dual_variables_gradients) = grad_policy_and_dual_loss_fn(
+                            (loss, (policy_metrics, mean_kl_mean_for_update)), (policy_gradients, dual_variables_gradients) = grad_policy_and_dual_loss_fn(
                                 policy_state.params, policy_state.target_params, critic_state.target_params, dual_variables_state.params, 
                                 normalized_states_for_policy, normalized_next_states_for_policy, keys1_for_policy_update, keys2_for_policy_update
                             )
-                            mean_kl_mean_for_update = policy_metrics.pop("dual/mean_kl_mean_for_update")
                             log_alpha_mean_before_update = dual_variables_state.params["params"]["log_alpha_mean"]
 
                             policy_state = policy_state.apply_gradients(grads=policy_gradients)
@@ -672,6 +676,8 @@ class FastMPO:
                                 projected_log_alpha_mean = projected_alpha_mean_without_epsilon + jnp.log(-jnp.expm1(-projected_alpha_mean_without_epsilon))
                                 use_projected_alpha_mean = alpha_mean_before_update <= self.projected_alpha_mean_dual_max
                                 log_alpha_mean_after_update = jnp.where(use_projected_alpha_mean, projected_log_alpha_mean, log_alpha_mean_after_update)
+                                policy_metrics["dual/projected_alpha_mean_mode_fraction"] = jnp.mean(use_projected_alpha_mean)
+                                policy_metrics["dual/projected_alpha_mean_violation_fraction"] = jnp.mean(mean_kl_mean_for_update > self.epsilon_parametric_mu)
 
                             dual_variables_state = dual_variables_state.replace(
                                 params={
@@ -691,6 +697,9 @@ class FastMPO:
                             policy_metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
                             policy_metrics["gradients/policy_grad_clip_fraction"] = (policy_metrics["gradients/policy_grad_norm"] > self.max_grad_norm).astype(jnp.float32)
                             policy_metrics["gradients/dual_variables_grad_norm"] = optax.global_norm(dual_variables_gradients)
+                            policy_metrics["kl/mean_kl_mean_batch_dimension_min"] = jnp.min(mean_kl_mean_for_update)
+                            policy_metrics["kl/mean_kl_mean_batch_dimension_max"] = jnp.max(mean_kl_mean_for_update)
+                            policy_metrics["dual/alpha_mean_after_update_max"] = jnp.max(jax.nn.softplus(dual_variables_state.params["params"]["log_alpha_mean"]) + self.float_epsilon)
 
                         metrics = {**critic_metrics, **policy_metrics}
 
