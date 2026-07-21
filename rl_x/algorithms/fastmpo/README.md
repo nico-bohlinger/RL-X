@@ -8,7 +8,7 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 ## RL-X implementation
 
 **Implementation Details**
-- No special implementation details
+- `algorithm.action_rescaling=tanh_fastsac` keeps the MPO distribution and KL constraints in latent Gaussian space while using tanh-squashed, FastSAC-scaled actions for environment interaction and critic learning.
 
 **Supported frameworks**
 - JAX (Flax)

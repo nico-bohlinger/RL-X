@@ -134,5 +134,7 @@ def get_processed_action_function(action_clipping, action_rescaling, env_as_low,
             action = env_as_low + (0.5 * (action + 1.0) * (env_as_high - env_as_low))
         elif action_rescaling == "fastsac":
             action = action * action_scale
+        elif action_rescaling == "tanh_fastsac":
+            action = jnp.tanh(action) * action_scale
         return action
     return jax.jit(get_clipped_and_scaled_action)

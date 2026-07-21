@@ -44,6 +44,7 @@ class FastMPO:
         self.render_callback_type = getattr(config.environment, 'render_callback_type', 'io_callback')
         self.dual_critic = config.algorithm.dual_critic
         self.action_clipping = config.algorithm.action_clipping
+        self.squashed_actions = config.algorithm.action_rescaling == "tanh_fastsac"
         self.policy_learning_rate = config.algorithm.policy_learning_rate
         self.critic_learning_rate = config.algorithm.critic_learning_rate
         self.dual_learning_rate = config.algorithm.dual_learning_rate
@@ -108,6 +109,9 @@ class FastMPO:
         
         if self.learning_starts < self.n_steps:
             raise ValueError("The replay buffer must at least be filled with n_steps transitions before learning starts.")
+
+        if self.squashed_actions and self.action_clipping:
+            raise ValueError("Tanh-squashed actions cannot be combined with action clipping.")
         
         if self.nr_parallel_seeds > 1:
             raise ValueError("Parallel seeds are not supported yet. This is mainly limited by not being able to log mutliple wandb runs at the same time.")
@@ -239,13 +243,14 @@ class FastMPO:
                 action_mean, action_std = self.policy.apply(policy_params, normalized_observation)
                 action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
                 processed_action = self.get_processed_action(action)
+                critic_action = processed_action if self.squashed_actions else action
                 env_state = self.train_env.step(env_state, processed_action)
                 dones = env_state.terminated | env_state.truncated
 
                 # Adding to replay buffer
                 replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
                 replay_buffer["next_states"] = replay_buffer["next_states"].at[replay_buffer["pos"]].set(env_state.actual_next_observation)
-                replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(action)
+                replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(critic_action)
                 replay_buffer["rewards"] = replay_buffer["rewards"].at[replay_buffer["pos"]].set(env_state.reward)
                 replay_buffer["dones"] = replay_buffer["dones"].at[replay_buffer["pos"]].set(dones)
                 replay_buffer["truncations"] = replay_buffer["truncations"].at[replay_buffer["pos"]].set(env_state.truncated)
@@ -288,13 +293,14 @@ class FastMPO:
                         action_mean, action_std = self.policy.apply(policy_params, normalized_observation)
                         action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
                         processed_action = self.get_processed_action(action)
+                        critic_action = processed_action if self.squashed_actions else action
                         env_state = self.train_env.step(env_state, processed_action)
                         dones = env_state.terminated | env_state.truncated
 
                         # Adding to replay buffer
                         replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
                         replay_buffer["next_states"] = replay_buffer["next_states"].at[replay_buffer["pos"]].set(env_state.actual_next_observation)
-                        replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(action)
+                        replay_buffer["actions"] = replay_buffer["actions"].at[replay_buffer["pos"]].set(critic_action)
                         replay_buffer["rewards"] = replay_buffer["rewards"].at[replay_buffer["pos"]].set(env_state.reward)
                         replay_buffer["dones"] = replay_buffer["dones"].at[replay_buffer["pos"]].set(dones)
                         replay_buffer["truncations"] = replay_buffer["truncations"].at[replay_buffer["pos"]].set(env_state.truncated)
@@ -315,7 +321,12 @@ class FastMPO:
                             # Critic loss
                             next_action_mean, next_action_std = self.policy.apply(policy_target_params, normalized_next_state)
                             sampled_next_actions_raw = next_action_mean[None, :] + next_action_std[None, :] * jax.random.normal(key, shape=(self.action_sampling_number,) + next_action_mean.shape)
-                            sampled_next_actions = jnp.clip(sampled_next_actions_raw, -1.0, 1.0) if self.action_clipping else sampled_next_actions_raw
+                            if self.squashed_actions:
+                                sampled_next_actions = self.get_processed_action(sampled_next_actions_raw)
+                            elif self.action_clipping:
+                                sampled_next_actions = jnp.clip(sampled_next_actions_raw, -1.0, 1.0)
+                            else:
+                                sampled_next_actions = sampled_next_actions_raw
 
                             expanded_next_states = jnp.repeat(normalized_next_state[None, :], self.action_sampling_number, axis=0)
                             target_next_logits = self.critic.apply(critic_target_params, expanded_next_states, sampled_next_actions) # (n_critics, N, nr_atoms)
@@ -383,7 +394,12 @@ class FastMPO:
                             stacked_states = jnp.concatenate([normalized_state[None, :], normalized_next_state[None, :]], axis=0)  # (2, obs)
                             target_action_mean, target_action_std = self.policy.apply(policy_target_params, stacked_states)
                             sampled_actions_raw = target_action_mean[None, :, :] + target_action_std[None, :, :] * jax.random.normal(key2, shape=(self.action_sampling_number,) + target_action_mean.shape)  # (sampled actions, 2, action_dim)
-                            sampled_actions = jnp.clip(sampled_actions_raw, -1.0, 1.0) if self.action_clipping else sampled_actions_raw
+                            if self.squashed_actions:
+                                sampled_actions = self.get_processed_action(sampled_actions_raw)
+                            elif self.action_clipping:
+                                sampled_actions = jnp.clip(sampled_actions_raw, -1.0, 1.0)
+                            else:
+                                sampled_actions = sampled_actions_raw
 
                             expanded_states = jnp.repeat(stacked_states[None, :, :], self.action_sampling_number, axis=0)  # (K,2,obs)
                             flat_states = expanded_states.reshape((-1, expanded_states.shape[-1]))      # (K*2, obs)
@@ -477,6 +493,7 @@ class FastMPO:
                                 "q/improvement_q_mean": jnp.mean(q_vals),
                                 "policy/std_min_mean": jnp.mean(jnp.min(online_action_std, axis=-1)),
                                 "policy/std_max_mean": jnp.mean(jnp.max(online_action_std, axis=-1)),
+                                "policy/latent_action_oob_fraction": jnp.mean(jnp.abs(sampled_actions_raw) > 1.0),
                             }
 
                             return loss, (metrics)
