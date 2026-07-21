@@ -420,6 +420,8 @@ class FastMPO:
                             eta = jax.nn.softplus(log_eta) + self.float_epsilon
                             eta_s = eta[0]
                             improvement_dist = jax.nn.softmax(q_vals / stop_gradient(eta_s), axis=0)  # (K,2)
+                            improvement_dist_entropy = -jnp.sum(improvement_dist * jnp.log(improvement_dist + self.float_epsilon), axis=0)
+                            improvement_dist_effective_samples = 1.0 / jnp.sum(improvement_dist ** 2, axis=0)
 
                             q_logsumexp = jax.scipy.special.logsumexp(q_vals / eta_s, axis=0)  # (2,)
                             loss_eta = eta_s * (self.epsilon_non_parametric + jnp.mean(q_logsumexp) - jnp.log(self.action_sampling_number))
@@ -487,10 +489,24 @@ class FastMPO:
                                 "dual/eta": eta_s,
                                 "dual/penalty_temperature": penalty_temperature,
                                 "dual/alpha_mean": jnp.mean(alpha_mean),
+                                "dual/alpha_mean_min": jnp.min(alpha_mean),
+                                "dual/alpha_mean_max": jnp.max(alpha_mean),
                                 "dual/alpha_std": jnp.mean(alpha_std),
+                                "dual/alpha_std_min": jnp.min(alpha_std),
+                                "dual/alpha_std_max": jnp.max(alpha_std),
                                 "kl/mean_kl_mean": jnp.mean(mean_kl_mean),
+                                "kl/mean_kl_mean_min": jnp.min(mean_kl_mean),
+                                "kl/mean_kl_mean_max": jnp.max(mean_kl_mean),
                                 "kl/mean_kl_std": jnp.mean(mean_kl_std),
+                                "kl/mean_kl_std_min": jnp.min(mean_kl_std),
+                                "kl/mean_kl_std_max": jnp.max(mean_kl_std),
                                 "q/improvement_q_mean": jnp.mean(q_vals),
+                                "q/improvement_q_std": jnp.std(q_vals),
+                                "q/improvement_q_action_range_mean": jnp.mean(jnp.max(q_vals, axis=0) - jnp.min(q_vals, axis=0)),
+                                "policy/improvement_weight_entropy": jnp.mean(improvement_dist_entropy),
+                                "policy/improvement_weight_effective_samples": jnp.mean(improvement_dist_effective_samples),
+                                "policy/target_online_mean_delta_rms": jnp.sqrt(jnp.mean((target_action_mean - online_action_mean) ** 2)),
+                                "policy/target_online_std_delta_rms": jnp.sqrt(jnp.mean((target_action_std - online_action_std) ** 2)),
                                 "policy/std_min_mean": jnp.mean(jnp.min(online_action_std, axis=-1)),
                                 "policy/std_max_mean": jnp.mean(jnp.max(online_action_std, axis=-1)),
                                 "policy/latent_action_abs_gt_one_fraction": jnp.mean(jnp.abs(sampled_actions_raw) > 1.0),
@@ -641,6 +657,7 @@ class FastMPO:
                             policy_metrics["lr/policy_learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
                             policy_metrics["lr/dual_variables_learning_rate"] = dual_variables_state.opt_state[1].hyperparams["learning_rate"]
                             policy_metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
+                            policy_metrics["gradients/policy_grad_clip_fraction"] = (policy_metrics["gradients/policy_grad_norm"] > self.max_grad_norm).astype(jnp.float32)
                             policy_metrics["gradients/dual_variables_grad_norm"] = optax.global_norm(dual_variables_gradients)
 
                         metrics = {**critic_metrics, **policy_metrics}
