@@ -12,6 +12,7 @@ test -z "$(git -C "$RLX_SOURCE" status --porcelain)"
 test -f "$RUN_ARGS_FILE"
 
 mapfile -t RUN_ARGS < "$RUN_ARGS_FILE"
+export PATH="$(dirname "$PYTHON_BIN"):$PATH"
 export PYTHONPATH="$RLX_SOURCE${PYTHON_OVERLAY:+:$PYTHON_OVERLAY}"
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export WANDB_DIR="$RLX_RUN_DIR/wandb"
