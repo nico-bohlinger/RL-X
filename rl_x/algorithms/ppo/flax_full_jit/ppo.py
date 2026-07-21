@@ -51,6 +51,7 @@ class PPO:
         self.critic_coef = config.algorithm.critic_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
+        self.nr_value_samples = getattr(config.algorithm, "nr_value_samples", 0)
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
@@ -96,9 +97,12 @@ class PPO:
             )
         )
 
+        critic_init_arguments = (env_state.next_observation,)
+        if self.nr_value_samples > 0:
+            critic_init_arguments += (jnp.zeros(env_state.next_observation.shape[:-1] + self.as_shape),)
         self.critic_state = TrainState.create(
             apply_fn=self.critic.apply,
-            params=self.critic.init(critic_key, env_state.next_observation),
+            params=self.critic.init(critic_key, *critic_init_arguments),
             tx=optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
                 optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
@@ -130,17 +134,36 @@ class PPO:
                     def single_rollout(single_rollout_carry, _):
                         policy_state, critic_state, env_state, key = single_rollout_carry
 
-                        key, subkey = jax.random.split(key)
+                        key, action_key = jax.random.split(key)
                         observation = env_state.next_observation
                         action_mean, action_logstd = self.policy.apply(policy_state.params, observation)
                         action_std = jnp.exp(action_logstd)
-                        action = action_mean + action_std * jax.random.normal(subkey, shape=action_mean.shape)
+                        action = action_mean + action_std * jax.random.normal(action_key, shape=action_mean.shape)
                         log_prob = (-0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd).sum(1)
                         processed_action = self.get_processed_action(action)
-                        value = self.critic.apply(critic_state.params, observation).squeeze(-1)
+                        if self.nr_value_samples > 0:
+                            key, value_key = jax.random.split(key)
+                            value_actions = action_mean[None, :] + action_std[None, :] * jax.random.normal(value_key, shape=(self.nr_value_samples,) + action_mean.shape)
+                            value_q = self.critic.apply(critic_state.params, jnp.repeat(observation[None, :], self.nr_value_samples, axis=0), value_actions).squeeze(-1)
+                            value = jnp.mean(value_q, axis=0)
+                            action_q = self.critic.apply(critic_state.params, observation, action).squeeze(-1)
+                            sampled_action_q_range = jnp.max(value_q, axis=0) - jnp.min(value_q, axis=0)
+                            executed_action_advantage = action_q - value
+                        else:
+                            value = self.critic.apply(critic_state.params, observation).squeeze(-1)
+                            sampled_action_q_range = jnp.zeros_like(value)
+                            executed_action_advantage = jnp.zeros_like(value)
 
                         env_state = self.train_env.step(env_state, processed_action)
-                        transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, env_state.terminated, log_prob, env_state.info)
+                        if self.nr_value_samples > 0:
+                            next_action_mean, next_action_logstd = self.policy.apply(policy_state.params, env_state.actual_next_observation)
+                            next_action_std = jnp.exp(next_action_logstd)
+                            key, next_value_key = jax.random.split(key)
+                            next_value_actions = next_action_mean[None, :] + next_action_std[None, :] * jax.random.normal(next_value_key, shape=(self.nr_value_samples,) + next_action_mean.shape)
+                            next_value = self.critic.apply(critic_state.params, jnp.repeat(env_state.actual_next_observation[None, :], self.nr_value_samples, axis=0), next_value_actions).squeeze(-1).mean(axis=0)
+                        else:
+                            next_value = jnp.zeros_like(value)
+                        transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, next_value, env_state.terminated, log_prob, sampled_action_q_range, executed_action_advantage, env_state.info)
 
                         if self.render:
                             if self.render_callback_type == "debug_callback":
@@ -154,17 +177,19 @@ class PPO:
 
                     single_rollout_carry, batch = jax.lax.scan(single_rollout, learning_iteration_carry, None, self.nr_steps)
                     policy_state, critic_state, env_state, key = single_rollout_carry
-                    states, next_states, actions, rewards, values, terminations, log_probs, infos = batch
+                    states, next_states, actions, rewards, values, next_values, terminations, log_probs, sampled_action_q_ranges, executed_action_advantages, infos = batch
 
 
                     # Calculating advantages and returns
-                    def calculate_gae_advantages(critic_state, next_states, rewards, values, terminations):
+                    if self.nr_value_samples == 0:
+                        next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
+
+                    def calculate_gae_advantages(next_values, rewards, values, terminations):
                         def compute_advantages(carry, t):
                             prev_advantage = carry[0]
                             advantage = delta[t] + self.gamma * self.gae_lambda * (1 - terminations[t]) * prev_advantage
                             return (advantage,), advantage
 
-                        next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
                         delta = rewards + self.gamma * next_values * (1.0 - terminations) - values
                         init_advantages = delta[-1]
                         _, advantages = jax.lax.scan(compute_advantages, (init_advantages,), jnp.arange(self.nr_steps - 2, -1, -1), unroll=True)
@@ -172,7 +197,7 @@ class PPO:
                         returns = advantages + values
                         return advantages, returns
 
-                    advantages, returns = calculate_gae_advantages(critic_state, next_states, rewards, values, terminations)
+                    advantages, returns = calculate_gae_advantages(next_values, rewards, values, terminations)
 
 
                     # Optimizing
@@ -196,7 +221,10 @@ class PPO:
                         entropy_loss = entropy.sum(1)
                         
                         # Critic loss
-                        new_value = self.critic.apply(critic_params, state_b)
+                        if self.nr_value_samples > 0:
+                            new_value = self.critic.apply(critic_params, state_b, action_b)
+                        else:
+                            new_value = self.critic.apply(critic_params, state_b)
                         critic_loss = 0.5 * (new_value - return_b) ** 2
 
                         # Combine losses
@@ -263,6 +291,9 @@ class PPO:
                     optimization_metrics["lr/learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
                     optimization_metrics["v_value/explained_variance"] = 1 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
                     optimization_metrics["policy/std_dev"] = jnp.mean(jnp.exp(policy_state.params["params"]["policy_logstd"]))
+                    if self.nr_value_samples > 0:
+                        optimization_metrics["q_value/sampled_action_range_mean"] = jnp.mean(sampled_action_q_ranges)
+                        optimization_metrics["q_value/executed_action_advantage_abs_mean"] = jnp.mean(jnp.abs(executed_action_advantages))
 
 
                     # Logging

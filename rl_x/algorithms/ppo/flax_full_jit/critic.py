@@ -12,15 +12,18 @@ def get_critic(config, env):
     critic_observation_indices = getattr(env, "critic_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return Critic(critic_observation_indices)
+        return Critic(critic_observation_indices, getattr(config.algorithm, "nr_value_samples", 0) > 0)
 
 
 class Critic(nn.Module):
     critic_observation_indices: Sequence[int]
+    action_conditioned: bool
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, action=None):
         x = x[..., self.critic_observation_indices]
+        if self.action_conditioned:
+            x = jnp.concatenate([x, action], axis=-1)
         critic = nn.Dense(512, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         critic = nn.LayerNorm()(critic)
         critic = nn.elu(critic)
