@@ -71,6 +71,8 @@ class FastMPO:
         self.min_log_temperature = config.algorithm.min_log_temperature
         self.min_log_alpha = config.algorithm.min_log_alpha
         self.precondition_alpha_dual_gradients = config.algorithm.precondition_alpha_dual_gradients
+        self.projected_alpha_mean_dual_step_size = config.algorithm.projected_alpha_mean_dual_step_size
+        self.projected_alpha_mean_dual_max = config.algorithm.projected_alpha_mean_dual_max
         self.policy_mean_loss_min_scale = config.algorithm.policy_mean_loss_min_scale
         self.batch_size = config.algorithm.batch_size
         self.buffer_size_per_env = config.algorithm.buffer_size_per_env
@@ -510,6 +512,7 @@ class FastMPO:
                                 "kl/mean_kl_mean": jnp.mean(mean_kl_mean),
                                 "kl/mean_kl_mean_min": jnp.min(mean_kl_mean),
                                 "kl/mean_kl_mean_max": jnp.max(mean_kl_mean),
+                                "dual/mean_kl_mean_for_update": mean_kl_mean,
                                 "kl/mean_kl_std": jnp.mean(mean_kl_std),
                                 "kl/mean_kl_std_min": jnp.min(mean_kl_std),
                                 "kl/mean_kl_std_max": jnp.max(mean_kl_std),
@@ -651,15 +654,30 @@ class FastMPO:
                                 policy_state.params, policy_state.target_params, critic_state.target_params, dual_variables_state.params, 
                                 normalized_states_for_policy, normalized_next_states_for_policy, keys1_for_policy_update, keys2_for_policy_update
                             )
+                            mean_kl_mean_for_update = policy_metrics.pop("dual/mean_kl_mean_for_update")
+                            log_alpha_mean_before_update = dual_variables_state.params["params"]["log_alpha_mean"]
 
                             policy_state = policy_state.apply_gradients(grads=policy_gradients)
                             dual_variables_state = dual_variables_state.apply_gradients(grads=dual_variables_gradients)
+
+                            log_alpha_mean_after_update = dual_variables_state.params["params"]["log_alpha_mean"]
+                            if self.projected_alpha_mean_dual_step_size > 0.0:
+                                alpha_mean_before_update = jax.nn.softplus(log_alpha_mean_before_update) + self.float_epsilon
+                                min_alpha_mean = jax.nn.softplus(self.min_log_alpha) + self.float_epsilon
+                                projected_alpha_mean = jnp.maximum(
+                                    alpha_mean_before_update + self.projected_alpha_mean_dual_step_size * (mean_kl_mean_for_update - self.epsilon_parametric_mu),
+                                    min_alpha_mean
+                                )
+                                projected_alpha_mean_without_epsilon = jnp.maximum(projected_alpha_mean - self.float_epsilon, self.float_epsilon)
+                                projected_log_alpha_mean = projected_alpha_mean_without_epsilon + jnp.log(-jnp.expm1(-projected_alpha_mean_without_epsilon))
+                                use_projected_alpha_mean = alpha_mean_before_update <= self.projected_alpha_mean_dual_max
+                                log_alpha_mean_after_update = jnp.where(use_projected_alpha_mean, projected_log_alpha_mean, log_alpha_mean_after_update)
 
                             dual_variables_state = dual_variables_state.replace(
                                 params={
                                     "params": {
                                         "log_eta": jnp.maximum(dual_variables_state.params["params"]["log_eta"], self.min_log_temperature),
-                                        "log_alpha_mean": jnp.maximum(dual_variables_state.params["params"]["log_alpha_mean"], self.min_log_alpha),
+                                        "log_alpha_mean": jnp.maximum(log_alpha_mean_after_update, self.min_log_alpha),
                                         "log_alpha_stddev": jnp.maximum(dual_variables_state.params["params"]["log_alpha_stddev"], self.min_log_alpha),
                                         "log_penalty_temperature": dual_variables_state.params["params"]["log_penalty_temperature"],
                                     }

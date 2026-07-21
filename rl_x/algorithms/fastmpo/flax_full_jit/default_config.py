@@ -40,6 +40,8 @@ def get_config(algorithm_name):
     config.min_log_temperature = -18.0
     config.min_log_alpha = -18.0
     config.precondition_alpha_dual_gradients = False
+    config.projected_alpha_mean_dual_step_size = 0.0
+    config.projected_alpha_mean_dual_max = 0.1
     config.policy_init_scale = 0.5
     config.policy_min_scale = 0.1
     config.policy_mean_loss_min_scale = 0.0
