@@ -28,6 +28,7 @@ def get_config(algorithm_name):
     config.max_grad_norm = 40.0
     config.collect_data_with_online_policy = False
     config.action_sampling_number = 4
+    config.improvement_top_fraction = 1.0
     config.epsilon_non_parametric = 0.1
     config.epsilon_parametric_mu = 0.01
     config.epsilon_parametric_sigma = 1e-6

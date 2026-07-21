@@ -59,6 +59,8 @@ class FastMPO:
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.collect_data_with_online_policy = config.algorithm.collect_data_with_online_policy
         self.action_sampling_number = config.algorithm.action_sampling_number
+        self.improvement_top_fraction = config.algorithm.improvement_top_fraction
+        self.improvement_top_k = max(1, int(np.ceil(self.action_sampling_number * self.improvement_top_fraction)))
         self.epsilon_non_parametric = config.algorithm.epsilon_non_parametric
         self.epsilon_parametric_mu = config.algorithm.epsilon_parametric_mu
         self.epsilon_parametric_sigma = config.algorithm.epsilon_parametric_sigma
@@ -113,6 +115,9 @@ class FastMPO:
         
         if self.learning_starts < self.n_steps:
             raise ValueError("The replay buffer must at least be filled with n_steps transitions before learning starts.")
+
+        if self.improvement_top_fraction <= 0.0 or self.improvement_top_fraction > 1.0:
+            raise ValueError("Improvement top fraction must be greater than zero and at most one.")
 
         if self.squashed_actions and self.action_clipping:
             raise ValueError("Tanh-squashed actions cannot be combined with action clipping.")
@@ -423,12 +428,17 @@ class FastMPO:
                             log_eta, log_alpha_mean, log_alpha_stddev, log_penalty_temperature = self.dual_variables.apply(dual_variables_params)
                             eta = jax.nn.softplus(log_eta) + self.float_epsilon
                             eta_s = eta[0]
-                            improvement_dist = jax.nn.softmax(q_vals / stop_gradient(eta_s), axis=0)  # (K,2)
+                            improvement_logits = q_vals / stop_gradient(eta_s)
+                            if self.improvement_top_k < self.action_sampling_number:
+                                _, improvement_top_indices = jax.lax.top_k(q_vals.T, self.improvement_top_k)
+                                improvement_top_mask = jnp.any(jax.nn.one_hot(improvement_top_indices, self.action_sampling_number, dtype=jnp.bool_), axis=1).T
+                                improvement_logits = jnp.where(improvement_top_mask, improvement_logits, -jnp.inf)
+                            improvement_dist = jax.nn.softmax(improvement_logits, axis=0)  # (K,2)
                             improvement_dist_entropy = -jnp.sum(improvement_dist * jnp.log(improvement_dist + self.float_epsilon), axis=0)
                             improvement_dist_effective_samples = 1.0 / jnp.sum(improvement_dist ** 2, axis=0)
 
-                            q_logsumexp = jax.scipy.special.logsumexp(q_vals / eta_s, axis=0)  # (2,)
-                            loss_eta = eta_s * (self.epsilon_non_parametric + jnp.mean(q_logsumexp) - jnp.log(self.action_sampling_number))
+                            q_logsumexp = jax.scipy.special.logsumexp(jnp.where(jnp.isfinite(improvement_logits), q_vals / eta_s, -jnp.inf), axis=0)  # (2,)
+                            loss_eta = eta_s * (self.epsilon_non_parametric + jnp.mean(q_logsumexp) - jnp.log(self.improvement_top_k))
 
                             if self.action_clipping:
                                 penalty_temperature = jax.nn.softplus(log_penalty_temperature)[0] + self.float_epsilon
@@ -521,6 +531,7 @@ class FastMPO:
                                 "q/improvement_q_action_range_mean": jnp.mean(jnp.max(q_vals, axis=0) - jnp.min(q_vals, axis=0)),
                                 "policy/improvement_weight_entropy": jnp.mean(improvement_dist_entropy),
                                 "policy/improvement_weight_effective_samples": jnp.mean(improvement_dist_effective_samples),
+                                "policy/improvement_selected_fraction": self.improvement_top_k / self.action_sampling_number,
                                 "policy/target_online_mean_delta_rms": jnp.sqrt(jnp.mean((target_action_mean - online_action_mean) ** 2)),
                                 "policy/target_online_std_delta_rms": jnp.sqrt(jnp.mean((target_action_std - online_action_std) ** 2)),
                                 "policy/mean_loss_std_min_mean": jnp.mean(jnp.min(mean_loss_action_std, axis=-1)),
