@@ -5,4 +5,5 @@ def get_config(algorithm_name):
     config = get_qppo_config(algorithm_name)
     config.nr_q_critics = 2
     config.critic_tau = 0.005
+    config.q_critic_reduction = "min"
     return config

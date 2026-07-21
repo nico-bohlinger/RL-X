@@ -55,6 +55,7 @@ class PPO:
         self.nr_value_samples = getattr(config.algorithm, "nr_value_samples", 0)
         self.nr_q_critics = getattr(config.algorithm, "nr_q_critics", 1)
         self.critic_tau = getattr(config.algorithm, "critic_tau", 0.0)
+        self.q_critic_reduction = getattr(config.algorithm, "q_critic_reduction", "min")
         self.use_target_q_critic = self.nr_q_critics > 1 and self.critic_tau > 0.0
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
@@ -74,6 +75,9 @@ class PPO:
         
         if self.nr_parallel_seeds > 1:
             raise ValueError("Parallel seeds are not supported yet. This is mainly limited by not being able to log mutliple wandb runs at the same time.")
+
+        if self.q_critic_reduction not in ["min", "mean"]:
+            raise ValueError("Q critic reduction must be min or mean.")
 
         rlx_logger.info(f"Using device: {jax.default_backend()}")
 
@@ -157,13 +161,13 @@ class PPO:
                             value_q = self.critic.apply(critic_value_params, jnp.repeat(observation[None, :], self.nr_value_samples, axis=0), value_actions).squeeze(-1)
                             if self.nr_q_critics > 1:
                                 twin_q_disagreement = jnp.mean(jnp.max(value_q, axis=0) - jnp.min(value_q, axis=0), axis=0)
-                                value_q = jnp.min(value_q, axis=0)
+                                value_q = jnp.min(value_q, axis=0) if self.q_critic_reduction == "min" else jnp.mean(value_q, axis=0)
                             else:
                                 twin_q_disagreement = jnp.zeros(value_q.shape[-1])
                             value = jnp.mean(value_q, axis=0)
                             action_q = self.critic.apply(critic_value_params, observation, action).squeeze(-1)
                             if self.nr_q_critics > 1:
-                                action_q = jnp.min(action_q, axis=0)
+                                action_q = jnp.min(action_q, axis=0) if self.q_critic_reduction == "min" else jnp.mean(action_q, axis=0)
                             sampled_action_q_range = jnp.max(value_q, axis=0) - jnp.min(value_q, axis=0)
                             executed_action_advantage = action_q - value
                         else:
@@ -180,7 +184,7 @@ class PPO:
                             next_value_actions = next_action_mean[None, :] + next_action_std[None, :] * jax.random.normal(next_value_key, shape=(self.nr_value_samples,) + next_action_mean.shape)
                             next_value_q = self.critic.apply(critic_value_params, jnp.repeat(env_state.actual_next_observation[None, :], self.nr_value_samples, axis=0), next_value_actions).squeeze(-1)
                             if self.nr_q_critics > 1:
-                                next_value_q = jnp.min(next_value_q, axis=0)
+                                next_value_q = jnp.min(next_value_q, axis=0) if self.q_critic_reduction == "min" else jnp.mean(next_value_q, axis=0)
                             next_value = next_value_q.mean(axis=0)
                         else:
                             next_value = jnp.zeros_like(value)
