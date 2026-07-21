@@ -405,6 +405,9 @@ class LocomotionEnv:
         info["rollout/episode_return"] = reward
         info["rollout/episode_length"] = jnp.zeros(nr_envs)
         info["env_curriculum/coefficient"] = internal_state["env_curriculum_coeff"]
+        info["env_info/termination_below_height"] = jnp.zeros(nr_envs, dtype=bool)
+        info["env_info/termination_velocity_saturation"] = jnp.zeros(nr_envs, dtype=bool)
+        info["env_info/termination_nonfinite_state"] = jnp.zeros(nr_envs, dtype=bool)
         info_episode_store = {
             "episode_return": jnp.zeros(nr_envs),
             "episode_step": jnp.zeros(nr_envs),
@@ -511,9 +514,15 @@ class LocomotionEnv:
         self.command_function.get_next_command(state.internal_state, should_sample_commands, command_key)
 
         next_observation = self.get_observation(data, mjx_model, state.internal_state, observation_key, chosen_action)
-        terminated = self.termination_function.should_terminate(state.internal_state) | jnp.any(jnp.abs(data.qvel[:, :3]) == 100.0, axis=-1)
+        termination_below_height = self.termination_function.should_terminate(state.internal_state)
+        termination_velocity_saturation = jnp.any(jnp.abs(data.qvel[:, :3]) >= 100.0, axis=-1)
+        termination_nonfinite_state = ~(jnp.all(jnp.isfinite(data.qpos), axis=-1) & jnp.all(jnp.isfinite(data.qvel), axis=-1) & jnp.all(jnp.isfinite(data.sensordata), axis=-1))
+        terminated = termination_below_height | termination_velocity_saturation | termination_nonfinite_state
         truncated = state.info_episode_store["episode_step"] >= (self.horizon - 1)
         done = terminated | truncated
+        state.info["env_info/termination_below_height"] = termination_below_height
+        state.info["env_info/termination_velocity_saturation"] = termination_velocity_saturation
+        state.info["env_info/termination_nonfinite_state"] = termination_nonfinite_state
 
         data = self.terrain_function.post_step(data, mjx_model, state.internal_state, terrain_key)
         self.reward_function.step(data, state.internal_state)

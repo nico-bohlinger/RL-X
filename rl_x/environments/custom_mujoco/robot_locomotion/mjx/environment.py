@@ -309,6 +309,9 @@ class LocomotionEnv:
         info["rollout/episode_return"] = reward
         info["rollout/episode_length"] = 0
         info["env_curriculum/coefficient"] = internal_state["env_curriculum_coeff"]
+        info["env_info/termination_below_height"] = False
+        info["env_info/termination_velocity_saturation"] = False
+        info["env_info/termination_nonfinite_state"] = False
         info_episode_store = {
             "episode_return": reward,
             "episode_step": 0,
@@ -429,9 +432,15 @@ class LocomotionEnv:
         self.command_function.get_next_command(state.internal_state, should_sample_commands, command_key)
         
         next_observation = self.get_observation(data, mjx_model, state.internal_state, observation_key, chosen_action)
-        terminated = self.termination_function.should_terminate(state.internal_state) | jnp.any(jnp.abs(data.qvel[:3]) == 100.0)
+        termination_below_height = self.termination_function.should_terminate(state.internal_state)
+        termination_velocity_saturation = jnp.any(jnp.abs(data.qvel[:3]) >= 100.0)
+        termination_nonfinite_state = ~(jnp.all(jnp.isfinite(data.qpos)) & jnp.all(jnp.isfinite(data.qvel)) & jnp.all(jnp.isfinite(data.sensordata)))
+        terminated = termination_below_height | termination_velocity_saturation | termination_nonfinite_state
         truncated = state.info_episode_store["episode_step"] >= (self.horizon - 1)
         done = terminated | truncated
+        state.info["env_info/termination_below_height"] = termination_below_height
+        state.info["env_info/termination_velocity_saturation"] = termination_velocity_saturation
+        state.info["env_info/termination_nonfinite_state"] = termination_nonfinite_state
 
         data = self.terrain_function.post_step(data, mjx_model, state.internal_state, terrain_key)
         self.reward_function.step(data, state.internal_state)
