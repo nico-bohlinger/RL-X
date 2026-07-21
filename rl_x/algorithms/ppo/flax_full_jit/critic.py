@@ -12,6 +12,9 @@ def get_critic(config, env):
     critic_observation_indices = getattr(env, "critic_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
+        nr_q_critics = getattr(config.algorithm, "nr_q_critics", 1)
+        if nr_q_critics > 1:
+            return VectorCritic(nr_q_critics, critic_observation_indices)
         return Critic(critic_observation_indices, getattr(config.algorithm, "nr_value_samples", 0) > 0)
 
 
@@ -33,3 +36,20 @@ class Critic(nn.Module):
         critic = nn.elu(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1), bias_init=constant(0.0))(critic)
         return critic
+
+
+class VectorCritic(nn.Module):
+    nr_critics: int
+    critic_observation_indices: Sequence[int]
+
+    @nn.compact
+    def __call__(self, x, action):
+        vmap_critic = nn.vmap(
+            Critic,
+            variable_axes={"params": 0},
+            split_rngs={"params": True},
+            in_axes=None,
+            out_axes=0,
+            axis_size=self.nr_critics,
+        )
+        return vmap_critic(critic_observation_indices=self.critic_observation_indices, action_conditioned=True)(x, action)

@@ -17,6 +17,7 @@ import wandb
 from rl_x.algorithms.ppo.flax_full_jit.general_properties import GeneralProperties
 from rl_x.algorithms.ppo.flax_full_jit.policy import get_policy
 from rl_x.algorithms.ppo.flax_full_jit.critic import get_critic
+from rl_x.algorithms.fastmpo.flax_full_jit.rl_train_state import RLTrainState
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -52,6 +53,9 @@ class PPO:
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
         self.nr_value_samples = getattr(config.algorithm, "nr_value_samples", 0)
+        self.nr_q_critics = getattr(config.algorithm, "nr_q_critics", 1)
+        self.critic_tau = getattr(config.algorithm, "critic_tau", 0.0)
+        self.use_target_q_critic = self.nr_q_critics > 1 and self.critic_tau > 0.0
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
         self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
@@ -100,14 +104,19 @@ class PPO:
         critic_init_arguments = (env_state.next_observation,)
         if self.nr_value_samples > 0:
             critic_init_arguments += (jnp.zeros(env_state.next_observation.shape[:-1] + self.as_shape),)
-        self.critic_state = TrainState.create(
-            apply_fn=self.critic.apply,
-            params=self.critic.init(critic_key, *critic_init_arguments),
-            tx=optax.chain(
+        critic_params = self.critic.init(critic_key, *critic_init_arguments)
+        critic_state_arguments = {
+            "apply_fn": self.critic.apply,
+            "params": critic_params,
+            "tx": optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
                 optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
             )
-        )
+        }
+        if self.use_target_q_critic:
+            self.critic_state = RLTrainState.create(target_params=critic_params, **critic_state_arguments)
+        else:
+            self.critic_state = TrainState.create(**critic_state_arguments)
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -142,17 +151,26 @@ class PPO:
                         log_prob = (-0.5 * ((action - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd).sum(1)
                         processed_action = self.get_processed_action(action)
                         if self.nr_value_samples > 0:
+                            critic_value_params = critic_state.target_params if self.use_target_q_critic else critic_state.params
                             key, value_key = jax.random.split(key)
                             value_actions = action_mean[None, :] + action_std[None, :] * jax.random.normal(value_key, shape=(self.nr_value_samples,) + action_mean.shape)
-                            value_q = self.critic.apply(critic_state.params, jnp.repeat(observation[None, :], self.nr_value_samples, axis=0), value_actions).squeeze(-1)
+                            value_q = self.critic.apply(critic_value_params, jnp.repeat(observation[None, :], self.nr_value_samples, axis=0), value_actions).squeeze(-1)
+                            if self.nr_q_critics > 1:
+                                twin_q_disagreement = jnp.mean(jnp.max(value_q, axis=0) - jnp.min(value_q, axis=0), axis=0)
+                                value_q = jnp.min(value_q, axis=0)
+                            else:
+                                twin_q_disagreement = jnp.zeros(value_q.shape[-1])
                             value = jnp.mean(value_q, axis=0)
-                            action_q = self.critic.apply(critic_state.params, observation, action).squeeze(-1)
+                            action_q = self.critic.apply(critic_value_params, observation, action).squeeze(-1)
+                            if self.nr_q_critics > 1:
+                                action_q = jnp.min(action_q, axis=0)
                             sampled_action_q_range = jnp.max(value_q, axis=0) - jnp.min(value_q, axis=0)
                             executed_action_advantage = action_q - value
                         else:
                             value = self.critic.apply(critic_state.params, observation).squeeze(-1)
                             sampled_action_q_range = jnp.zeros_like(value)
                             executed_action_advantage = jnp.zeros_like(value)
+                            twin_q_disagreement = jnp.zeros_like(value)
 
                         env_state = self.train_env.step(env_state, processed_action)
                         if self.nr_value_samples > 0:
@@ -160,10 +178,13 @@ class PPO:
                             next_action_std = jnp.exp(next_action_logstd)
                             key, next_value_key = jax.random.split(key)
                             next_value_actions = next_action_mean[None, :] + next_action_std[None, :] * jax.random.normal(next_value_key, shape=(self.nr_value_samples,) + next_action_mean.shape)
-                            next_value = self.critic.apply(critic_state.params, jnp.repeat(env_state.actual_next_observation[None, :], self.nr_value_samples, axis=0), next_value_actions).squeeze(-1).mean(axis=0)
+                            next_value_q = self.critic.apply(critic_value_params, jnp.repeat(env_state.actual_next_observation[None, :], self.nr_value_samples, axis=0), next_value_actions).squeeze(-1)
+                            if self.nr_q_critics > 1:
+                                next_value_q = jnp.min(next_value_q, axis=0)
+                            next_value = next_value_q.mean(axis=0)
                         else:
                             next_value = jnp.zeros_like(value)
-                        transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, next_value, env_state.terminated, log_prob, sampled_action_q_range, executed_action_advantage, env_state.info)
+                        transition = (observation, env_state.actual_next_observation, action, env_state.reward, value, next_value, env_state.terminated, log_prob, sampled_action_q_range, executed_action_advantage, twin_q_disagreement, env_state.info)
 
                         if self.render:
                             if self.render_callback_type == "debug_callback":
@@ -177,7 +198,7 @@ class PPO:
 
                     single_rollout_carry, batch = jax.lax.scan(single_rollout, learning_iteration_carry, None, self.nr_steps)
                     policy_state, critic_state, env_state, key = single_rollout_carry
-                    states, next_states, actions, rewards, values, next_values, terminations, log_probs, sampled_action_q_ranges, executed_action_advantages, infos = batch
+                    states, next_states, actions, rewards, values, next_values, terminations, log_probs, sampled_action_q_ranges, executed_action_advantages, twin_q_disagreements, infos = batch
 
 
                     # Calculating advantages and returns
@@ -276,6 +297,8 @@ class PPO:
 
                         policy_state = policy_state.apply_gradients(grads=policy_gradients)
                         critic_state = critic_state.apply_gradients(grads=critic_gradients)
+                        if self.use_target_q_critic:
+                            critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.critic_tau))
 
                         metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
                         metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
@@ -294,6 +317,8 @@ class PPO:
                     if self.nr_value_samples > 0:
                         optimization_metrics["q_value/sampled_action_range_mean"] = jnp.mean(sampled_action_q_ranges)
                         optimization_metrics["q_value/executed_action_advantage_abs_mean"] = jnp.mean(jnp.abs(executed_action_advantages))
+                        if self.nr_q_critics > 1:
+                            optimization_metrics["q_value/twin_disagreement_mean"] = jnp.mean(twin_q_disagreements)
 
 
                     # Logging
