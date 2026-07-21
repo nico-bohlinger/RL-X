@@ -44,7 +44,7 @@ class FastMPO:
         self.render_callback_type = getattr(config.environment, 'render_callback_type', 'io_callback')
         self.dual_critic = config.algorithm.dual_critic
         self.action_clipping = config.algorithm.action_clipping
-        self.squashed_actions = config.algorithm.action_rescaling == "tanh_fastsac"
+        self.squashed_actions = config.algorithm.action_rescaling in ("tanh", "tanh_fastsac")
         self.policy_learning_rate = config.algorithm.policy_learning_rate
         self.critic_learning_rate = config.algorithm.critic_learning_rate
         self.dual_learning_rate = config.algorithm.dual_learning_rate
@@ -493,7 +493,7 @@ class FastMPO:
                                 "q/improvement_q_mean": jnp.mean(q_vals),
                                 "policy/std_min_mean": jnp.mean(jnp.min(online_action_std, axis=-1)),
                                 "policy/std_max_mean": jnp.mean(jnp.max(online_action_std, axis=-1)),
-                                "policy/latent_action_oob_fraction": jnp.mean(jnp.abs(sampled_actions_raw) > 1.0),
+                                "policy/latent_action_abs_gt_one_fraction": jnp.mean(jnp.abs(sampled_actions_raw) > 1.0),
                             }
 
                             return loss, (metrics)
