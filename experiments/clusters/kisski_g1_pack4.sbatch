@@ -33,7 +33,6 @@ for GPU_INDEX in 0 1 2 3; do
     RUN_ARGS_FILE="${CONFIG_PATHS[$GPU_INDEX]}"
     RUN_TAG="$(basename "$RUN_ARGS_FILE" .args)"
     (
-        export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
         export CLUSTER_NAME=KISSKI
         export RLX_SOURCE
         export EXPECTED_RLX_COMMIT
@@ -42,7 +41,8 @@ for GPU_INDEX in 0 1 2 3; do
         export JAX_CACHE_DIR="$RLX_ROOT/jax_cache/${SLURM_JOB_ID}_${GPU_INDEX}_${RUN_TAG}"
         export RLX_RUN_DIR="$RLX_ROOT/runs/${SLURM_JOB_ID}_${GPU_INDEX}_${RUN_TAG}"
         export RUNNER_RUN_NAME="kisski_${SLURM_JOB_ID}_gpu${GPU_INDEX}"
-        bash "$RLX_ROOT/scripts/run_g1_noeval.sh"
+        srun --exclusive --exact --nodes=1 --ntasks=1 --cpus-per-task=8 --gpus-per-task=1 --gpu-bind="map_gpu:$GPU_INDEX" \
+            bash "$RLX_ROOT/scripts/run_g1_noeval.sh"
     ) > "$RLX_ROOT/runs/${RUN_TAG}_${SLURM_JOB_ID}.log" 2>&1 &
     PIDS+=("$!")
 done
