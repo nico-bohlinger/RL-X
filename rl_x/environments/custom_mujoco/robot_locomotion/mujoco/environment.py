@@ -191,9 +191,6 @@ class LocomotionEnv(gym.Env):
                 "rollout/episode_return": 0.0,
                 "rollout/episode_length": 0,
                 "env_curriculum/coefficient": np.where(eval_mode, 1.0, 0.0),
-                "env_info/termination_below_height": False,
-                "env_info/termination_velocity_saturation": False,
-                "env_info/termination_nonfinite_state": False,
             },
             "info_episode_store": {
                 "episode_return": 0.0,
@@ -343,15 +340,9 @@ class LocomotionEnv(gym.Env):
             self.command_function.get_next_command()
         
         next_observation = self.get_observation(chosen_action)
-        termination_below_height = self.termination_function.should_terminate()
-        termination_velocity_saturation = np.any(np.abs(self.internal_state["data"].qvel[:3]) >= 100.0)
-        termination_nonfinite_state = ~(np.all(np.isfinite(self.internal_state["data"].qpos)) & np.all(np.isfinite(self.internal_state["data"].qvel)) & np.all(np.isfinite(self.internal_state["data"].sensordata)))
-        terminated = termination_below_height | termination_velocity_saturation | termination_nonfinite_state
+        terminated = self.termination_function.should_terminate() | np.any(np.abs(self.internal_state["data"].qvel[:3]) == 100.0)
         truncated = self.internal_state["info_episode_store"]["episode_step"] >= (self.horizon - 1)
         done = terminated | truncated
-        self.internal_state["info"]["env_info/termination_below_height"] = termination_below_height
-        self.internal_state["info"]["env_info/termination_velocity_saturation"] = termination_velocity_saturation
-        self.internal_state["info"]["env_info/termination_nonfinite_state"] = termination_nonfinite_state
 
         self.terrain_function.post_step()
         self.reward_function.step()

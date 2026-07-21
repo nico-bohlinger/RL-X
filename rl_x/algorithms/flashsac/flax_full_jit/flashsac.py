@@ -15,7 +15,6 @@ import orbax.checkpoint
 import optax
 import wandb
 
-from rl_x.algorithms.evaluation import get_evaluation_termination_counts, get_evaluation_termination_metrics
 from rl_x.algorithms.flashsac.flax_full_jit.general_properties import GeneralProperties
 from rl_x.algorithms.flashsac.flax_full_jit.policy import get_policy
 from rl_x.algorithms.flashsac.flax_full_jit.critic import get_critic
@@ -532,29 +531,26 @@ class FlashSAC:
                             key, reset_key = jax.random.split(key)
                             reset_keys = jax.random.split(reset_key, self.nr_envs)
                             eval_env_state = self.eval_env.reset(reset_keys, True)
-                            eval_termination_counts = jax.tree.map(jnp.zeros_like, get_evaluation_termination_counts(eval_env_state))
 
                             def single_eval_rollout(eval_carry, _):
-                                policy_state, eval_env_state, eval_termination_counts = eval_carry
+                                policy_state, eval_env_state = eval_carry
                                 eval_mean, _ = self.policy.apply(
                                     {"params": policy_state.params, "batch_stats": policy_state.batch_stats},
                                     eval_env_state.next_observation, train=False,
                                 )
                                 eval_action = self.policy.deterministic_action(eval_mean)
                                 eval_env_state = self.eval_env.step(eval_env_state, self.get_processed_action(eval_action))
-                                eval_termination_counts = jax.tree.map(jnp.add, eval_termination_counts, get_evaluation_termination_counts(eval_env_state))
-                                return (policy_state, eval_env_state, eval_termination_counts), None
+                                return (policy_state, eval_env_state), None
 
-                            (_, eval_env_state, eval_termination_counts), _ = jax.lax.scan(
+                            (_, eval_env_state), _ = jax.lax.scan(
                                 single_eval_rollout,
-                                (policy_state, eval_env_state, eval_termination_counts),
+                                (policy_state, eval_env_state),
                                 jnp.arange(self.horizon),
                             )
                             eval_metrics = {
                                 "eval/episode_return": jnp.mean(eval_env_state.info["rollout/episode_return"]),
                                 "eval/episode_length": jnp.mean(eval_env_state.info["rollout/episode_length"]),
                             }
-                            eval_metrics.update(get_evaluation_termination_metrics(eval_termination_counts))
 
                             def eval_callback(args):
                                 metrics, step = args
