@@ -2,6 +2,7 @@
 #SBATCH --account=kisski-merl
 #SBATCH --partition=kisski
 #SBATCH --gpus=A100:4
+#SBATCH --constraint=inet
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -11,6 +12,10 @@
 #SBATCH --output=/user/nico.bohlinger/u29390/rlx_g1_cluster/runs/kisski_pack4_%j.log
 
 set -euo pipefail
+
+export http_proxy="${http_proxy:-http://www-cache.gwdg.de:3128}"
+export https_proxy="${https_proxy:-http://www-cache.gwdg.de:3128}"
+export ftp_proxy="${ftp_proxy:-http://www-cache.gwdg.de:3128}"
 
 if [ "$#" -ne 5 ]; then
     echo "usage: sbatch kisski_g1_pack4.sbatch <commit> <gpu0.args> <gpu1.args> <gpu2.args> <gpu3.args>" >&2

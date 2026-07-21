@@ -3,6 +3,7 @@
 #SBATCH --partition=grete:interactive
 #SBATCH --qos=2h
 #SBATCH --gpus=1g.20gb:1
+#SBATCH --constraint=inet
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -12,6 +13,10 @@
 #SBATCH --output=/user/nico.bohlinger/u29390/rlx_g1_cluster/runs/kisski_g1_smoke_%j.log
 
 set -euo pipefail
+
+export http_proxy="${http_proxy:-http://www-cache.gwdg.de:3128}"
+export https_proxy="${https_proxy:-http://www-cache.gwdg.de:3128}"
+export ftp_proxy="${ftp_proxy:-http://www-cache.gwdg.de:3128}"
 
 if [ "$#" -ne 2 ]; then
     echo "usage: sbatch kisski_g1_one_gpu.sbatch <commit> <run.args>" >&2
