@@ -1,0 +1,9 @@
+--algorithm.name=fastmpo.flax_full_jit
+--algorithm.total_timesteps=81920
+--algorithm.evaluation_and_save_frequency=81920
+--algorithm.logging_frequency=40960
+--algorithm.batch_size=256
+--algorithm.buffer_size_per_env=16
+--algorithm.nr_critic_updates_per_policy_update=1
+--algorithm.nr_policy_updates_per_step=1
+--runner.exp_name=cluster_bringup__g1_fastmpo__noeval_nosave

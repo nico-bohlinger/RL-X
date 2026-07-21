@@ -1,0 +1,5 @@
+--algorithm.name=fastmpo.flax_full_jit
+--algorithm.policy_min_scale=0.03
+--algorithm.policy_tau=0.9
+--algorithm.policy_learning_rate=0.01
+--runner.exp_name=E41__G1__hfield__fastmpo__stable_k4__kisski__noeval
