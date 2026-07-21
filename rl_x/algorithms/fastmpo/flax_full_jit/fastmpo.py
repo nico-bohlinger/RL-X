@@ -70,6 +70,7 @@ class FastMPO:
         self.float_epsilon = config.algorithm.float_epsilon
         self.min_log_temperature = config.algorithm.min_log_temperature
         self.min_log_alpha = config.algorithm.min_log_alpha
+        self.precondition_alpha_dual_gradients = config.algorithm.precondition_alpha_dual_gradients
         self.policy_mean_loss_min_scale = config.algorithm.policy_mean_loss_min_scale
         self.batch_size = config.algorithm.batch_size
         self.buffer_size_per_env = config.algorithm.buffer_size_per_env
@@ -458,7 +459,10 @@ class FastMPO:
                             kl_mean = jnp.log(kl_mean_std1 / kl_mean_std0) + (kl_mean_var0 + (target_action_mean - online_action_mean) ** 2) / (2.0 * kl_mean_var1) - 0.5
                             mean_kl_mean = kl_mean.mean(axis=0)  # (action_dim,)
                             loss_kl_mean = jnp.sum(stop_gradient(alpha_mean) * mean_kl_mean)
-                            loss_alpha_mean = jnp.sum(alpha_mean * (self.epsilon_parametric_mu - stop_gradient(mean_kl_mean)))
+                            alpha_mean_gradient_scale = 1.0
+                            if self.precondition_alpha_dual_gradients:
+                                alpha_mean_gradient_scale = 1.0 / stop_gradient(jnp.maximum(jax.nn.sigmoid(log_alpha_mean), self.float_epsilon))
+                            loss_alpha_mean = jnp.sum(alpha_mean * (self.epsilon_parametric_mu - stop_gradient(mean_kl_mean)) * alpha_mean_gradient_scale)
 
                             logprob_std = jnp.sum(-0.5 * ((((sampled_actions_raw - target_action_mean) / online_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(online_action_std), axis=-1)  # (sampled actions, 2 * batch)
 
@@ -471,7 +475,10 @@ class FastMPO:
                             kl_std = jnp.log(kl_std_std1 / kl_std_std0) + (kl_std_var0 + (target_action_mean - target_action_mean) ** 2) / (2.0 * kl_std_var1) - 0.5
                             mean_kl_std = kl_std.mean(axis=0)
                             loss_kl_std = jnp.sum(stop_gradient(alpha_std) * mean_kl_std)
-                            loss_alpha_std = jnp.sum(alpha_std * (self.epsilon_parametric_sigma - stop_gradient(mean_kl_std)))
+                            alpha_std_gradient_scale = 1.0
+                            if self.precondition_alpha_dual_gradients:
+                                alpha_std_gradient_scale = 1.0 / stop_gradient(jnp.maximum(jax.nn.sigmoid(log_alpha_stddev), self.float_epsilon))
+                            loss_alpha_std = jnp.sum(alpha_std * (self.epsilon_parametric_sigma - stop_gradient(mean_kl_std)) * alpha_std_gradient_scale)
 
                             actor_loss = loss_pg_mean + loss_pg_std + loss_kl_mean + loss_kl_std
                             dual_loss = loss_alpha_mean + loss_alpha_std + loss_eta
@@ -493,9 +500,13 @@ class FastMPO:
                                 "dual/alpha_mean": jnp.mean(alpha_mean),
                                 "dual/alpha_mean_min": jnp.min(alpha_mean),
                                 "dual/alpha_mean_max": jnp.max(alpha_mean),
+                                "dual/log_alpha_mean_min": jnp.min(log_alpha_mean),
+                                "dual/log_alpha_mean_max": jnp.max(log_alpha_mean),
                                 "dual/alpha_std": jnp.mean(alpha_std),
                                 "dual/alpha_std_min": jnp.min(alpha_std),
                                 "dual/alpha_std_max": jnp.max(alpha_std),
+                                "dual/log_alpha_std_min": jnp.min(log_alpha_stddev),
+                                "dual/log_alpha_std_max": jnp.max(log_alpha_stddev),
                                 "kl/mean_kl_mean": jnp.mean(mean_kl_mean),
                                 "kl/mean_kl_mean_min": jnp.min(mean_kl_mean),
                                 "kl/mean_kl_mean_max": jnp.max(mean_kl_mean),
