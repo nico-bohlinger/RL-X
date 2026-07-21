@@ -70,6 +70,7 @@ class FastMPO:
         self.float_epsilon = config.algorithm.float_epsilon
         self.min_log_temperature = config.algorithm.min_log_temperature
         self.min_log_alpha = config.algorithm.min_log_alpha
+        self.policy_mean_loss_min_scale = config.algorithm.policy_mean_loss_min_scale
         self.batch_size = config.algorithm.batch_size
         self.buffer_size_per_env = config.algorithm.buffer_size_per_env
         self.learning_starts = config.algorithm.learning_starts
@@ -445,7 +446,8 @@ class FastMPO:
                             alpha_mean = jax.nn.softplus(log_alpha_mean) + self.float_epsilon
                             alpha_std = jax.nn.softplus(log_alpha_stddev) + self.float_epsilon
 
-                            logprob_mean = jnp.sum(-0.5 * ((((sampled_actions_raw - online_action_mean) / target_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(target_action_std), axis=-1)  # (sampled actions, 2 * batch)
+                            mean_loss_action_std = jnp.maximum(target_action_std, self.policy_mean_loss_min_scale)
+                            logprob_mean = jnp.sum(-0.5 * ((((sampled_actions_raw - online_action_mean) / mean_loss_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(mean_loss_action_std), axis=-1)  # (sampled actions, 2 * batch)
 
                             loss_pg_mean = -(logprob_mean * improvement_dist).sum(axis=0).mean()
 
@@ -507,6 +509,7 @@ class FastMPO:
                                 "policy/improvement_weight_effective_samples": jnp.mean(improvement_dist_effective_samples),
                                 "policy/target_online_mean_delta_rms": jnp.sqrt(jnp.mean((target_action_mean - online_action_mean) ** 2)),
                                 "policy/target_online_std_delta_rms": jnp.sqrt(jnp.mean((target_action_std - online_action_std) ** 2)),
+                                "policy/mean_loss_std_min_mean": jnp.mean(jnp.min(mean_loss_action_std, axis=-1)),
                                 "policy/std_min_mean": jnp.mean(jnp.min(online_action_std, axis=-1)),
                                 "policy/std_max_mean": jnp.mean(jnp.max(online_action_std, axis=-1)),
                                 "policy/latent_action_abs_gt_one_fraction": jnp.mean(jnp.abs(sampled_actions_raw) > 1.0),

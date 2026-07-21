@@ -41,6 +41,7 @@ def get_config(algorithm_name):
     config.min_log_alpha = -18.0
     config.policy_init_scale = 0.5
     config.policy_min_scale = 0.1
+    config.policy_mean_loss_min_scale = 0.0
     config.batch_size = 8192  # fastsac: 8192, fasttd3: 32768
     config.buffer_size_per_env = 1024  # fastsac: 1024, fasttd3: 10240
     config.learning_starts = 10  # times nr_envs
