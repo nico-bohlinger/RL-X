@@ -44,7 +44,7 @@ class FastMPO:
         self.render_callback_type = getattr(config.environment, 'render_callback_type', 'io_callback')
         self.dual_critic = config.algorithm.dual_critic
         self.action_clipping = config.algorithm.action_clipping
-        self.squashed_actions = config.algorithm.action_rescaling in ("tanh", "tanh_fastsac")
+        self.squashed_actions = config.algorithm.action_rescaling in ("tanh", "tanh_fastsac", "tanh_joint_limits")
         self.policy_learning_rate = config.algorithm.policy_learning_rate
         self.critic_learning_rate = config.algorithm.critic_learning_rate
         self.dual_learning_rate = config.algorithm.dual_learning_rate

@@ -33,8 +33,10 @@ def get_policy(config, env):
         range_to_upper = jnp.abs(env_as_high - env_as_center)
         max_range = jnp.maximum(range_to_lower, range_to_upper)
         action_scale = max_range / env_as_scale
+        action_scale_to_lower = range_to_lower / env_as_scale
+        action_scale_to_upper = range_to_upper / env_as_scale
 
-        fn = get_processed_action_function(config.algorithm.action_clipping, config.algorithm.action_rescaling, env_as_low, env_as_high, action_scale)
+        fn = get_processed_action_function(config.algorithm.action_clipping, config.algorithm.action_rescaling, env_as_low, env_as_high, action_scale, action_scale_to_lower, action_scale_to_upper)
 
         return (policy, fn)
 
@@ -124,7 +126,7 @@ class MPOPolicy(nn.Module):
         return mean, stddev
 
 
-def get_processed_action_function(action_clipping, action_rescaling, env_as_low, env_as_high, action_scale):
+def get_processed_action_function(action_clipping, action_rescaling, env_as_low, env_as_high, action_scale, action_scale_to_lower, action_scale_to_upper):
     def get_clipped_and_scaled_action(action, env_as_low=env_as_low, env_as_high=env_as_high):
         if action_clipping:
             action = jnp.clip(action, -1, 1)
@@ -138,5 +140,8 @@ def get_processed_action_function(action_clipping, action_rescaling, env_as_low,
             action = jnp.tanh(action)
         elif action_rescaling == "tanh_fastsac":
             action = jnp.tanh(action) * action_scale
+        elif action_rescaling == "tanh_joint_limits":
+            zero_logit = jnp.log(action_scale_to_lower / action_scale_to_upper)
+            action = -action_scale_to_lower + (action_scale_to_lower + action_scale_to_upper) * jax.nn.sigmoid(2.0 * action + zero_logit)
         return action
     return jax.jit(get_clipped_and_scaled_action)

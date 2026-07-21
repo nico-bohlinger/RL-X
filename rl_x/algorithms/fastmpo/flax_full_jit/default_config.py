@@ -13,7 +13,7 @@ def get_config(algorithm_name):
     config.dual_critic = True
     config.policy_network_type = "fastsac"  # fastsac, fasttd3, mpo
     config.action_clipping = False
-    config.action_rescaling = "none"  # "none", "fastsac", "normal", "tanh", "tanh_fastsac"
+    config.action_rescaling = "none"  # "none", "fastsac", "normal", "tanh", "tanh_fastsac", "tanh_joint_limits"
     config.policy_learning_rate = 3e-4
     config.critic_learning_rate = 3e-4
     config.dual_learning_rate = 1e-2
