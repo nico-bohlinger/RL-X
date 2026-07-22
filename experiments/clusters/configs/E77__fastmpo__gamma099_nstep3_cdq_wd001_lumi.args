@@ -1,0 +1,11 @@
+--algorithm.name=fastmpo.flax_full_jit
+--algorithm.policy_min_scale=0.03
+--algorithm.policy_tau=0.9
+--algorithm.policy_learning_rate=0.01
+--algorithm.gamma=0.99
+--algorithm.n_steps=3
+--algorithm.clipped_double_q_learning=True
+--algorithm.critic_weight_decay=0.01
+--runner.exp_name=E77__G1__hfield__fastmpo__gamma099_nstep3__clipped_double_q__critic_wd001__lumi__noeval
+--runner.run_name=E77_fastmpo_gamma099_nstep3_clipped_double_q_critic_wd001_lumi_seed0
+--runner.notes=clipped_temporal_q_inflation_regularization_test_lumi

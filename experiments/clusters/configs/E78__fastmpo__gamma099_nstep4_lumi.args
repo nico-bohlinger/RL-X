@@ -1,0 +1,9 @@
+--algorithm.name=fastmpo.flax_full_jit
+--algorithm.policy_min_scale=0.03
+--algorithm.policy_tau=0.9
+--algorithm.policy_learning_rate=0.01
+--algorithm.gamma=0.99
+--algorithm.n_steps=4
+--runner.exp_name=E78__G1__hfield__fastmpo__gamma099_nstep4__lumi__noeval
+--runner.run_name=E78_fastmpo_gamma099_nstep4_lumi_seed0
+--runner.notes=gamma099_temporal_horizon_bracket_test_lumi
