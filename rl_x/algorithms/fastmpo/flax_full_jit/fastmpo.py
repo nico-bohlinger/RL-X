@@ -77,6 +77,7 @@ class FastMPO:
         self.projected_alpha_mean_dual_max = config.algorithm.projected_alpha_mean_dual_max
         self.policy_mean_loss_min_scale = config.algorithm.policy_mean_loss_min_scale
         self.policy_mean_loss_max_inverse_variance_ratio = config.algorithm.policy_mean_loss_max_inverse_variance_ratio
+        self.policy_mean_kl_penalty_min = config.algorithm.policy_mean_kl_penalty_min
         self.batch_size = config.algorithm.batch_size
         self.buffer_size_per_env = config.algorithm.buffer_size_per_env
         self.learning_starts = config.algorithm.learning_starts
@@ -486,7 +487,10 @@ class FastMPO:
                             kl_mean_var1 = kl_mean_std1 ** 2
                             kl_mean = jnp.log(kl_mean_std1 / kl_mean_std0) + (kl_mean_var0 + (target_action_mean - online_action_mean) ** 2) / (2.0 * kl_mean_var1) - 0.5
                             mean_kl_mean = kl_mean.mean(axis=0)  # (action_dim,)
-                            loss_kl_mean = jnp.sum(stop_gradient(alpha_mean) * mean_kl_mean)
+                            actor_alpha_mean = alpha_mean
+                            if self.policy_mean_kl_penalty_min > 0.0:
+                                actor_alpha_mean = jnp.maximum(actor_alpha_mean, self.policy_mean_kl_penalty_min)
+                            loss_kl_mean = jnp.sum(stop_gradient(actor_alpha_mean) * mean_kl_mean)
                             alpha_mean_gradient_scale = 1.0
                             if self.precondition_alpha_dual_gradients:
                                 alpha_mean_gradient_scale = 1.0 / stop_gradient(jnp.maximum(jax.nn.sigmoid(log_alpha_mean), self.float_epsilon))
@@ -528,6 +532,9 @@ class FastMPO:
                                 "dual/alpha_mean": jnp.mean(alpha_mean),
                                 "dual/alpha_mean_min": jnp.min(alpha_mean),
                                 "dual/alpha_mean_max": jnp.max(alpha_mean),
+                                "dual/actor_alpha_mean": jnp.mean(actor_alpha_mean),
+                                "dual/actor_alpha_mean_min": jnp.min(actor_alpha_mean),
+                                "dual/actor_alpha_mean_max": jnp.max(actor_alpha_mean),
                                 "dual/log_alpha_mean_min": jnp.min(log_alpha_mean),
                                 "dual/log_alpha_mean_max": jnp.max(log_alpha_mean),
                                 "dual/alpha_std": jnp.mean(alpha_std),
