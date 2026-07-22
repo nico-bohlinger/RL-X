@@ -1,0 +1,2 @@
+--algorithm.name=ppo_mpo_aux_replay.flax_full_jit
+--runner.exp_name=E53__G1__hfield__ppo_mpo_replay__lumi__noeval
