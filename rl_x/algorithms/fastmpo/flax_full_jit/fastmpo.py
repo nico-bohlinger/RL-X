@@ -76,6 +76,7 @@ class FastMPO:
         self.projected_alpha_mean_dual_step_size = config.algorithm.projected_alpha_mean_dual_step_size
         self.projected_alpha_mean_dual_max = config.algorithm.projected_alpha_mean_dual_max
         self.policy_mean_loss_min_scale = config.algorithm.policy_mean_loss_min_scale
+        self.policy_mean_loss_max_inverse_variance_ratio = config.algorithm.policy_mean_loss_max_inverse_variance_ratio
         self.batch_size = config.algorithm.batch_size
         self.buffer_size_per_env = config.algorithm.buffer_size_per_env
         self.learning_starts = config.algorithm.learning_starts
@@ -464,7 +465,18 @@ class FastMPO:
                             alpha_std = jax.nn.softplus(log_alpha_stddev) + self.float_epsilon
 
                             mean_loss_action_std = jnp.maximum(target_action_std, self.policy_mean_loss_min_scale)
-                            logprob_mean = jnp.sum(-0.5 * ((((sampled_actions_raw - online_action_mean) / mean_loss_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(mean_loss_action_std), axis=-1)  # (sampled actions, 2 * batch)
+                            mean_loss_inverse_variance = 1.0 / (mean_loss_action_std ** 2)
+                            if self.policy_mean_loss_max_inverse_variance_ratio > 0.0:
+                                mean_inverse_variance = jnp.mean(mean_loss_inverse_variance, axis=-1, keepdims=True)
+                                mean_loss_inverse_variance = jnp.minimum(
+                                    mean_loss_inverse_variance,
+                                    self.policy_mean_loss_max_inverse_variance_ratio * mean_inverse_variance,
+                                )
+                                mean_loss_inverse_variance = mean_loss_inverse_variance * mean_inverse_variance / (jnp.mean(mean_loss_inverse_variance, axis=-1, keepdims=True) + self.float_epsilon)
+                                mean_loss_squared_error = (sampled_actions_raw - online_action_mean) ** 2 * mean_loss_inverse_variance
+                                logprob_mean = jnp.sum(-0.5 * (mean_loss_squared_error + jnp.log(2.0 * jnp.pi)) - jnp.log(mean_loss_action_std), axis=-1)  # (sampled actions, 2 * batch)
+                            else:
+                                logprob_mean = jnp.sum(-0.5 * ((((sampled_actions_raw - online_action_mean) / mean_loss_action_std) ** 2) + jnp.log(2.0 * jnp.pi)) - jnp.log(mean_loss_action_std), axis=-1)  # (sampled actions, 2 * batch)
 
                             loss_pg_mean = -(logprob_mean * improvement_dist).sum(axis=0).mean()
 
@@ -539,6 +551,7 @@ class FastMPO:
                                 "policy/target_online_mean_delta_rms": jnp.sqrt(jnp.mean((target_action_mean - online_action_mean) ** 2)),
                                 "policy/target_online_std_delta_rms": jnp.sqrt(jnp.mean((target_action_std - online_action_std) ** 2)),
                                 "policy/mean_loss_std_min_mean": jnp.mean(jnp.min(mean_loss_action_std, axis=-1)),
+                                "policy/mean_loss_inverse_variance_max_to_mean": jnp.mean(jnp.max(mean_loss_inverse_variance, axis=-1) / (jnp.mean(mean_loss_inverse_variance, axis=-1) + self.float_epsilon)),
                                 "policy/std_min_mean": jnp.mean(jnp.min(online_action_std, axis=-1)),
                                 "policy/std_max_mean": jnp.mean(jnp.max(online_action_std, axis=-1)),
                                 "policy/latent_action_abs_gt_one_fraction": jnp.mean(jnp.abs(sampled_actions_raw) > 1.0),
