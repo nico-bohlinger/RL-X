@@ -1,5 +1,6 @@
 --algorithm.name=ppo_mpo_aux_replay.flax_full_jit
 --algorithm.total_timesteps=1048576
+--algorithm.evaluation_and_save_frequency=1048576
 --algorithm.nr_epochs=1
 --algorithm.minibatch_size=8192
 --algorithm.mpo_aux_start_step=0
