@@ -21,6 +21,11 @@ def get_config(algorithm_name):
     config.critic_coef = 1.0
     config.max_grad_norm = 5.0
     config.std_dev = 1.0
+    config.mpo_aux_loss_coefficient = 0.0
+    config.mpo_aux_action_samples = 8
+    config.mpo_aux_temperature = 1.0
+    config.mpo_aux_q_critic_coef = 1.0
+    config.mpo_aux_start_step = 0
     config.action_clipping_and_rescaling = False
     config.evaluation_and_save_frequency = 17301504
     config.evaluation_active = False

@@ -16,7 +16,7 @@ import wandb
 
 from rl_x.algorithms.ppo.flax_full_jit.general_properties import GeneralProperties
 from rl_x.algorithms.ppo.flax_full_jit.policy import get_policy
-from rl_x.algorithms.ppo.flax_full_jit.critic import get_critic
+from rl_x.algorithms.ppo.flax_full_jit.critic import Critic, get_critic
 from rl_x.algorithms.fastmpo.flax_full_jit.rl_train_state import RLTrainState
 
 rlx_logger = logging.getLogger("rl_x")
@@ -52,6 +52,12 @@ class PPO:
         self.critic_coef = config.algorithm.critic_coef
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.std_dev = config.algorithm.std_dev
+        self.mpo_aux_loss_coefficient = getattr(config.algorithm, "mpo_aux_loss_coefficient", 0.0)
+        self.mpo_aux_action_samples = getattr(config.algorithm, "mpo_aux_action_samples", 8)
+        self.mpo_aux_temperature = getattr(config.algorithm, "mpo_aux_temperature", 1.0)
+        self.mpo_aux_q_critic_coef = getattr(config.algorithm, "mpo_aux_q_critic_coef", 1.0)
+        self.mpo_aux_start_step = getattr(config.algorithm, "mpo_aux_start_step", 0)
+        self.use_mpo_aux = self.mpo_aux_loss_coefficient > 0.0
         self.nr_value_samples = getattr(config.algorithm, "nr_value_samples", 0)
         self.nr_q_critics = getattr(config.algorithm, "nr_q_critics", 1)
         self.critic_tau = getattr(config.algorithm, "critic_tau", 0.0)
@@ -79,10 +85,22 @@ class PPO:
         if self.q_critic_reduction not in ["min", "mean"]:
             raise ValueError("Q critic reduction must be min or mean.")
 
+        if self.use_mpo_aux and self.nr_value_samples > 0:
+            raise ValueError("The MPO auxiliary requires PPO's ordinary V critic.")
+
+        if self.use_mpo_aux and self.mpo_aux_action_samples < 2:
+            raise ValueError("The MPO auxiliary requires at least two action samples.")
+
+        if self.use_mpo_aux and self.mpo_aux_temperature <= 0.0:
+            raise ValueError("The MPO auxiliary temperature must be positive.")
+
         rlx_logger.info(f"Using device: {jax.default_backend()}")
 
         self.key = jax.random.PRNGKey(self.seed)
-        self.key, policy_key, critic_key, reset_key = jax.random.split(self.key, 4)
+        if self.use_mpo_aux:
+            self.key, policy_key, critic_key, mpo_aux_q_critic_key, reset_key = jax.random.split(self.key, 5)
+        else:
+            self.key, policy_key, critic_key, reset_key = jax.random.split(self.key, 4)
         reset_key = jax.random.split(reset_key, 1)
 
         self.policy, self.get_processed_action = get_policy(self.config, self.train_env)
@@ -122,6 +140,23 @@ class PPO:
         else:
             self.critic_state = TrainState.create(**critic_state_arguments)
 
+        if self.use_mpo_aux:
+            critic_observation_indices = getattr(self.train_env, "critic_observation_indices", jnp.arange(self.train_env.single_observation_space.shape[0]))
+            self.mpo_aux_q_critic = Critic(critic_observation_indices, True)
+            mpo_aux_q_critic_params = self.mpo_aux_q_critic.init(
+                mpo_aux_q_critic_key,
+                env_state.next_observation,
+                jnp.zeros(env_state.next_observation.shape[:-1] + self.as_shape),
+            )
+            self.mpo_aux_q_critic_state = TrainState.create(
+                apply_fn=self.mpo_aux_q_critic.apply,
+                params=mpo_aux_q_critic_params,
+                tx=optax.chain(
+                    optax.clip_by_global_norm(self.max_grad_norm),
+                    optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
+                )
+            )
+
         if self.save_model:
             os.makedirs(self.save_path)
             self.latest_model_file_name = "latest.model"
@@ -136,12 +171,20 @@ class PPO:
 
             policy_state = self.policy_state
             critic_state = self.critic_state
+            if self.use_mpo_aux:
+                mpo_aux_q_critic_state = self.mpo_aux_q_critic_state
 
             def multi_learning_and_eval_save_iteration(multi_learning_and_eval_save_iteration_carry, multi_learning_iteration_step):
-                policy_state, critic_state, env_state, key = multi_learning_and_eval_save_iteration_carry
+                if self.use_mpo_aux:
+                    policy_state, critic_state, mpo_aux_q_critic_state, env_state, key = multi_learning_and_eval_save_iteration_carry
+                else:
+                    policy_state, critic_state, env_state, key = multi_learning_and_eval_save_iteration_carry
 
                 def learning_iteration(learning_iteration_carry, learning_iteration_step):
-                    policy_state, critic_state, env_state, key = learning_iteration_carry
+                    if self.use_mpo_aux:
+                        policy_state, critic_state, mpo_aux_q_critic_state, env_state, key = learning_iteration_carry
+                    else:
+                        policy_state, critic_state, env_state, key = learning_iteration_carry
 
                     # Acting
                     def single_rollout(single_rollout_carry, _):
@@ -200,7 +243,7 @@ class PPO:
 
                         return (policy_state, critic_state, env_state, key), transition
 
-                    single_rollout_carry, batch = jax.lax.scan(single_rollout, learning_iteration_carry, None, self.nr_steps)
+                    single_rollout_carry, batch = jax.lax.scan(single_rollout, (policy_state, critic_state, env_state, key), None, self.nr_steps)
                     policy_state, critic_state, env_state, key = single_rollout_carry
                     states, next_states, actions, rewards, values, next_values, terminations, log_probs, sampled_action_q_ranges, executed_action_advantages, twin_q_disagreements, infos = batch
 
@@ -226,7 +269,12 @@ class PPO:
 
 
                     # Optimizing
-                    def loss_fn(policy_params, critic_params, state_b, action_b, log_prob_b, return_b, advantage_b):
+                    behavior_policy_params = tree.map_structure(jax.lax.stop_gradient, policy_state.params)
+                    combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
+                    mpo_aux_active = jnp.float32(combined_learning_iteration_step * self.batch_size >= self.mpo_aux_start_step)
+
+                    def loss_fn(policy_params, critic_params, state_b, action_b, log_prob_b, return_b, advantage_b,
+                                mpo_aux_q_critic_params=None, mpo_aux_actions_b=None, mpo_aux_weights_b=None):
                         # Policy loss
                         action_mean, action_logstd = self.policy.apply(policy_params, state_b)
                         action_std = jnp.exp(action_logstd)
@@ -255,6 +303,16 @@ class PPO:
                         # Combine losses
                         loss = pg_loss - self.entropy_coef * entropy_loss + self.critic_coef * critic_loss
 
+                        if self.use_mpo_aux:
+                            mpo_aux_q_value = self.mpo_aux_q_critic.apply(mpo_aux_q_critic_params, state_b, action_b).squeeze(-1)
+                            mpo_aux_q_loss = 0.5 * (mpo_aux_q_value - return_b) ** 2
+                            mpo_aux_action_mean, mpo_aux_action_logstd = self.policy.apply(policy_params, state_b)
+                            mpo_aux_action_std = jnp.exp(mpo_aux_action_logstd)
+                            mpo_aux_log_probs = -0.5 * ((mpo_aux_actions_b - mpo_aux_action_mean) / mpo_aux_action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - mpo_aux_action_logstd
+                            mpo_aux_log_probs = mpo_aux_log_probs.sum(-1)
+                            mpo_aux_loss = -jnp.sum(mpo_aux_weights_b * mpo_aux_log_probs)
+                            loss = loss + self.mpo_aux_q_critic_coef * mpo_aux_q_loss + mpo_aux_active * self.mpo_aux_loss_coefficient * mpo_aux_loss
+
                         # Create metrics
                         metrics = {
                             "loss/policy_gradient_loss": pg_loss,
@@ -263,6 +321,12 @@ class PPO:
                             "policy_ratio/approx_kl": approx_kl_div,
                             "policy_ratio/clip_fraction": clip_fraction,
                         }
+
+                        if self.use_mpo_aux:
+                            metrics["loss/mpo_aux_loss"] = mpo_aux_loss
+                            metrics["loss/mpo_aux_q_loss"] = mpo_aux_q_loss
+                            metrics["mpo_aux/weight_effective_samples"] = 1.0 / jnp.sum(mpo_aux_weights_b ** 2)
+                            metrics["mpo_aux/active"] = mpo_aux_active
 
                         return loss, (metrics)
                     
@@ -273,10 +337,15 @@ class PPO:
                     batch_returns = returns.reshape(-1)
                     batch_log_probs = log_probs.reshape(-1)
 
-                    vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0), out_axes=0)
                     safe_mean = lambda x: jnp.mean(x) if x is not None else x
-                    mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
-                    grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
+                    if self.use_mpo_aux:
+                        vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0, None, 0, 0), out_axes=0)
+                        mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
+                        grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1, 7), has_aux=True)
+                    else:
+                        vmap_loss_fn = jax.vmap(loss_fn, in_axes=(None, None, 0, 0, 0, 0, 0), out_axes=0)
+                        mean_vmapped_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_loss_fn(*a, **k))
+                        grad_loss_fn = jax.value_and_grad(mean_vmapped_loss_fn, argnums=(0, 1), has_aux=True)
 
                     key, subkey = jax.random.split(key)
                     batch_indices = jnp.tile(jnp.arange(self.batch_size), (self.nr_epochs, 1))
@@ -284,36 +353,85 @@ class PPO:
                     batch_indices = batch_indices.reshape((self.nr_epochs * self.nr_minibatches, self.minibatch_size))
 
                     def minibatch_update(carry, minibatch_indices):
-                        policy_state, critic_state = carry
+                        if self.use_mpo_aux:
+                            policy_state, critic_state, mpo_aux_q_critic_state, key = carry
+                        else:
+                            policy_state, critic_state = carry
 
                         minibatch_advantages = batch_advantages[minibatch_indices]
                         minibatch_advantages = (minibatch_advantages - jnp.mean(minibatch_advantages)) / (jnp.std(minibatch_advantages) + 1e-8)
 
-                        (loss, (metrics)), (policy_gradients, critic_gradients) = grad_loss_fn(
-                            policy_state.params,
-                            critic_state.params,
-                            batch_states[minibatch_indices],
-                            batch_actions[minibatch_indices],
-                            batch_log_probs[minibatch_indices],
-                            batch_returns[minibatch_indices],
-                            minibatch_advantages
-                        )
+                        if self.use_mpo_aux:
+                            key, mpo_aux_action_key = jax.random.split(key)
+                            mpo_aux_states = batch_states[minibatch_indices]
+                            mpo_aux_behavior_mean, mpo_aux_behavior_logstd = self.policy.apply(behavior_policy_params, mpo_aux_states)
+                            mpo_aux_behavior_std = jnp.exp(mpo_aux_behavior_logstd)
+                            mpo_aux_actions = mpo_aux_behavior_mean[:, None, :] + mpo_aux_behavior_std[:, None, :] * jax.random.normal(
+                                mpo_aux_action_key,
+                                shape=(self.minibatch_size, self.mpo_aux_action_samples) + self.as_shape,
+                            )
+                            mpo_aux_q_values = self.mpo_aux_q_critic.apply(
+                                mpo_aux_q_critic_state.params,
+                                jnp.repeat(mpo_aux_states[:, None, :], self.mpo_aux_action_samples, axis=1),
+                                mpo_aux_actions,
+                            ).squeeze(-1)
+                            mpo_aux_normalized_q_values = (mpo_aux_q_values - jnp.mean(mpo_aux_q_values, axis=1, keepdims=True)) / (jnp.std(mpo_aux_q_values, axis=1, keepdims=True) + 1e-6)
+                            mpo_aux_weights = jax.lax.stop_gradient(jax.nn.softmax(mpo_aux_normalized_q_values / self.mpo_aux_temperature, axis=1))
+                            mpo_aux_actions = jax.lax.stop_gradient(mpo_aux_actions)
+                            (loss, (metrics)), (policy_gradients, critic_gradients, mpo_aux_q_critic_gradients) = grad_loss_fn(
+                                policy_state.params,
+                                critic_state.params,
+                                mpo_aux_states,
+                                batch_actions[minibatch_indices],
+                                batch_log_probs[minibatch_indices],
+                                batch_returns[minibatch_indices],
+                                minibatch_advantages,
+                                mpo_aux_q_critic_state.params,
+                                mpo_aux_actions,
+                                mpo_aux_weights,
+                            )
+                            metrics["mpo_aux/q_action_range_mean"] = jnp.mean(jnp.max(mpo_aux_q_values, axis=1) - jnp.min(mpo_aux_q_values, axis=1))
+                        else:
+                            (loss, (metrics)), (policy_gradients, critic_gradients) = grad_loss_fn(
+                                policy_state.params,
+                                critic_state.params,
+                                batch_states[minibatch_indices],
+                                batch_actions[minibatch_indices],
+                                batch_log_probs[minibatch_indices],
+                                batch_returns[minibatch_indices],
+                                minibatch_advantages
+                            )
 
                         policy_state = policy_state.apply_gradients(grads=policy_gradients)
                         critic_state = critic_state.apply_gradients(grads=critic_gradients)
                         if self.use_target_q_critic:
                             critic_state = critic_state.replace(target_params=optax.incremental_update(critic_state.params, critic_state.target_params, self.critic_tau))
 
+                        if self.use_mpo_aux:
+                            mpo_aux_q_critic_state = mpo_aux_q_critic_state.apply_gradients(grads=mpo_aux_q_critic_gradients)
+
                         metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
                         metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
 
-                        carry = (policy_state, critic_state)
+                        if self.use_mpo_aux:
+                            metrics["gradients/mpo_aux_q_critic_grad_norm"] = optax.global_norm(mpo_aux_q_critic_gradients)
+
+                        if self.use_mpo_aux:
+                            carry = (policy_state, critic_state, mpo_aux_q_critic_state, key)
+                        else:
+                            carry = (policy_state, critic_state)
 
                         return carry, (metrics)
                     
-                    init_carry = (policy_state, critic_state)
+                    if self.use_mpo_aux:
+                        init_carry = (policy_state, critic_state, mpo_aux_q_critic_state, key)
+                    else:
+                        init_carry = (policy_state, critic_state)
                     carry, (optimization_metrics) = jax.lax.scan(minibatch_update, init_carry, batch_indices)
-                    policy_state, critic_state = carry
+                    if self.use_mpo_aux:
+                        policy_state, critic_state, mpo_aux_q_critic_state, key = carry
+                    else:
+                        policy_state, critic_state = carry
 
                     optimization_metrics["lr/learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
                     optimization_metrics["v_value/explained_variance"] = 1 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
@@ -343,14 +461,22 @@ class PPO:
                             self.log(f"{key}", np.asarray(value), global_step)
                         self.end_logging(wandb_commit=not is_last_train_update_before_eval)
 
-                    combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
                     jax.debug.callback(callback, (combined_metrics, learning_iteration_step, combined_learning_iteration_step, parallel_seed_id))
-                    
+
+                    if self.use_mpo_aux:
+                        return (policy_state, critic_state, mpo_aux_q_critic_state, env_state, key), None
                     return (policy_state, critic_state, env_state, key), None
                     
                 key, subkey = jax.random.split(key)
-                learning_iteration_carry, _ = jax.lax.scan(learning_iteration, (policy_state, critic_state, env_state, subkey), jnp.arange(self.nr_updates_per_multi_learning_iteration))
-                policy_state, critic_state, env_state, key = learning_iteration_carry
+                if self.use_mpo_aux:
+                    initial_learning_iteration_carry = (policy_state, critic_state, mpo_aux_q_critic_state, env_state, subkey)
+                else:
+                    initial_learning_iteration_carry = (policy_state, critic_state, env_state, subkey)
+                learning_iteration_carry, _ = jax.lax.scan(learning_iteration, initial_learning_iteration_carry, jnp.arange(self.nr_updates_per_multi_learning_iteration))
+                if self.use_mpo_aux:
+                    policy_state, critic_state, mpo_aux_q_critic_state, env_state, key = learning_iteration_carry
+                else:
+                    policy_state, critic_state, env_state, key = learning_iteration_carry
 
 
                 # Evaluating
@@ -390,14 +516,24 @@ class PPO:
 
                 # Saving
                 if self.save_model:
-                    def save_with_check(policy_state, critic_state):
-                        self.save(policy_state, critic_state)
-                    jax.debug.callback(save_with_check, policy_state, critic_state)
+                    if self.use_mpo_aux:
+                        def save_with_check(policy_state, critic_state, mpo_aux_q_critic_state):
+                            self.save(policy_state, critic_state, mpo_aux_q_critic_state)
+                        jax.debug.callback(save_with_check, policy_state, critic_state, mpo_aux_q_critic_state)
+                    else:
+                        def save_with_check(policy_state, critic_state):
+                            self.save(policy_state, critic_state)
+                        jax.debug.callback(save_with_check, policy_state, critic_state)
 
-                
+                if self.use_mpo_aux:
+                    return (policy_state, critic_state, mpo_aux_q_critic_state, env_state, key), None
                 return (policy_state, critic_state, env_state, key), None
 
-            jax.lax.scan(multi_learning_and_eval_save_iteration, (policy_state, critic_state, env_state, key), jnp.arange(self.nr_multi_learning_and_eval_save_iterations))
+            if self.use_mpo_aux:
+                initial_multi_learning_carry = (policy_state, critic_state, mpo_aux_q_critic_state, env_state, key)
+            else:
+                initial_multi_learning_carry = (policy_state, critic_state, env_state, key)
+            jax.lax.scan(multi_learning_and_eval_save_iteration, initial_multi_learning_carry, jnp.arange(self.nr_multi_learning_and_eval_save_iterations))
             
 
         self.key, subkey = jax.random.split(self.key)
@@ -439,11 +575,13 @@ class PPO:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
 
-    def save(self, policy_state, critic_state):
+    def save(self, policy_state, critic_state, mpo_aux_q_critic_state=None):
         checkpoint = {
             "policy": policy_state,
             "critic": critic_state
         }
+        if self.use_mpo_aux:
+            checkpoint["mpo_aux_q_critic"] = mpo_aux_q_critic_state
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
         with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as f:
@@ -473,12 +611,16 @@ class PPO:
             "policy": model.policy_state,
             "critic": model.critic_state
         }
+        if model.use_mpo_aux:
+            target["mpo_aux_q_critic"] = model.mpo_aux_q_critic_state
         restore_args = orbax_utils.restore_args_from_target(target)
         checkpointer = orbax.checkpoint.PyTreeCheckpointer()
         checkpoint = checkpointer.restore(checkpoint_dir, item=target, restore_args=restore_args)
 
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
+        if model.use_mpo_aux:
+            model.mpo_aux_q_critic_state = checkpoint["mpo_aux_q_critic"]
 
         shutil.rmtree(checkpoint_dir)
 
