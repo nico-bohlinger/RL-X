@@ -1,0 +1,10 @@
+--algorithm.name=fastmpo.flax_full_jit
+--algorithm.policy_min_scale=0.03
+--algorithm.policy_tau=0.9
+--algorithm.policy_learning_rate=0.01
+--algorithm.gamma=0.99
+--algorithm.n_steps=3
+--algorithm.collect_data_with_online_policy=True
+--runner.exp_name=E72__G1__hfield__fastmpo__gamma099_nstep3__online_collection__lumi__noeval
+--runner.run_name=E72_fastmpo_gamma099_nstep3_online_collection_lumi_seed0
+--runner.notes=gamma099_nstep3_behavior_mismatch_test_lumi
