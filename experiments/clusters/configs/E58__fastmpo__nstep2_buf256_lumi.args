@@ -1,0 +1,9 @@
+--algorithm.name=fastmpo.flax_full_jit
+--algorithm.policy_min_scale=0.03
+--algorithm.policy_tau=0.9
+--algorithm.policy_learning_rate=0.01
+--algorithm.n_steps=2
+--algorithm.buffer_size_per_env=256
+--runner.exp_name=E58__G1__hfield__fastmpo__nstep2_buf256__lumi__noeval
+--runner.run_name=E58_fastmpo_nstep2_buf256_lumi_seed0
+--runner.notes=nstep2_short_replay_age_test_lumi

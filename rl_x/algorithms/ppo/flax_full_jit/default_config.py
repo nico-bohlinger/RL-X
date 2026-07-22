@@ -26,6 +26,7 @@ def get_config(algorithm_name):
     config.mpo_aux_temperature = 1.0
     config.mpo_aux_q_critic_coef = 1.0
     config.mpo_aux_start_step = 0
+    config.mpo_aux_end_step = 0
     config.mpo_aux_replay_buffer_size_per_env = 0
     config.mpo_aux_replay_batch_size = 8192
     config.mpo_aux_replay_critic_tau = 0.005

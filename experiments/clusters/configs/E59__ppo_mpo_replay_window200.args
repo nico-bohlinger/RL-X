@@ -1,0 +1,5 @@
+--algorithm.name=ppo_mpo_aux_replay.flax_full_jit
+--algorithm.mpo_aux_end_step=200000000
+--runner.exp_name=E59__G1__hfield__ppo_mpo_replay__window200__noeval
+--runner.run_name=E59_ppo_mpo_replay_window200_seed0
+--runner.notes=ppo_mpo_replay_auxiliary_active_50m_to_200m

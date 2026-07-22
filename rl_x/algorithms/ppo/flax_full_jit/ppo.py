@@ -57,6 +57,7 @@ class PPO:
         self.mpo_aux_temperature = getattr(config.algorithm, "mpo_aux_temperature", 1.0)
         self.mpo_aux_q_critic_coef = getattr(config.algorithm, "mpo_aux_q_critic_coef", 1.0)
         self.mpo_aux_start_step = getattr(config.algorithm, "mpo_aux_start_step", 0)
+        self.mpo_aux_end_step = getattr(config.algorithm, "mpo_aux_end_step", 0)
         self.use_mpo_aux = self.mpo_aux_loss_coefficient > 0.0
         self.mpo_aux_replay_buffer_size_per_env = getattr(config.algorithm, "mpo_aux_replay_buffer_size_per_env", 0)
         self.mpo_aux_replay_batch_size = getattr(config.algorithm, "mpo_aux_replay_batch_size", 8192)
@@ -97,6 +98,9 @@ class PPO:
 
         if self.use_mpo_aux and self.mpo_aux_temperature <= 0.0:
             raise ValueError("The MPO auxiliary temperature must be positive.")
+
+        if self.use_mpo_aux and 0 < self.mpo_aux_end_step <= self.mpo_aux_start_step:
+            raise ValueError("The MPO auxiliary end step must be greater than its start step.")
 
         if self.use_mpo_aux_replay and self.mpo_aux_replay_buffer_size_per_env < self.nr_steps:
             raise ValueError("The MPO auxiliary replay buffer must hold at least one PPO rollout.")
@@ -308,7 +312,10 @@ class PPO:
                     # Optimizing
                     behavior_policy_params = tree.map_structure(jax.lax.stop_gradient, policy_state.params)
                     combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
-                    mpo_aux_active = jnp.float32(combined_learning_iteration_step * self.batch_size >= self.mpo_aux_start_step)
+                    global_step = combined_learning_iteration_step * self.batch_size
+                    mpo_aux_active = jnp.float32(global_step >= self.mpo_aux_start_step)
+                    if self.mpo_aux_end_step > 0:
+                        mpo_aux_active *= jnp.float32(global_step < self.mpo_aux_end_step)
 
                     def loss_fn(policy_params, critic_params, state_b, action_b, log_prob_b, return_b, advantage_b,
                                 mpo_aux_q_critic_params=None, mpo_aux_actions_b=None, mpo_aux_weights_b=None):
