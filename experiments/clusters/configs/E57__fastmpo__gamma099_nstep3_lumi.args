@@ -1,0 +1,9 @@
+--algorithm.name=fastmpo.flax_full_jit
+--algorithm.policy_min_scale=0.03
+--algorithm.policy_tau=0.9
+--algorithm.policy_learning_rate=0.01
+--algorithm.gamma=0.99
+--algorithm.n_steps=3
+--runner.exp_name=E57__G1__hfield__fastmpo__gamma099_nstep3__lumi__noeval
+--runner.run_name=E57_fastmpo_gamma099_nstep3_lumi_seed0
+--runner.notes=stable_k4_gamma099_nstep3_cross_lumi
