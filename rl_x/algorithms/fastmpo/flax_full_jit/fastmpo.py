@@ -78,6 +78,8 @@ class FastMPO:
         self.policy_mean_loss_min_scale = config.algorithm.policy_mean_loss_min_scale
         self.policy_mean_loss_max_inverse_variance_ratio = config.algorithm.policy_mean_loss_max_inverse_variance_ratio
         self.policy_mean_kl_penalty_min = config.algorithm.policy_mean_kl_penalty_min
+        self.policy_mean_kl_projection_epsilon = config.algorithm.policy_mean_kl_projection_epsilon
+        self.policy_mean_kl_projection_iterations = config.algorithm.policy_mean_kl_projection_iterations
         self.batch_size = config.algorithm.batch_size
         self.buffer_size_per_env = config.algorithm.buffer_size_per_env
         self.learning_starts = config.algorithm.learning_starts
@@ -703,7 +705,59 @@ class FastMPO:
                             )
                             log_alpha_mean_before_update = dual_variables_state.params["params"]["log_alpha_mean"]
 
+                            policy_params_before_update = policy_state.params
                             policy_state = policy_state.apply_gradients(grads=policy_gradients)
+                            if self.policy_mean_kl_projection_epsilon > 0.0:
+                                proposed_policy_params = policy_state.params
+                                projection_target_mean, projection_target_std = self.policy.apply(policy_state.target_params, normalized_states_for_policy)
+
+                                def get_projection_mean_kl_max(policy_params):
+                                    projected_action_mean, _ = self.policy.apply(policy_params, normalized_states_for_policy)
+                                    projection_mean_kl = jnp.mean((projection_target_mean - projected_action_mean) ** 2 / (2.0 * jnp.maximum(projection_target_std, self.float_epsilon) ** 2), axis=0)
+                                    return jnp.max(projection_mean_kl)
+
+                                projection_mean_kl_before = get_projection_mean_kl_max(policy_params_before_update)
+                                projection_mean_kl_proposed = get_projection_mean_kl_max(proposed_policy_params)
+
+                                def projection_search(_):
+                                    def projection_iteration(_, projection_bounds):
+                                        lower_bound, upper_bound = projection_bounds
+                                        interpolation_fraction = 0.5 * (lower_bound + upper_bound)
+                                        interpolated_params = tree.map_structure(
+                                            lambda old_param, proposed_param: old_param + interpolation_fraction * (proposed_param - old_param),
+                                            policy_params_before_update,
+                                            proposed_policy_params,
+                                        )
+                                        interpolated_mean_kl_max = get_projection_mean_kl_max(interpolated_params)
+                                        lower_bound = jnp.where(interpolated_mean_kl_max <= self.policy_mean_kl_projection_epsilon, interpolation_fraction, lower_bound)
+                                        upper_bound = jnp.where(interpolated_mean_kl_max <= self.policy_mean_kl_projection_epsilon, upper_bound, interpolation_fraction)
+                                        return lower_bound, upper_bound
+
+                                    projection_fraction, _ = jax.lax.fori_loop(
+                                        0,
+                                        self.policy_mean_kl_projection_iterations,
+                                        projection_iteration,
+                                        (jnp.array(0.0, dtype=jnp.float32), jnp.array(1.0, dtype=jnp.float32)),
+                                    )
+                                    return projection_fraction
+
+                                projection_fraction = jax.lax.cond(
+                                    projection_mean_kl_proposed <= self.policy_mean_kl_projection_epsilon,
+                                    lambda _: jnp.array(1.0, dtype=jnp.float32),
+                                    projection_search,
+                                    operand=None,
+                                )
+                                projected_policy_params = tree.map_structure(
+                                    lambda old_param, proposed_param: old_param + projection_fraction * (proposed_param - old_param),
+                                    policy_params_before_update,
+                                    proposed_policy_params,
+                                )
+                                policy_state = policy_state.replace(params=projected_policy_params)
+                                policy_metrics["policy/mean_kl_projection_fraction"] = projection_fraction
+                                policy_metrics["policy/mean_kl_projection_active"] = (projection_fraction < 1.0).astype(jnp.float32)
+                                policy_metrics["policy/mean_kl_projection_before_max"] = projection_mean_kl_before
+                                policy_metrics["policy/mean_kl_projection_proposed_max"] = projection_mean_kl_proposed
+                                policy_metrics["policy/mean_kl_projection_after_max"] = get_projection_mean_kl_max(projected_policy_params)
                             dual_variables_state = dual_variables_state.apply_gradients(grads=dual_variables_gradients)
 
                             log_alpha_mean_after_update = dual_variables_state.params["params"]["log_alpha_mean"]
