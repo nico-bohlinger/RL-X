@@ -29,7 +29,7 @@ export RLX_ROOT=/project/project_465003217/rlx_g1_cluster
 export RLX_SOURCE="$RLX_ROOT/software/RL-X/$EXPECTED_RLX_COMMIT"
 export PYTHON_BIN=/appl/local/csc/soft/ai/bin/python
 export PYTHON_OVERLAY=/project/project_465003217/loco_mjx_cluster/python_overlay
-export JAX_CACHE_DIR="$RLX_ROOT/jax_cache/${SLURM_JOB_ID}"
+export JAX_CACHE_DIR="${TMPDIR:-/tmp}/rlx_jax_cache_${SLURM_JOB_ID}"
 export RLX_RUN_DIR="$RLX_ROOT/runs/${SLURM_JOB_ID}"
 export RUNNER_RUN_NAME="lumi_${SLURM_JOB_ID}"
 
