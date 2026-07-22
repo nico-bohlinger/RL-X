@@ -83,6 +83,7 @@ class FastMPO:
         self.v_max = config.algorithm.v_max
         self.critic_tau = config.algorithm.critic_tau
         self.policy_tau = config.algorithm.policy_tau
+        self.policy_target_update_period = config.algorithm.policy_target_update_period
         self.gamma = config.algorithm.gamma
         self.nr_atoms = config.algorithm.nr_atoms
         self.n_steps = config.algorithm.n_steps
@@ -118,6 +119,9 @@ class FastMPO:
 
         if self.improvement_top_fraction <= 0.0 or self.improvement_top_fraction > 1.0:
             raise ValueError("Improvement top fraction must be greater than zero and at most one.")
+
+        if self.policy_target_update_period < 0:
+            raise ValueError("Policy target update period must be nonnegative.")
 
         if self.squashed_actions and self.action_clipping:
             raise ValueError("Tanh-squashed actions cannot be combined with action clipping.")
@@ -636,7 +640,14 @@ class FastMPO:
                             normalized_next_states_all = next_states_all
 
                         update_idx = 0
-                        for _ in range(self.nr_policy_updates_per_step):
+                        base_policy_update_iteration = (
+                            (
+                                eval_save_iteration_step * self.nr_loggings_per_eval_save_iteration * self.nr_updates_per_logging_iteration
+                                + logging_iteration_step * self.nr_updates_per_logging_iteration
+                                + learning_iteration_step
+                            ) * self.nr_policy_updates_per_step
+                        )
+                        for policy_update_idx in range(self.nr_policy_updates_per_step):
                             for _ in range(self.nr_critic_updates_per_policy_update):
                                 normalized_states = normalized_states_all[update_idx]
                                 normalized_next_states = normalized_next_states_all[update_idx]
@@ -701,7 +712,18 @@ class FastMPO:
                                 }
                             )
                             
-                            policy_state = policy_state.replace(target_params=optax.incremental_update(policy_state.params, policy_state.target_params, self.policy_tau))
+                            if self.policy_target_update_period > 0:
+                                update_policy_target = (base_policy_update_iteration + policy_update_idx + 1) % self.policy_target_update_period == 0
+                                policy_target_params = jax.lax.cond(
+                                    update_policy_target,
+                                    lambda _: policy_state.params,
+                                    lambda _: policy_state.target_params,
+                                    operand=None,
+                                )
+                            else:
+                                update_policy_target = jnp.ones((), dtype=jnp.bool_)
+                                policy_target_params = optax.incremental_update(policy_state.params, policy_state.target_params, self.policy_tau)
+                            policy_state = policy_state.replace(target_params=policy_target_params)
 
                             policy_metrics["lr/policy_learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
                             policy_metrics["lr/dual_variables_learning_rate"] = dual_variables_state.opt_state[1].hyperparams["learning_rate"]
@@ -711,6 +733,7 @@ class FastMPO:
                             policy_metrics["kl/mean_kl_mean_batch_dimension_min"] = jnp.min(mean_kl_mean_for_update)
                             policy_metrics["kl/mean_kl_mean_batch_dimension_max"] = jnp.max(mean_kl_mean_for_update)
                             policy_metrics["dual/alpha_mean_after_update_max"] = jnp.max(jax.nn.softplus(dual_variables_state.params["params"]["log_alpha_mean"]) + self.float_epsilon)
+                            policy_metrics["policy/target_sync_fraction"] = update_policy_target.astype(jnp.float32)
 
                         metrics = {**critic_metrics, **policy_metrics}
 

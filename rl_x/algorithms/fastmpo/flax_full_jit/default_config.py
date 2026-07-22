@@ -53,6 +53,7 @@ def get_config(algorithm_name):
     config.v_max = 20.0  # fastsac: 20.0, fasttd3: 10.0
     config.critic_tau = 0.125  # fastsac: 0.125, fasttd3: 0.1
     config.policy_tau = 0.3
+    config.policy_target_update_period = 0
     config.gamma = 0.97
     config.nr_atoms = 101
     config.n_steps = 1
