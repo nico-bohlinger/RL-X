@@ -51,6 +51,16 @@ class FastMPO:
         self.anneal_policy_learning_rate = config.algorithm.anneal_policy_learning_rate
         self.anneal_critic_learning_rate = config.algorithm.anneal_critic_learning_rate
         self.anneal_dual_learning_rate = config.algorithm.anneal_dual_learning_rate
+        self.learning_rate_schedule = config.algorithm.learning_rate_schedule
+        self.policy_learning_rate_final = config.algorithm.policy_learning_rate_final
+        self.critic_learning_rate_final = config.algorithm.critic_learning_rate_final
+        self.dual_learning_rate_final = config.algorithm.dual_learning_rate_final
+        self.policy_learning_rate_schedule_start_step = config.algorithm.policy_learning_rate_schedule_start_step
+        self.critic_learning_rate_schedule_start_step = config.algorithm.critic_learning_rate_schedule_start_step
+        self.dual_learning_rate_schedule_start_step = config.algorithm.dual_learning_rate_schedule_start_step
+        self.policy_learning_rate_schedule_end_step = self.total_timesteps if config.algorithm.policy_learning_rate_schedule_end_step == -1 else config.algorithm.policy_learning_rate_schedule_end_step
+        self.critic_learning_rate_schedule_end_step = self.total_timesteps if config.algorithm.critic_learning_rate_schedule_end_step == -1 else config.algorithm.critic_learning_rate_schedule_end_step
+        self.dual_learning_rate_schedule_end_step = self.total_timesteps if config.algorithm.dual_learning_rate_schedule_end_step == -1 else config.algorithm.dual_learning_rate_schedule_end_step
         self.policy_weight_decay = config.algorithm.policy_weight_decay
         self.critic_weight_decay = config.algorithm.critic_weight_decay
         self.dual_weight_decay = config.algorithm.dual_weight_decay
@@ -119,6 +129,20 @@ class FastMPO:
         if self.improvement_top_fraction <= 0.0 or self.improvement_top_fraction > 1.0:
             raise ValueError("Improvement top fraction must be greater than zero and at most one.")
 
+        if self.learning_rate_schedule not in ("linear", "cosine"):
+            raise ValueError("Learning rate schedule must be linear or cosine.")
+
+        for anneal_learning_rate, initial_learning_rate, final_learning_rate, schedule_start_step, schedule_end_step in (
+            (self.anneal_policy_learning_rate, self.policy_learning_rate, self.policy_learning_rate_final, self.policy_learning_rate_schedule_start_step, self.policy_learning_rate_schedule_end_step),
+            (self.anneal_critic_learning_rate, self.critic_learning_rate, self.critic_learning_rate_final, self.critic_learning_rate_schedule_start_step, self.critic_learning_rate_schedule_end_step),
+            (self.anneal_dual_learning_rate, self.dual_learning_rate, self.dual_learning_rate_final, self.dual_learning_rate_schedule_start_step, self.dual_learning_rate_schedule_end_step),
+        ):
+            if anneal_learning_rate and (initial_learning_rate <= 0.0 or final_learning_rate < 0.0):
+                raise ValueError("Scheduled learning rates must have a positive initial value and nonnegative final value.")
+
+            if anneal_learning_rate and (schedule_start_step < 0 or schedule_end_step <= schedule_start_step):
+                raise ValueError("Learning rate schedule steps must satisfy 0 <= start < end.")
+
         if self.squashed_actions and self.action_clipping:
             raise ValueError("Tanh-squashed actions cannot be combined with action clipping.")
         
@@ -136,23 +160,46 @@ class FastMPO:
         nr_actions = np.prod(self.train_env.single_action_space.shape).item()
         self.dual_variables = DualVariables(nr_actions, self.init_log_eta, self.init_log_alpha_mean, self.init_log_alpha_stddev, self.init_log_penalty_temperature)
 
+        policy_learning_rate = self.policy_learning_rate
+        critic_learning_rate = self.critic_learning_rate
+        dual_learning_rate = self.dual_learning_rate
+
+        def get_learning_rate(initial_learning_rate, final_learning_rate, schedule_start_step, schedule_end_step, global_step):
+            progress = jnp.clip((global_step - schedule_start_step) / (schedule_end_step - schedule_start_step), 0.0, 1.0)
+            if self.learning_rate_schedule == "linear":
+                return initial_learning_rate + progress * (final_learning_rate - initial_learning_rate)
+
+            return final_learning_rate + 0.5 * (initial_learning_rate - final_learning_rate) * (1.0 + jnp.cos(jnp.pi * progress))
+
         def policy_linear_schedule(count):
-            step = count * self.nr_envs
-            total_steps = self.total_timesteps
-            fraction = 1.0 - (step / total_steps)
-            return self.policy_learning_rate * fraction
+            global_step = count * self.nr_envs / self.nr_policy_updates_per_step
+            return get_learning_rate(
+                policy_learning_rate,
+                self.policy_learning_rate_final,
+                self.policy_learning_rate_schedule_start_step,
+                self.policy_learning_rate_schedule_end_step,
+                global_step,
+            )
         
         def critic_linear_schedule(count):
-            step = count * self.nr_envs
-            total_steps = self.total_timesteps
-            fraction = 1.0 - (step / total_steps)
-            return self.critic_learning_rate * fraction
+            global_step = count * self.nr_envs / self.nr_critic_updates_per_step
+            return get_learning_rate(
+                critic_learning_rate,
+                self.critic_learning_rate_final,
+                self.critic_learning_rate_schedule_start_step,
+                self.critic_learning_rate_schedule_end_step,
+                global_step,
+            )
         
         def dual_linear_schedule(count):
-            step = count * self.nr_envs
-            total_steps = self.total_timesteps
-            fraction = 1.0 - (step / total_steps)
-            return self.dual_learning_rate * fraction
+            global_step = count * self.nr_envs / self.nr_policy_updates_per_step
+            return get_learning_rate(
+                dual_learning_rate,
+                self.dual_learning_rate_final,
+                self.dual_learning_rate_schedule_start_step,
+                self.dual_learning_rate_schedule_end_step,
+                global_step,
+            )
         
         self.policy_learning_rate = policy_linear_schedule if self.anneal_policy_learning_rate else self.policy_learning_rate
         self.critic_learning_rate = critic_linear_schedule if self.anneal_critic_learning_rate else self.critic_learning_rate
