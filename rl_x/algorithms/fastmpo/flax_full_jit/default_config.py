@@ -57,6 +57,8 @@ def get_config(algorithm_name):
     config.nr_atoms = 101
     config.n_steps = 1
     config.clipped_double_q_learning = False  # only possible if dual_critic is True
+    config.normalize_critic_values = False
+    config.normalized_return_max = 5.0
     config.nr_critic_updates_per_policy_update = 4  # fastsac: 4, fasttd3: 2, mpo: 1
     config.nr_policy_updates_per_step = 2  # fastsac: 2, fasttd3: 1, mpo: some
     config.enable_observation_normalization = True

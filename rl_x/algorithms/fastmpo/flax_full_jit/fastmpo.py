@@ -20,6 +20,7 @@ from rl_x.algorithms.fastmpo.flax_full_jit.policy import get_policy
 from rl_x.algorithms.fastmpo.flax_full_jit.critic import get_critic
 from rl_x.algorithms.fastmpo.flax_full_jit.dual_variables import DualVariables
 from rl_x.algorithms.fastmpo.flax_full_jit.rl_train_state import RLTrainState
+from rl_x.algorithms.fastmpo.flax_full_jit import critic_value_normalizer
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -87,6 +88,8 @@ class FastMPO:
         self.nr_atoms = config.algorithm.nr_atoms
         self.n_steps = config.algorithm.n_steps
         self.clipped_double_q_learning = config.algorithm.clipped_double_q_learning
+        self.normalize_critic_values = config.algorithm.normalize_critic_values
+        self.normalized_return_max = config.algorithm.normalized_return_max
         self.nr_critic_updates_per_policy_update = config.algorithm.nr_critic_updates_per_policy_update
         self.nr_policy_updates_per_step = config.algorithm.nr_policy_updates_per_step
         self.enable_observation_normalization = config.algorithm.enable_observation_normalization
@@ -115,6 +118,9 @@ class FastMPO:
         
         if self.learning_starts < self.n_steps:
             raise ValueError("The replay buffer must at least be filled with n_steps transitions before learning starts.")
+
+        if self.normalize_critic_values and self.normalized_return_max <= 0.0:
+            raise ValueError("Normalized return max must be positive.")
 
         if self.improvement_top_fraction <= 0.0 or self.improvement_top_fraction > 1.0:
             raise ValueError("Improvement top fraction must be greater than zero and at most one.")
@@ -202,6 +208,11 @@ class FastMPO:
         else:
             self.observation_normalizer_state = {}
 
+        if self.normalize_critic_values:
+            self.critic_value_normalizer_state = critic_value_normalizer.init_critic_value_normalizer_state(self.nr_envs)
+        else:
+            self.critic_value_normalizer_state = {}
+
         if self.save_model:
             os.makedirs(self.save_path)
             self.latest_model_file_name = "latest.model"
@@ -218,6 +229,7 @@ class FastMPO:
             critic_state = self.critic_state
             dual_variables_state = self.dual_variables_state
             observation_normalizer_state = self.observation_normalizer_state
+            critic_value_normalizer_state = self.critic_value_normalizer_state
 
             # Replay buffer
             states_buffer = jnp.zeros((self.buffer_size_per_env, self.nr_envs, self.os_shape[0]), dtype=jnp.float32)
@@ -239,7 +251,7 @@ class FastMPO:
 
             # Fill replay buffer until learning_starts
             def fill_replay_buffer(carry, _):
-                policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key = carry
+                policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key = carry
 
                 # Acting
                 key, subkey = jax.random.split(key)
@@ -255,6 +267,10 @@ class FastMPO:
                 critic_action = processed_action if self.squashed_actions else action
                 env_state = self.train_env.step(env_state, processed_action)
                 dones = env_state.terminated | env_state.truncated
+                if self.normalize_critic_values:
+                    critic_value_normalizer_state = critic_value_normalizer.update_critic_value_normalizer(
+                        critic_value_normalizer_state, env_state.reward, env_state.terminated, env_state.truncated, self.gamma
+                    )
 
                 # Adding to replay buffer
                 replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
@@ -274,22 +290,22 @@ class FastMPO:
                             return self.train_env.render(env_state)
                         env_state = jax.experimental.io_callback(render, env_state, env_state)
 
-                return (policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key), None
+                return (policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key), None
             
             key, subkey = jax.random.split(key)
-            fill_replay_buffer_carry, _ = jax.lax.scan(fill_replay_buffer, (policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, subkey), jnp.arange(self.learning_starts))
-            policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key = fill_replay_buffer_carry
+            fill_replay_buffer_carry, _ = jax.lax.scan(fill_replay_buffer, (policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, subkey), jnp.arange(self.learning_starts))
+            policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key = fill_replay_buffer_carry
 
 
             # Training
             def eval_save_iteration(eval_save_iteration_carry, eval_save_iteration_step):
-                policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key = eval_save_iteration_carry
+                policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key = eval_save_iteration_carry
 
                 def logging_iteration(logging_iteration_carry, logging_iteration_step):
-                    policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key = logging_iteration_carry
+                    policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key = logging_iteration_carry
 
                     def learning_iteration(learning_iteration_carry, learning_iteration_step):
-                        policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key = learning_iteration_carry
+                        policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key = learning_iteration_carry
 
                         # Acting
                         key, subkey = jax.random.split(key)
@@ -305,6 +321,10 @@ class FastMPO:
                         critic_action = processed_action if self.squashed_actions else action
                         env_state = self.train_env.step(env_state, processed_action)
                         dones = env_state.terminated | env_state.truncated
+                        if self.normalize_critic_values:
+                            critic_value_normalizer_state = critic_value_normalizer.update_critic_value_normalizer(
+                                critic_value_normalizer_state, env_state.reward, env_state.terminated, env_state.truncated, self.gamma
+                            )
 
                         # Adding to replay buffer
                         replay_buffer["states"] = replay_buffer["states"].at[replay_buffer["pos"]].set(observation)
@@ -326,7 +346,7 @@ class FastMPO:
 
 
                         # Optimizing - Critic and Policy
-                        def critic_loss_fn(policy_target_params, critic_params, critic_target_params, normalized_state, normalized_next_state, action, reward, done, truncated, effective_n_steps, key):
+                        def critic_loss_fn(policy_target_params, critic_params, critic_target_params, critic_value_scale, normalized_state, normalized_next_state, action, reward, done, truncated, effective_n_steps, key):
                             # Critic loss
                             next_action_mean, next_action_std = self.policy.apply(policy_target_params, normalized_next_state)
                             sampled_next_actions_raw = next_action_mean[None, :] + next_action_std[None, :] * jax.random.normal(key, shape=(self.action_sampling_number,) + next_action_mean.shape)
@@ -346,7 +366,8 @@ class FastMPO:
                             q_support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
                             bootstrap = 1.0 - (done * (1.0 - truncated))
                             discount = (self.gamma ** effective_n_steps) * bootstrap
-                            target_z = jnp.clip(reward + discount * q_support, self.v_min, self.v_max)
+                            normalized_reward = reward / critic_value_scale
+                            target_z = jnp.clip(normalized_reward + discount * q_support, self.v_min, self.v_max)
                             
                             b = (target_z - self.v_min) / delta_z
                             l = jnp.floor(b).astype(jnp.int32)
@@ -373,7 +394,7 @@ class FastMPO:
                             proj = proj.at[(critic_idxs, l_idxs)].add(mean_target_next_pmf * wt_l)
                             proj = proj.at[(critic_idxs, u_idxs)].add(mean_target_next_pmf * wt_u)
 
-                            qf_next_target_value = jnp.sum(proj * q_support, axis=-1)  # (n_critics,)
+                            qf_next_target_value = jnp.sum(proj * q_support, axis=-1) * critic_value_scale  # (n_critics,)
 
                             if self.dual_critic and self.clipped_double_q_learning:
                                 use_first = qf_next_target_value[0] <= qf_next_target_value[1]
@@ -394,11 +415,17 @@ class FastMPO:
                                 "q/q_mean": jnp.mean(qf_next_target_value),
                                 "q/q_max": jnp.max(qf_next_target_value),
                                 "q/q_min": jnp.min(qf_next_target_value),
+                                "q/critic_value_scale": critic_value_scale,
+                                "q/normalized_reward_abs_mean": jnp.abs(normalized_reward),
+                                "q/target_support_saturation_fraction": jnp.mean(
+                                    (normalized_reward + discount * q_support <= self.v_min)
+                                    | (normalized_reward + discount * q_support >= self.v_max)
+                                ),
                             }
 
                             return q_loss, (metrics)
                         
-                        def policy_and_dual_loss_fn(policy_params, policy_target_params, critic_target_params, dual_variables_params, normalized_state, normalized_next_state, key1, key2):   
+                        def policy_and_dual_loss_fn(policy_params, policy_target_params, critic_target_params, dual_variables_params, critic_value_scale, normalized_state, normalized_next_state, key1, key2):
                             # Policy and dual loss
                             stacked_states = jnp.concatenate([normalized_state[None, :], normalized_next_state[None, :]], axis=0)  # (2, obs)
                             target_action_mean, target_action_std = self.policy.apply(policy_target_params, stacked_states)
@@ -416,7 +443,7 @@ class FastMPO:
                             logits = self.critic.apply(critic_target_params, flat_states, flat_actions)  # (n_critics, K*2, nr_atoms)
                             pmf = jax.nn.softmax(logits, axis=-1)
                             q_support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
-                            q_vals = jnp.sum(pmf * q_support, axis=-1)
+                            q_vals = jnp.sum(pmf * q_support, axis=-1) * critic_value_scale
                             q_vals = q_vals.reshape((q_vals.shape[0], self.action_sampling_number, 2))  # (n_critics,K,2)
                             if q_vals.shape[0] == 1:
                                 q_vals = q_vals[0]
@@ -543,12 +570,12 @@ class FastMPO:
                             return loss, (metrics)
                         
 
-                        vmap_critic_loss_fn = jax.vmap(critic_loss_fn, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
+                        vmap_critic_loss_fn = jax.vmap(critic_loss_fn, in_axes=(None, None, None, None, 0, 0, 0, 0, 0, 0, 0, 0), out_axes=0)
                         safe_mean = lambda x: jnp.mean(x) if x is not None else x
                         mean_vmapped_critic_loss_fn = lambda *a, **k: tree.map_structure(safe_mean, vmap_critic_loss_fn(*a, **k))
                         grad_critic_loss_fn = jax.value_and_grad(mean_vmapped_critic_loss_fn, argnums=(1,), has_aux=True)
 
-                        vmap_policy_and_dual_loss_fn = jax.vmap(policy_and_dual_loss_fn, in_axes=(None, None, None, None, 0, 0, 0, 0), out_axes=0)
+                        vmap_policy_and_dual_loss_fn = jax.vmap(policy_and_dual_loss_fn, in_axes=(None, None, None, None, None, 0, 0, 0, 0), out_axes=0)
                         def mean_vmapped_policy_and_dual_loss_fn(*args, **kwargs):
                             losses, policy_metrics = vmap_policy_and_dual_loss_fn(*args, **kwargs)
                             mean_kl_mean_for_update = policy_metrics.pop("dual/mean_kl_mean_for_update")
@@ -635,6 +662,13 @@ class FastMPO:
                             normalized_states_all = states_all
                             normalized_next_states_all = next_states_all
 
+                        if self.normalize_critic_values:
+                            critic_value_scale = critic_value_normalizer.get_critic_value_scale(
+                                critic_value_normalizer_state, self.normalized_return_max, self.float_epsilon
+                            )
+                        else:
+                            critic_value_scale = jnp.ones((), dtype=jnp.float32)
+
                         update_idx = 0
                         for _ in range(self.nr_policy_updates_per_step):
                             for _ in range(self.nr_critic_updates_per_policy_update):
@@ -651,7 +685,7 @@ class FastMPO:
 
                                 (loss, (critic_metrics)), (critic_gradients,) = grad_critic_loss_fn(
                                     policy_state.target_params, critic_state.params, critic_state.target_params,
-                                    normalized_states, normalized_next_states, actions, rewards, dones, truncations, effective_n_steps,
+                                    critic_value_scale, normalized_states, normalized_next_states, actions, rewards, dones, truncations, effective_n_steps,
                                     keys_for_critic_update)
 
                                 critic_state = critic_state.apply_gradients(grads=critic_gradients)
@@ -660,6 +694,10 @@ class FastMPO:
 
                                 critic_metrics["lr/critic_learning_rate"] = critic_state.opt_state[1].hyperparams["learning_rate"]
                                 critic_metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
+                                if self.normalize_critic_values:
+                                    critic_metrics["q/discounted_return_abs_max"] = critic_value_normalizer_state["discounted_return_abs_max"]
+                                    critic_metrics["q/discounted_return_running_mean"] = critic_value_normalizer_state["running_mean"]
+                                    critic_metrics["q/discounted_return_running_std"] = jnp.sqrt(critic_value_normalizer_state["running_var"] + self.float_epsilon)
 
                                 update_idx += 1
 
@@ -667,7 +705,7 @@ class FastMPO:
                             normalized_next_states_for_policy = normalized_next_states
                             
                             (loss, (policy_metrics, mean_kl_mean_for_update)), (policy_gradients, dual_variables_gradients) = grad_policy_and_dual_loss_fn(
-                                policy_state.params, policy_state.target_params, critic_state.target_params, dual_variables_state.params, 
+                                policy_state.params, policy_state.target_params, critic_state.target_params, dual_variables_state.params, critic_value_scale,
                                 normalized_states_for_policy, normalized_next_states_for_policy, keys1_for_policy_update, keys2_for_policy_update
                             )
                             log_alpha_mean_before_update = dual_variables_state.params["params"]["log_alpha_mean"]
@@ -714,11 +752,11 @@ class FastMPO:
 
                         metrics = {**critic_metrics, **policy_metrics}
 
-                        return (policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key), (env_state.info, metrics)
+                        return (policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key), (env_state.info, metrics)
                         
                     key, subkey = jax.random.split(key)
-                    learning_iteration_carry, info_and_optimization_metrics = jax.lax.scan(learning_iteration, (policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, subkey), jnp.arange(self.nr_updates_per_logging_iteration))
-                    policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key = learning_iteration_carry
+                    learning_iteration_carry, info_and_optimization_metrics = jax.lax.scan(learning_iteration, (policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, subkey), jnp.arange(self.nr_updates_per_logging_iteration))
+                    policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key = learning_iteration_carry
                     infos, optimization_metrics = info_and_optimization_metrics
                     infos = {key: jnp.mean(infos[key]) for key in infos}
                     optimization_metrics = {key: jnp.mean(optimization_metrics[key]) for key in optimization_metrics}
@@ -746,11 +784,11 @@ class FastMPO:
                     nr_update_iteration = (eval_save_iteration_step * self.nr_loggings_per_eval_save_iteration * self.nr_updates_per_logging_iteration) + (logging_iteration_step+1) * self.nr_updates_per_logging_iteration
                     jax.debug.callback(callback, (combined_metrics, logging_iteration_step, nr_update_iteration, parallel_seed_id))
 
-                    return (policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key), None
+                    return (policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key), None
 
                 key, subkey = jax.random.split(key)
-                logging_iteration_carry, _ = jax.lax.scan(logging_iteration, (policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, subkey), jnp.arange(self.nr_loggings_per_eval_save_iteration))
-                policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key = logging_iteration_carry
+                logging_iteration_carry, _ = jax.lax.scan(logging_iteration, (policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, subkey), jnp.arange(self.nr_loggings_per_eval_save_iteration))
+                policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key = logging_iteration_carry
 
 
                 # Evaluating
@@ -790,14 +828,14 @@ class FastMPO:
 
                 # Saving
                 if self.save_model:
-                    def save_with_check(policy_state, critic_state, dual_variables_state, observation_normalizer_state):
-                        self.save(policy_state, critic_state, dual_variables_state, observation_normalizer_state)
-                    jax.debug.callback(save_with_check, policy_state, critic_state, dual_variables_state, observation_normalizer_state)
+                    def save_with_check(policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state):
+                        self.save(policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state)
+                    jax.debug.callback(save_with_check, policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state)
 
                 
-                return (policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key), None
+                return (policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key), None
 
-            jax.lax.scan(eval_save_iteration, (policy_state, critic_state, dual_variables_state, observation_normalizer_state, replay_buffer, env_state, key), jnp.arange(self.nr_eval_save_iterations))
+            jax.lax.scan(eval_save_iteration, (policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state, replay_buffer, env_state, key), jnp.arange(self.nr_eval_save_iterations))
             
 
         self.key, subkey = jax.random.split(self.key)
@@ -839,13 +877,15 @@ class FastMPO:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
 
-    def save(self, policy_state, critic_state, dual_variables_state, observation_normalizer_state):
+    def save(self, policy_state, critic_state, dual_variables_state, observation_normalizer_state, critic_value_normalizer_state):
         checkpoint = {
             "policy": policy_state,
             "critic": critic_state,
             "dual_variables": dual_variables_state,
-            "observation_normalizer": observation_normalizer_state
+            "observation_normalizer": observation_normalizer_state,
         }
+        if self.normalize_critic_values:
+            checkpoint["critic_value_normalizer"] = critic_value_normalizer_state
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
         with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as f:
@@ -875,8 +915,10 @@ class FastMPO:
             "policy": model.policy_state,
             "critic": model.critic_state,
             "dual_variables": model.dual_variables_state,
-            "observation_normalizer": model.observation_normalizer_state
+            "observation_normalizer": model.observation_normalizer_state,
         }
+        if model.normalize_critic_values:
+            target["critic_value_normalizer"] = model.critic_value_normalizer_state
         restore_args = orbax_utils.restore_args_from_target(target)
         checkpointer = orbax.checkpoint.PyTreeCheckpointer()
         checkpoint = checkpointer.restore(checkpoint_dir, item=target, restore_args=restore_args)
@@ -885,6 +927,8 @@ class FastMPO:
         model.critic_state = checkpoint["critic"]
         model.dual_variables_state = checkpoint["dual_variables"]
         model.observation_normalizer_state = checkpoint["observation_normalizer"]
+        if model.normalize_critic_values:
+            model.critic_value_normalizer_state = checkpoint["critic_value_normalizer"]
 
         shutil.rmtree(checkpoint_dir)
 
