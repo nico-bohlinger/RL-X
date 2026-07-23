@@ -1,0 +1,14 @@
+--algorithm.name=fastmpo.flax_full_jit
+--algorithm.policy_min_scale=0.03
+--algorithm.policy_tau=0.9
+--algorithm.policy_learning_rate=0.01
+--algorithm.gamma=0.99
+--algorithm.n_steps=3
+--algorithm.clipped_double_q_learning=True
+--algorithm.v_min=-10
+--algorithm.v_max=10
+--algorithm.buffer_size_per_env=2048
+--algorithm.batch_size=16384
+--runner.exp_name=E95__G1__hfield__fastmpo__gamma099_nstep3__clipped_double_q__support10__buffer2048__batch16384__lumi__noeval
+--runner.run_name=E95_fastmpo_gamma099_nstep3_clipped_double_q_support10_buffer2048_batch16384_lumi_seed0
+--runner.notes=modern_support10_buffer2048_critic_batch_noise_test
