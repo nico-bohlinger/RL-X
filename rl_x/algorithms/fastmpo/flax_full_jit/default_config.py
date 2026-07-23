@@ -20,6 +20,16 @@ def get_config(algorithm_name):
     config.anneal_policy_learning_rate = False
     config.anneal_critic_learning_rate = False
     config.anneal_dual_learning_rate = False
+    config.learning_rate_schedule = "linear"  # linear, cosine
+    config.policy_learning_rate_final = 0.0
+    config.critic_learning_rate_final = 0.0
+    config.dual_learning_rate_final = 0.0
+    config.policy_learning_rate_schedule_start_step = 0
+    config.critic_learning_rate_schedule_start_step = 0
+    config.dual_learning_rate_schedule_start_step = 0
+    config.policy_learning_rate_schedule_end_step = -1
+    config.critic_learning_rate_schedule_end_step = -1
+    config.dual_learning_rate_schedule_end_step = -1
     config.policy_weight_decay = 0.001
     config.critic_weight_decay = 0.001
     config.dual_weight_decay = 0.0
