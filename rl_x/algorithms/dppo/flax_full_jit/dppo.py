@@ -15,7 +15,7 @@ import optax
 import wandb
 
 from rl_x.algorithms.dppo.flax_full_jit.networks import DiffusionPolicy, ValueCritic
-from rl_x.algorithms.reppo.flax_full_jit import observation_normalizer
+from rl_x.algorithms.dppo.flax_full_jit import observation_normalizer
 
 rlx_logger = logging.getLogger("rl_x")
 

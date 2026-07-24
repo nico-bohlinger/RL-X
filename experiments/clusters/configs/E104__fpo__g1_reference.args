@@ -1,0 +1,4 @@
+--algorithm.name=fpo.flax_full_jit
+--algorithm.total_timesteps=2000158720
+--runner.exp_name=E104__G1__hfield__algorithm_comparison__fpo__reference__noeval_nosave
+--runner.notes=Standalone FPO reference-method comparison on unchanged G1; seed0, no evaluation, no checkpoints; outcome is curriculum versus global step and wall clock.

@@ -8,7 +8,7 @@ def get_config(algorithm_name):
 
     config.device = "gpu"
     config.nr_parallel_seeds = 1
-    config.total_timesteps = 2_000_000_000
+    config.total_timesteps = 2_000_158_720
     config.learning_rate = 3e-4
     config.anneal_learning_rate = False
     config.nr_steps = 128
