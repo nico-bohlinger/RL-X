@@ -121,7 +121,7 @@ class SPO:
         learning_rate = (
             linear_schedule if self.anneal_learning_rate else self.learning_rate
         )
-        optimizer = lambda: optax.chain(
+        optimizer = optax.chain(
             optax.inject_hyperparams(optax.adam)(
                 learning_rate=learning_rate
             ),
@@ -129,7 +129,7 @@ class SPO:
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, env_state.next_observation),
-            tx=optimizer(),
+            tx=optimizer,
         )
         self.observation_normalizer_state = (
             observation_normalizer.init_observation_normalizer_state(
@@ -144,7 +144,7 @@ class SPO:
         self.critic_state = TrainState.create(
             apply_fn=self.critic.apply,
             params=self.critic.init(critic_key, env_state.next_observation),
-            tx=optimizer(),
+            tx=optimizer,
         )
 
         if self.save_model:

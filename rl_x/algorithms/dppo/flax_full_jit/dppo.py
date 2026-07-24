@@ -184,20 +184,20 @@ class DPPO:
             if self.anneal_learning_rate
             else self.policy_learning_rate
         )
-        policy_optimizer_transforms = []
-        if self.max_grad_norm is not None:
-            policy_optimizer_transforms.append(
-                optax.clip_by_global_norm(self.max_grad_norm)
+        if self.max_grad_norm != -1.0:
+            policy_optimizer = optax.chain(
+                optax.clip_by_global_norm(self.max_grad_norm),
+                optax.inject_hyperparams(optax.adam)(
+                    learning_rate=policy_learning_rate
+                ),
             )
-        policy_optimizer_transforms.append(
-            optax.inject_hyperparams(optax.adam)(
-                learning_rate=policy_learning_rate
+        else:
+            policy_optimizer = optax.chain(
+                optax.inject_hyperparams(optax.adam)(
+                    learning_rate=policy_learning_rate
+                ),
             )
-        )
-        policy_optimizer = lambda: optax.chain(
-            *policy_optimizer_transforms
-        )
-        critic_optimizer = lambda: optax.chain(
+        critic_optimizer = optax.chain(
             optax.inject_hyperparams(optax.adam)(
                 learning_rate=self.critic_learning_rate
             ),
@@ -205,12 +205,12 @@ class DPPO:
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, dummy_observation, dummy_action, dummy_timestep),
-            tx=policy_optimizer(),
+            tx=policy_optimizer,
         )
         self.critic_state = TrainState.create(
             apply_fn=self.critic.apply,
             params=self.critic.init(critic_key, dummy_observation),
-            tx=critic_optimizer(),
+            tx=critic_optimizer,
         )
         self.observation_normalizer_state = observation_normalizer.init_observation_normalizer_state(self.os_shape)
         self.reward_normalizer_state = reward_normalizer.init_reward_normalizer_state(self.nr_envs)

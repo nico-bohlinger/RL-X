@@ -130,7 +130,7 @@ class FPO:
             return self.learning_rate * fraction
 
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
-        optimizer = lambda: optax.chain(
+        optimizer = optax.chain(
             optax.inject_hyperparams(optax.adamw)(
                 learning_rate=learning_rate,
                 b1=self.adam_beta1,
@@ -141,12 +141,12 @@ class FPO:
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, dummy_observation, dummy_action, dummy_timestep),
-            tx=optimizer(),
+            tx=optimizer,
         )
         self.critic_state = TrainState.create(
             apply_fn=self.critic.apply,
             params=self.critic.init(critic_key, dummy_observation),
-            tx=optimizer(),
+            tx=optimizer,
         )
         self.observation_normalizer_state = observation_normalizer.init_observation_normalizer_state(self.os_shape)
 

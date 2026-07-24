@@ -267,24 +267,6 @@ class DIME:
         return observation
 
 
-    def cosine_timestep_multiplier(self, step):
-        reverse_time = (
-            self.diffusion_steps - step
-        ) / self.diffusion_steps
-        offset = 1.0 + self.cosine_schedule_offset
-        return (
-            (1.0 - self.minimum_timestep)
-            * jnp.cos(
-                0.5
-                * jnp.pi
-                * (offset - reverse_time)
-                / offset
-            )
-            ** 2
-            + self.minimum_timestep
-        )
-
-
     def sample_action(
         self,
         actor_params,
@@ -317,9 +299,23 @@ class DIME:
                 normalized_observation.shape[:-1] + (1,),
                 step,
             )
+            reverse_time = (
+                self.diffusion_steps - step
+            ) / self.diffusion_steps
+            offset = 1.0 + self.cosine_schedule_offset
             timestep_delta = (
                 base_timestep
-                * self.cosine_timestep_multiplier(step)
+                * (
+                    (1.0 - self.minimum_timestep)
+                    * jnp.cos(
+                        0.5
+                        * jnp.pi
+                        * (offset - reverse_time)
+                        / offset
+                    )
+                    ** 2
+                    + self.minimum_timestep
+                )
             )
             variance_time = timestep_delta / friction
             transition_std = jnp.sqrt(2.0 * variance_time)

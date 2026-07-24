@@ -93,18 +93,16 @@ class DistributionalCritic(nn.Module):
             axis=-1,
         )
         x = BatchRenorm(
-            use_running_average=not train,
-            momentum=self.batch_renorm_momentum,
-            warm_up_steps=self.batch_renorm_warmup_steps,
-        )(x)
+            self.batch_renorm_momentum,
+            self.batch_renorm_warmup_steps,
+        )(x, train)
         for hidden_dimension in self.hidden_dims:
             x = nn.Dense(hidden_dimension)(x)
             x = nn.relu(x)
             x = BatchRenorm(
-                use_running_average=not train,
-                momentum=self.batch_renorm_momentum,
-                warm_up_steps=self.batch_renorm_warmup_steps,
-            )(x)
+                self.batch_renorm_momentum,
+                self.batch_renorm_warmup_steps,
+            )(x, train)
         return jax.nn.softmax(nn.Dense(self.nr_atoms)(x), axis=-1)
 
 

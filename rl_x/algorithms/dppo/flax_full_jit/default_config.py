@@ -21,7 +21,7 @@ def get_config(algorithm_name):
     config.clipping_epsilon_base = 0.1
     config.clipping_epsilon_rate = 3.0
     config.critic_coef = 0.5
-    config.max_grad_norm = None
+    config.max_grad_norm = -1.0
     config.target_kl = 1.0
     config.reward_scaling = 1.0
     config.normalize_reward = True
