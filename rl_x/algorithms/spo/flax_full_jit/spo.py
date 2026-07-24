@@ -16,6 +16,8 @@ import wandb
 
 from rl_x.algorithms.spo.flax_full_jit.critic import Critic
 from rl_x.algorithms.spo.flax_full_jit.policy import get_policy
+from rl_x.algorithms.spo.flax_full_jit import observation_normalizer
+from rl_x.algorithms.spo.flax_full_jit import reward_normalizer
 
 rlx_logger = logging.getLogger("rl_x")
 
@@ -50,7 +52,12 @@ class SPO:
         self.spo_epsilon = config.algorithm.spo_epsilon
         self.entropy_coef = config.algorithm.entropy_coef
         self.critic_coef = config.algorithm.critic_coef
+        self.clip_value_loss = config.algorithm.clip_value_loss
         self.max_grad_norm = config.algorithm.max_grad_norm
+        self.normalize_observation = (
+            config.algorithm.normalize_observation
+        )
+        self.normalize_reward = config.algorithm.normalize_reward
         self.evaluation_and_save_frequency = (
             config.algorithm.evaluation_and_save_frequency
         )
@@ -115,7 +122,6 @@ class SPO:
             linear_schedule if self.anneal_learning_rate else self.learning_rate
         )
         optimizer = lambda: optax.chain(
-            optax.clip_by_global_norm(self.max_grad_norm),
             optax.inject_hyperparams(optax.adam)(
                 learning_rate=learning_rate
             ),
@@ -124,6 +130,16 @@ class SPO:
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, env_state.next_observation),
             tx=optimizer(),
+        )
+        self.observation_normalizer_state = (
+            observation_normalizer.init_observation_normalizer_state(
+                self.nr_envs, self.os_shape
+            )
+        )
+        self.reward_normalizer_state = (
+            reward_normalizer.init_reward_normalizer_state(
+                self.nr_envs
+            )
         )
         self.critic_state = TrainState.create(
             apply_fn=self.critic.apply,
@@ -145,19 +161,50 @@ class SPO:
             )
             policy_state = self.policy_state
             critic_state = self.critic_state
+            normalizer_state = self.observation_normalizer_state
+            reward_normalizer_state = self.reward_normalizer_state
 
             def multi_iteration(carry, multi_iteration_step):
-                policy_state, critic_state, env_state, key = carry
+                (
+                    policy_state,
+                    critic_state,
+                    normalizer_state,
+                    reward_normalizer_state,
+                    env_state,
+                    key,
+                ) = carry
 
                 def learning_iteration(carry, learning_iteration_step):
-                    policy_state, critic_state, env_state, key = carry
+                    (
+                        policy_state,
+                        critic_state,
+                        normalizer_state,
+                        reward_normalizer_state,
+                        env_state,
+                        key,
+                    ) = carry
 
                     def rollout_step(carry, _):
-                        env_state, key = carry
+                        env_state, normalizer_state, key = carry
                         observation = env_state.next_observation
+                        if self.normalize_observation:
+                            normalizer_state = (
+                                observation_normalizer
+                                .update_observation_normalizer(
+                                    normalizer_state, observation
+                                )
+                            )
+                        normalized_observation = (
+                            observation_normalizer
+                            .normalize_observation(
+                                normalizer_state, observation
+                            )
+                            if self.normalize_observation
+                            else observation
+                        )
                         key, action_key = jax.random.split(key)
                         action_mean, action_logstd = self.policy.apply(
-                            policy_state.params, observation
+                            policy_state.params, normalized_observation
                         )
                         action_std = jnp.exp(action_logstd)
                         action = action_mean + action_std * jax.random.normal(
@@ -170,14 +217,23 @@ class SPO:
                             axis=-1,
                         )
                         value = self.critic.apply(
-                            critic_state.params, observation
+                            critic_state.params, normalized_observation
                         ).squeeze(-1)
                         env_state = self.train_env.step(
                             env_state, self.get_processed_action(action)
                         )
+                        normalized_next_observation = (
+                            observation_normalizer
+                            .normalize_observation(
+                                normalizer_state,
+                                env_state.actual_next_observation,
+                            )
+                            if self.normalize_observation
+                            else env_state.actual_next_observation
+                        )
                         transition = (
-                            observation,
-                            env_state.actual_next_observation,
+                            normalized_observation,
+                            normalized_next_observation,
                             action,
                             log_probability,
                             env_state.reward,
@@ -197,11 +253,19 @@ class SPO:
                                     env_state,
                                     env_state,
                                 )
-                        return (env_state, key), transition
+                        return (
+                            env_state,
+                            normalizer_state,
+                            key,
+                        ), transition
 
-                    (env_state, key), batch = jax.lax.scan(
+                    (
+                        env_state,
+                        normalizer_state,
+                        key,
+                    ), batch = jax.lax.scan(
                         rollout_step,
-                        (env_state, key),
+                        (env_state, normalizer_state, key),
                         None,
                         self.nr_steps,
                     )
@@ -219,6 +283,17 @@ class SPO:
                     next_values = self.critic.apply(
                         critic_state.params, next_states
                     ).squeeze(-1)
+                    if self.normalize_reward:
+                        (
+                            reward_normalizer_state,
+                            rewards,
+                        ) = reward_normalizer.normalize_reward(
+                            reward_normalizer_state,
+                            rewards,
+                            terminations,
+                            truncations,
+                            self.gamma,
+                        )
 
                     def advantage_step(next_advantage, inputs):
                         reward, value, next_value, terminated, truncated = inputs
@@ -261,6 +336,7 @@ class SPO:
                     )
                     batch_advantages = advantages.reshape(-1)
                     batch_returns = returns.reshape(-1)
+                    batch_values = values.reshape(-1)
 
                     def loss_fn(
                         policy_params,
@@ -270,6 +346,7 @@ class SPO:
                         behavior_log_probability_b,
                         advantage_b,
                         return_b,
+                        behavior_value_b,
                     ):
                         action_mean, action_logstd = self.policy.apply(
                             policy_params, state_b
@@ -287,13 +364,16 @@ class SPO:
                             - behavior_log_probability_b
                         )
                         ratio = jnp.exp(log_ratio)
+                        normalized_advantage = (
+                            advantage_b - jnp.mean(advantage_b)
+                        ) / (jnp.std(advantage_b) + 1e-8)
                         ratio_deviation_penalty = (
-                            jnp.abs(advantage_b)
+                            jnp.abs(normalized_advantage)
                             * (ratio - 1.0) ** 2
                             / (2.0 * self.spo_epsilon)
                         )
                         policy_loss = jnp.mean(
-                            -advantage_b * ratio
+                            -normalized_advantage * ratio
                             + ratio_deviation_penalty
                         )
                         entropy = jnp.sum(
@@ -304,9 +384,28 @@ class SPO:
                         value = self.critic.apply(
                             critic_params, state_b
                         ).squeeze(-1)
-                        critic_loss = 0.5 * jnp.mean(
-                            (value - return_b) ** 2
-                        )
+                        if self.clip_value_loss:
+                            unclipped_value_loss = (
+                                value - return_b
+                            ) ** 2
+                            clipped_value = behavior_value_b + jnp.clip(
+                                value - behavior_value_b,
+                                -self.spo_epsilon,
+                                self.spo_epsilon,
+                            )
+                            clipped_value_loss = (
+                                clipped_value - return_b
+                            ) ** 2
+                            critic_loss = 0.5 * jnp.mean(
+                                jnp.maximum(
+                                    unclipped_value_loss,
+                                    clipped_value_loss,
+                                )
+                            )
+                        else:
+                            critic_loss = 0.5 * jnp.mean(
+                                (value - return_b) ** 2
+                            )
                         total_loss = (
                             policy_loss
                             - self.entropy_coef * jnp.mean(entropy)
@@ -324,6 +423,12 @@ class SPO:
                             "policy_ratio/mean": jnp.mean(ratio),
                             "policy_ratio/min": jnp.min(ratio),
                             "policy_ratio/max": jnp.max(ratio),
+                            "advantage/normalized_mean": jnp.mean(
+                                normalized_advantage
+                            ),
+                            "advantage/normalized_std": jnp.std(
+                                normalized_advantage
+                            ),
                         }
                         return total_loss, metrics
 
@@ -363,12 +468,28 @@ class SPO:
                             ],
                             batch_advantages[minibatch_indices],
                             batch_returns[minibatch_indices],
+                            batch_values[minibatch_indices],
+                        )
+                        combined_gradient_norm = jnp.sqrt(
+                            optax.global_norm(policy_gradients) ** 2
+                            + optax.global_norm(critic_gradients) ** 2
+                        )
+                        gradient_scale = jnp.minimum(
+                            1.0,
+                            self.max_grad_norm
+                            / (combined_gradient_norm + 1e-6),
                         )
                         policy_state = policy_state.apply_gradients(
-                            grads=policy_gradients
+                            grads=tree.map_structure(
+                                lambda gradient: gradient * gradient_scale,
+                                policy_gradients,
+                            )
                         )
                         critic_state = critic_state.apply_gradients(
-                            grads=critic_gradients
+                            grads=tree.map_structure(
+                                lambda gradient: gradient * gradient_scale,
+                                critic_gradients,
+                            )
                         )
                         metrics["gradients/policy_grad_norm"] = (
                             optax.global_norm(policy_gradients)
@@ -388,7 +509,7 @@ class SPO:
                     )
                     optimization_metrics[
                         "lr/learning_rate"
-                    ] = policy_state.opt_state[1].hyperparams[
+                    ] = policy_state.opt_state[0].hyperparams[
                         "learning_rate"
                     ]
                     optimization_metrics[
@@ -452,32 +573,61 @@ class SPO:
                     return (
                         policy_state,
                         critic_state,
+                        normalizer_state,
+                        reward_normalizer_state,
                         env_state,
                         key,
                     ), None
 
                 carry, _ = jax.lax.scan(
                     learning_iteration,
-                    (policy_state, critic_state, env_state, key),
+                    (
+                        policy_state,
+                        critic_state,
+                        normalizer_state,
+                        reward_normalizer_state,
+                        env_state,
+                        key,
+                    ),
                     jnp.arange(
                         self.nr_updates_per_multi_learning_iteration
                     ),
                 )
-                policy_state, critic_state, env_state, key = carry
+                (
+                    policy_state,
+                    critic_state,
+                    normalizer_state,
+                    reward_normalizer_state,
+                    env_state,
+                    key,
+                ) = carry
                 if self.save_model:
                     jax.debug.callback(
-                        self.save, policy_state, critic_state
+                        self.save,
+                        policy_state,
+                        critic_state,
+                        normalizer_state,
+                        reward_normalizer_state,
                     )
                 return (
                     policy_state,
                     critic_state,
+                    normalizer_state,
+                    reward_normalizer_state,
                     env_state,
                     key,
                 ), None
 
             jax.lax.scan(
                 multi_iteration,
-                (policy_state, critic_state, env_state, key),
+                (
+                    policy_state,
+                    critic_state,
+                    normalizer_state,
+                    reward_normalizer_state,
+                    env_state,
+                    key,
+                ),
                 jnp.arange(
                     self.nr_multi_learning_and_eval_save_iterations
                 ),
@@ -536,10 +686,18 @@ class SPO:
             )
 
 
-    def save(self, policy_state, critic_state):
+    def save(
+        self,
+        policy_state,
+        critic_state,
+        normalizer_state,
+        reward_normalizer_state,
+    ):
         checkpoint = {
             "policy": policy_state,
             "critic": critic_state,
+            "observation_normalizer": normalizer_state,
+            "reward_normalizer": reward_normalizer_state,
         }
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.latest_model_checkpointer.save(
@@ -605,6 +763,10 @@ class SPO:
         target = {
             "policy": model.policy_state,
             "critic": model.critic_state,
+            "observation_normalizer": (
+                model.observation_normalizer_state
+            ),
+            "reward_normalizer": model.reward_normalizer_state,
         }
         restore_args = orbax_utils.restore_args_from_target(target)
         checkpoint = orbax.checkpoint.PyTreeCheckpointer().restore(
@@ -614,6 +776,12 @@ class SPO:
         )
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
+        model.observation_normalizer_state = checkpoint[
+            "observation_normalizer"
+        ]
+        model.reward_normalizer_state = checkpoint[
+            "reward_normalizer"
+        ]
         shutil.rmtree(checkpoint_directory)
         return model
 
@@ -633,7 +801,15 @@ class SPO:
                 env_state, key = carry
                 action_mean, _ = self.policy.apply(
                     self.policy_state.params,
-                    env_state.next_observation,
+                    (
+                        observation_normalizer
+                        .normalize_observation(
+                            self.observation_normalizer_state,
+                            env_state.next_observation,
+                        )
+                        if self.normalize_observation
+                        else env_state.next_observation
+                    ),
                 )
                 env_state = self.eval_env.step(
                     env_state,

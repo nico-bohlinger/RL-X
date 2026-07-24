@@ -44,24 +44,41 @@ class Policy(nn.Module):
     def __call__(self, x):
         x = x[..., self.policy_observation_indices]
         policy_mean = nn.Dense(
-            512,
+            256,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        policy_mean = nn.LayerNorm()(policy_mean)
-        policy_mean = nn.elu(policy_mean)
+        policy_mean = nn.tanh(policy_mean)
         policy_mean = nn.Dense(
             256,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(policy_mean)
-        policy_mean = nn.elu(policy_mean)
+        policy_mean = nn.tanh(policy_mean)
         policy_mean = nn.Dense(
             128,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(policy_mean)
-        policy_mean = nn.elu(policy_mean)
+        policy_mean = nn.tanh(policy_mean)
+        policy_mean = nn.Dense(
+            128,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(policy_mean)
+        policy_mean = nn.tanh(policy_mean)
+        policy_mean = nn.Dense(
+            64,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(policy_mean)
+        policy_mean = nn.tanh(policy_mean)
+        policy_mean = nn.Dense(
+            64,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(policy_mean)
+        policy_mean = nn.tanh(policy_mean)
         policy_mean = nn.Dense(
             np.prod(self.as_shape).item(),
             kernel_init=orthogonal(0.01),
@@ -86,10 +103,7 @@ def get_processed_action_function(
             env_as_low=env_as_low,
             env_as_high=env_as_high,
         ):
-            clipped_action = jnp.clip(action, -1, 1)
-            return env_as_low + 0.5 * (clipped_action + 1.0) * (
-                env_as_high - env_as_low
-            )
+            return jnp.clip(action, env_as_low, env_as_high)
 
         return jax.jit(get_clipped_and_scaled_action)
     return jax.jit(lambda x: x)

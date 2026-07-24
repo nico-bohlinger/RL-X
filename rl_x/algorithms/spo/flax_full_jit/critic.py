@@ -12,24 +12,17 @@ class Critic(nn.Module):
     def __call__(self, x):
         x = x[..., self.critic_observation_indices]
         critic = nn.Dense(
-            512,
+            64,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        critic = nn.LayerNorm()(critic)
-        critic = nn.elu(critic)
+        critic = nn.tanh(critic)
         critic = nn.Dense(
-            256,
+            64,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(critic)
-        critic = nn.elu(critic)
-        critic = nn.Dense(
-            128,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-        )(critic)
-        critic = nn.elu(critic)
+        critic = nn.tanh(critic)
         return nn.Dense(
             1,
             kernel_init=orthogonal(1.0),

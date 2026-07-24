@@ -1,0 +1,4 @@
+--algorithm.name=fpo.flax_full_jit
+--algorithm.total_timesteps=2000158720
+--runner.exp_name=E111__G1__hfield__algorithm_comparison__fpo__reference_corrected__noeval_nosave
+--runner.notes=Corrected standalone FPO reference-method comparison on unchanged G1; current authors G1 network, flow, CFM, ASPO, optimizer and update geometry; seed0, no evaluation, no checkpoints; outcome is curriculum versus global step and wall clock.

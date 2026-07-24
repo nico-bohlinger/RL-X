@@ -56,9 +56,14 @@ class DIME:
         self.updates_per_step = config.algorithm.updates_per_step
         self.policy_delay = config.algorithm.policy_delay
         self.gamma = config.algorithm.gamma
-        self.critic_tau = config.algorithm.critic_tau
         self.policy_tau = config.algorithm.policy_tau
         self.critic_hidden_dims = tuple(config.algorithm.critic_hidden_dims)
+        self.batch_renorm_momentum = (
+            config.algorithm.batch_renorm_momentum
+        )
+        self.batch_renorm_warmup_steps = (
+            config.algorithm.batch_renorm_warmup_steps
+        )
         self.nr_critics = config.algorithm.nr_critics
         self.nr_atoms = config.algorithm.nr_atoms
         self.v_min = config.algorithm.v_min
@@ -182,6 +187,8 @@ class DIME:
             self.nr_critics,
             self.critic_hidden_dims,
             self.nr_atoms,
+            self.batch_renorm_momentum,
+            self.batch_renorm_warmup_steps,
             self.critic_observation_indices,
         )
         self.entropy_coefficient = EntropyCoefficient(
@@ -194,8 +201,14 @@ class DIME:
             dummy_action,
             dummy_timestep,
         )
-        critic_params = self.critic.init(
-            critic_key, dummy_observation, dummy_action
+        critic_variables = self.critic.init(
+            {
+                "params": critic_key,
+                "batch_stats": critic_key,
+            },
+            dummy_observation,
+            dummy_action,
+            False,
         )
         self.actor_state = TrainState.create(
             apply_fn=self.actor.apply,
@@ -217,8 +230,8 @@ class DIME:
         )
         self.critic_state = RLTrainState.create(
             apply_fn=self.critic.apply,
-            params=critic_params,
-            target_params=critic_params,
+            params=critic_variables["params"],
+            batch_stats=critic_variables["batch_stats"],
             tx=optax.adam(
                 self.critic_learning_rate,
                 b1=self.adam_beta1,
@@ -302,7 +315,7 @@ class DIME:
             step, noise = inputs
             timestep = jnp.full(
                 normalized_observation.shape[:-1] + (1,),
-                step / self.diffusion_steps,
+                step,
             )
             timestep_delta = (
                 base_timestep
@@ -620,48 +633,87 @@ class DIME:
                             entropy_state.params
                         )
                     )
-                    next_distribution = self.critic.apply(
-                        critic_state.target_params,
-                        next_state_batch,
-                        jax.lax.stop_gradient(next_action),
-                    )
-                    next_distribution = jnp.mean(
-                        next_distribution, axis=0
-                    )
                     entropy_bonus = entropy_coefficient * (
                         next_running_cost
                         + next_stochastic_cost
                         + next_terminal_cost
                     )
-                    target_distribution = jax.lax.stop_gradient(
-                        self.project_distribution(
-                            next_distribution,
-                            reward_batch,
-                            terminated_batch,
-                            entropy_bonus,
-                        )
-                    )
 
-                    def critic_loss_fn(critic_params):
-                        current_distribution = self.critic.apply(
-                            critic_params,
-                            state_batch,
-                            action_batch,
+                    def critic_loss_fn(
+                        critic_params, critic_batch_stats
+                    ):
+                        (
+                            current_and_next_distribution,
+                            critic_state_update,
+                        ) = self.critic.apply(
+                            {
+                                "params": critic_params,
+                                "batch_stats": critic_batch_stats,
+                            },
+                            jnp.concatenate(
+                                [
+                                    state_batch,
+                                    next_state_batch,
+                                ],
+                                axis=0,
+                            ),
+                            jnp.concatenate(
+                                [
+                                    action_batch,
+                                    jax.lax.stop_gradient(
+                                        next_action
+                                    ),
+                                ],
+                                axis=0,
+                            ),
+                            True,
+                            mutable=["batch_stats"],
                         )
-                        cross_entropy = -jnp.mean(
-                            jnp.sum(
-                                target_distribution[None, ...]
-                                * jnp.log(
-                                    current_distribution + 1e-15
+                        (
+                            current_distribution,
+                            next_distribution,
+                        ) = jnp.split(
+                            current_and_next_distribution,
+                            2,
+                            axis=1,
+                        )
+                        target_distribution = jax.lax.stop_gradient(
+                            (
+                                self.project_distribution(
+                                    next_distribution[0],
+                                    reward_batch,
+                                    terminated_batch,
+                                    entropy_bonus,
+                                )
+                                + self.project_distribution(
+                                    next_distribution[1],
+                                    reward_batch,
+                                    terminated_batch,
+                                    entropy_bonus,
+                                )
+                            )
+                            / 2.0
+                        )
+                        cross_entropy = -jnp.sum(
+                            jnp.mean(
+                                jnp.sum(
+                                    target_distribution[None, ...]
+                                    * jnp.log(
+                                        current_distribution + 1e-15
+                                    ),
+                                    axis=-1,
                                 ),
                                 axis=-1,
                             )
                         )
-                        distribution_entropy = jnp.mean(
-                            jnp.sum(
-                                current_distribution
-                                * jnp.log(
-                                    current_distribution + 1e-15
+                        distribution_entropy = jnp.sum(
+                            jnp.mean(
+                                jnp.sum(
+                                    current_distribution
+                                    * jnp.log(
+                                        current_distribution + 1e-15
+                                    ),
+                                    axis=-1,
                                 ),
                                 axis=-1,
                             )
@@ -680,23 +732,49 @@ class DIME:
                                     axis=-1,
                                 )
                             ),
+                            "q/current_mean": jnp.mean(
+                                jnp.sum(
+                                    current_distribution
+                                    * self.support,
+                                    axis=-1,
+                                )
+                            ),
+                            "q/distribution_entropy": -jnp.mean(
+                                jnp.sum(
+                                    current_distribution
+                                    * jnp.log(
+                                        current_distribution
+                                        + 1e-15
+                                    ),
+                                    axis=-1,
+                                )
+                            ),
+                            "critic_state_update": (
+                                critic_state_update
+                            ),
                         }
 
                     (
                         (critic_loss, critic_metrics),
                         critic_gradients,
                     ) = jax.value_and_grad(
-                        critic_loss_fn, has_aux=True
-                    )(critic_state.params)
+                        critic_loss_fn,
+                        argnums=0,
+                        has_aux=True,
+                    )(
+                        critic_state.params,
+                        critic_state.batch_stats,
+                    )
+                    critic_state_update = critic_metrics.pop(
+                        "critic_state_update"
+                    )
                     critic_state = critic_state.apply_gradients(
                         grads=critic_gradients
                     )
                     critic_state = critic_state.replace(
-                        target_params=optax.incremental_update(
-                            critic_state.params,
-                            critic_state.target_params,
-                            self.critic_tau,
-                        )
+                        batch_stats=critic_state_update[
+                            "batch_stats"
+                        ]
                     )
 
                     def actor_and_temperature_update(
@@ -722,9 +800,15 @@ class DIME:
                                 actor_key,
                             )
                             q_distribution = self.critic.apply(
-                                critic_state.params,
+                                {
+                                    "params": critic_state.params,
+                                    "batch_stats": (
+                                        critic_state.batch_stats
+                                    ),
+                                },
                                 state_batch,
                                 sampled_action,
+                                False,
                             )
                             q_value = jnp.mean(
                                 jnp.sum(
@@ -815,6 +899,15 @@ class DIME:
                         actor_metrics[
                             "gradients/actor_grad_norm"
                         ] = optax.global_norm(actor_gradients)
+                        actor_metrics[
+                            "actor/update_active"
+                        ] = jnp.ones(())
+                        actor_metrics[
+                            "entropy/target_mismatch"
+                        ] = (
+                            actor_metrics["entropy/running_cost"]
+                            - self.target_entropy
+                        )
                         return (
                             actor_state,
                             target_actor_state,
@@ -839,6 +932,8 @@ class DIME:
                                 entropy_state.params
                             ),
                             "gradients/actor_grad_norm": jnp.zeros(()),
+                            "actor/update_active": jnp.zeros(()),
+                            "entropy/target_mismatch": jnp.zeros(()),
                         }
                         return (
                             actor_state,
@@ -895,6 +990,8 @@ class DIME:
                     metrics = {
                         "loss/critic_loss": jnp.zeros(()),
                         "q/target_mean": jnp.zeros(()),
+                        "q/current_mean": jnp.zeros(()),
+                        "q/distribution_entropy": jnp.zeros(()),
                         "loss/actor_loss": jnp.zeros(()),
                         "entropy/running_cost": jnp.zeros(()),
                         "entropy/stochastic_cost": jnp.zeros(()),
@@ -907,6 +1004,8 @@ class DIME:
                         ),
                         "gradients/actor_grad_norm": jnp.zeros(()),
                         "gradients/critic_grad_norm": jnp.zeros(()),
+                        "actor/update_active": jnp.zeros(()),
+                        "entropy/target_mismatch": jnp.zeros(()),
                     }
                     return update_carry, metrics
 

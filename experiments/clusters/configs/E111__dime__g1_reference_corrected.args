@@ -1,0 +1,4 @@
+--algorithm.name=dime.flax_full_jit
+--algorithm.total_timesteps=2000158720
+--runner.exp_name=E111__G1__hfield__algorithm_comparison__dime__reference_corrected__noeval_nosave
+--runner.notes=Corrected standalone DIME reference-method comparison on unchanged G1; reference PISGRAD diffusion, adjoint path costs, learned timestep and friction, CrossQ Batch-Renorm categorical critic, joint current-next batch and update-to-data geometry; seed0, no evaluation, no checkpoints; outcome is curriculum versus global step and wall clock.

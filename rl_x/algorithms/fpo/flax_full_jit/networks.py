@@ -19,7 +19,7 @@ class FlowPolicy(nn.Module):
         x = jnp.concatenate([observation, noisy_action, timestep_embedding], axis=-1)
         for hidden_dimension in self.hidden_dims:
             x = nn.Dense(hidden_dimension, kernel_init=nn.initializers.lecun_uniform())(x)
-            x = nn.silu(x)
+            x = nn.elu(x)
         x = nn.Dense(self.action_dimension, kernel_init=nn.initializers.lecun_uniform())(x)
         return x * self.output_scale
 
@@ -33,5 +33,5 @@ class ValueCritic(nn.Module):
         x = observation[..., self.critic_observation_indices]
         for hidden_dimension in self.hidden_dims:
             x = nn.Dense(hidden_dimension, kernel_init=nn.initializers.lecun_uniform())(x)
-            x = nn.silu(x)
+            x = nn.elu(x)
         return nn.Dense(1, kernel_init=nn.initializers.lecun_uniform())(x)

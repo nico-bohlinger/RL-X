@@ -1,0 +1,4 @@
+--algorithm.name=dppo.flax_full_jit
+--algorithm.total_timesteps=2000158720
+--runner.exp_name=E111__G1__hfield__algorithm_comparison__dppo__reference_corrected__noeval_nosave
+--runner.notes=Corrected standalone from-scratch DPPO comparison on unchanged G1; cosine DDPM posterior, reference denoising-MDP sample accounting, per-dimension log probabilities, denoising discounts, clipping schedule, normalization and residual networks; seed0, no evaluation, no checkpoints; outcome is curriculum versus global step and wall clock.

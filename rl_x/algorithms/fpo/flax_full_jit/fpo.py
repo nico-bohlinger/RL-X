@@ -39,6 +39,9 @@ class FPO:
         self.render = config.environment.render
         self.render_callback_type = getattr(config.environment, "render_callback_type", "io_callback")
         self.learning_rate = config.algorithm.learning_rate
+        self.weight_decay = config.algorithm.weight_decay
+        self.adam_beta1 = config.algorithm.adam_beta1
+        self.adam_beta2 = config.algorithm.adam_beta2
         self.anneal_learning_rate = config.algorithm.anneal_learning_rate
         self.nr_steps = config.algorithm.nr_steps
         self.nr_epochs = config.algorithm.nr_epochs
@@ -55,11 +58,17 @@ class FPO:
         self.policy_hidden_dims = tuple(config.algorithm.policy_hidden_dims)
         self.critic_hidden_dims = tuple(config.algorithm.critic_hidden_dims)
         self.policy_output_scale = config.algorithm.policy_output_scale
-        self.output_mode = config.algorithm.output_mode
+        self.action_clip = config.algorithm.action_clip
         self.nr_flow_samples_per_action = config.algorithm.nr_flow_samples_per_action
-        self.average_losses_before_exp = config.algorithm.average_losses_before_exp
-        self.discretize_t_for_training = config.algorithm.discretize_t_for_training
-        self.feather_std = config.algorithm.feather_std
+        self.timestep_inverse_cdf_beta = config.algorithm.timestep_inverse_cdf_beta
+        self.action_perturb_std = config.algorithm.action_perturb_std
+        self.cfm_loss_clamp = config.algorithm.cfm_loss_clamp
+        self.cfm_loss_clamp_negative_advantages_max = (
+            config.algorithm.cfm_loss_clamp_negative_advantages_max
+        )
+        self.cfm_difference_clamp_max = config.algorithm.cfm_difference_clamp_max
+        self.trust_region_mode = config.algorithm.trust_region_mode
+        self.advantage_clamp = config.algorithm.advantage_clamp
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
 
@@ -76,8 +85,6 @@ class FPO:
         self.horizon = self.train_env.horizon
         self.policy_observation_indices = getattr(self.train_env, "policy_observation_indices", jnp.arange(self.os_shape[0]))
         self.critic_observation_indices = getattr(self.train_env, "critic_observation_indices", jnp.arange(self.os_shape[0]))
-        self.action_low = jnp.asarray(self.train_env.single_action_space.low)
-        self.action_high = jnp.asarray(self.train_env.single_action_space.high)
         self.schedule_current = jnp.linspace(1.0, 0.0, self.flow_steps + 1)[:-1]
         self.schedule_next = jnp.linspace(1.0, 0.0, self.flow_steps + 1)[1:]
 
@@ -89,14 +96,16 @@ class FPO:
             raise ValueError("Evaluation and save frequency must be a multiple of the rollout batch size.")
         if self.nr_parallel_seeds > 1:
             raise ValueError("Parallel seeds are not supported yet.")
-        if self.output_mode not in ["u", "u_but_supervise_as_eps"]:
-            raise ValueError("Output mode must be u or u_but_supervise_as_eps.")
         if self.flow_steps < 1:
             raise ValueError("Flow steps must be positive.")
         if self.timestep_embed_dim < 2 or self.timestep_embed_dim % 2 != 0:
             raise ValueError("Timestep embedding dimension must be positive and divisible by two.")
         if self.nr_flow_samples_per_action < 1:
             raise ValueError("The number of flow samples per action must be positive.")
+        if self.timestep_inverse_cdf_beta <= 0.0:
+            raise ValueError("The timestep inverse-CDF beta must be positive.")
+        if self.trust_region_mode not in ["ppo", "spo", "aspo"]:
+            raise ValueError("Trust-region mode must be ppo, spo or aspo.")
         rlx_logger.info(f"Using device: {jax.default_backend()}")
 
         self.key = jax.random.PRNGKey(self.seed)
@@ -122,8 +131,12 @@ class FPO:
 
         learning_rate = linear_schedule if self.anneal_learning_rate else self.learning_rate
         optimizer = lambda: optax.chain(
-            optax.clip_by_global_norm(self.max_grad_norm),
-            optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
+            optax.inject_hyperparams(optax.adamw)(
+                learning_rate=learning_rate,
+                b1=self.adam_beta1,
+                b2=self.adam_beta2,
+                weight_decay=self.weight_decay,
+            ),
         )
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
@@ -154,17 +167,15 @@ class FPO:
         observation = jnp.broadcast_to(normalized_observation[..., None, :], sample_shape + (normalized_observation.shape[-1],))
         noisy_action = timestep * epsilon + (1.0 - timestep) * action[..., None, :]
         network_prediction = self.policy.apply(policy_params, observation, noisy_action, timestep)
-        if self.output_mode == "u":
-            target = epsilon - action[..., None, :]
-            return jnp.mean((network_prediction - target) ** 2, axis=-1)
-        action_prediction = noisy_action - timestep * network_prediction
-        epsilon_prediction = action_prediction + network_prediction
-        return jnp.mean((epsilon - epsilon_prediction) ** 2, axis=-1)
+        target = epsilon - action[..., None, :]
+        return jnp.sum(
+            (network_prediction - target) ** 2, axis=-1
+        ) / jnp.sqrt(self.action_dimension)
 
 
     def sample_action(self, policy_params, normalizer_state, observation, key, deterministic=False):
         normalized_observation = self.normalize(normalizer_state, observation)
-        key, sample_key, loss_key, feather_key = jax.random.split(key, 4)
+        key, sample_key, loss_key, perturb_key = jax.random.split(key, 4)
         initial_action = jax.random.normal(sample_key, observation.shape[:-1] + self.as_shape)
 
         def euler_step(noisy_action, inputs):
@@ -180,22 +191,31 @@ class FPO:
             (self.schedule_current, self.schedule_next),
         )
         if not deterministic:
-            action += self.feather_std * jax.random.normal(feather_key, action.shape)
+            action += self.action_perturb_std * jax.random.normal(
+                perturb_key, action.shape
+            )
 
         loss_shape = observation.shape[:-1] + (self.nr_flow_samples_per_action,)
         epsilon_key, timestep_key = jax.random.split(loss_key)
         epsilon = jax.random.normal(epsilon_key, loss_shape + self.as_shape)
-        if self.discretize_t_for_training:
-            timestep_indices = jax.random.randint(timestep_key, loss_shape, 0, self.flow_steps)
-            timestep = self.schedule_current[timestep_indices][..., None]
-        else:
-            timestep = jax.random.uniform(timestep_key, loss_shape + (1,))
+        uniform_timestep = jax.random.uniform(
+            timestep_key, loss_shape + (1,)
+        )
+        timestep = 0.005 + 0.99 * (
+            1.0
+            - (1.0 - uniform_timestep)
+            ** (1.0 / self.timestep_inverse_cdf_beta)
+        )
         initial_statistic = self.compute_cfm_loss(
             policy_params, normalized_observation, action, epsilon, timestep
         )
         action_info = (epsilon, timestep, initial_statistic)
 
-        processed_action = self.action_low + 0.5 * (jnp.tanh(action) + 1.0) * (self.action_high - self.action_low)
+        processed_action = jnp.clip(
+            action,
+            -self.action_clip,
+            self.action_clip,
+        )
         return key, action, processed_action, action_info
 
 
@@ -277,28 +297,82 @@ class FPO:
                     )
                     batch_timestep = action_info[1].reshape((-1, self.nr_flow_samples_per_action, 1))
                     batch_initial_statistic = action_info[2].reshape((-1, self.nr_flow_samples_per_action))
+                    batch_advantages = (
+                        batch_advantages - jnp.mean(batch_advantages)
+                    ) / (jnp.std(batch_advantages) + 1e-8)
+                    batch_advantages = jnp.clip(
+                        batch_advantages,
+                        -self.advantage_clamp,
+                        self.advantage_clamp,
+                    )
 
                     def loss_fn(policy_params, critic_params, state_b, action_b, advantage_b, return_b,
                                 epsilon_b, timestep_b, initial_statistic_b):
-                        normalized_advantage = (advantage_b - jnp.mean(advantage_b)) / (jnp.std(advantage_b) + 1e-8)
                         current_statistic = self.compute_cfm_loss(
                             policy_params, state_b, action_b, epsilon_b, timestep_b
                         )
-                        if self.average_losses_before_exp:
-                            ratio = jnp.exp(
-                                jnp.mean(initial_statistic_b, axis=-1, keepdims=True)
-                                - jnp.mean(current_statistic, axis=-1, keepdims=True)
+                        initial_statistic_b = jnp.minimum(
+                            initial_statistic_b, self.cfm_loss_clamp
+                        )
+                        current_statistic = jnp.minimum(
+                            current_statistic, self.cfm_loss_clamp
+                        )
+                        current_statistic = jnp.where(
+                            advantage_b[..., None] < 0.0,
+                            jnp.minimum(
+                                current_statistic,
+                                self.cfm_loss_clamp_negative_advantages_max,
+                            ),
+                            current_statistic,
+                        )
+                        unclamped_log_ratio = (
+                            initial_statistic_b - current_statistic
+                        )
+                        clamped_log_ratio = jnp.minimum(
+                            unclamped_log_ratio,
+                            self.cfm_difference_clamp_max,
+                        )
+                        log_ratio = (
+                            unclamped_log_ratio
+                            + jax.lax.stop_gradient(
+                                clamped_log_ratio - unclamped_log_ratio
                             )
+                        )
+                        ratio = jnp.exp(log_ratio)
+                        surrogate = (
+                            -advantage_b[..., None] * ratio
+                        )
+                        clipped_surrogate = (
+                            -advantage_b[..., None]
+                            * jnp.clip(
+                                ratio,
+                                1.0 - self.clipping_epsilon,
+                                1.0 + self.clipping_epsilon,
+                            )
+                        )
+                        ppo_loss = jnp.maximum(
+                            surrogate, clipped_surrogate
+                        )
+                        spo_loss = -(
+                            ratio * advantage_b[..., None]
+                            - jnp.abs(advantage_b[..., None])
+                            * (ratio - 1.0) ** 2
+                            / (2.0 * self.clipping_epsilon)
+                        )
+                        if self.trust_region_mode == "ppo":
+                            policy_loss = jnp.mean(ppo_loss)
+                        elif self.trust_region_mode == "spo":
+                            policy_loss = jnp.mean(spo_loss)
                         else:
-                            ratio = jnp.exp(jnp.clip(initial_statistic_b - current_statistic, -3.0, 3.0))
-
-                        surrogate = ratio * normalized_advantage[..., None]
-                        clipped_surrogate = jnp.clip(
-                            ratio, 1.0 - self.clipping_epsilon, 1.0 + self.clipping_epsilon
-                        ) * normalized_advantage[..., None]
-                        policy_loss = -jnp.mean(jnp.minimum(surrogate, clipped_surrogate))
+                            policy_loss = jnp.mean(
+                                jnp.where(
+                                    advantage_b[..., None] > 0.0,
+                                    ppo_loss,
+                                    spo_loss,
+                                )
+                            )
                         value = self.critic.apply(critic_params, state_b).squeeze(-1)
-                        critic_loss = 0.5 * jnp.mean((value - return_b) ** 2)
+                        critic_loss = jnp.mean((value - return_b) ** 2)
                         total_loss = policy_loss + self.critic_coef * critic_loss
                         metrics = {
                             "loss/policy_gradient_loss": policy_loss,
@@ -307,7 +381,19 @@ class FPO:
                             "policy_ratio/min": jnp.min(ratio),
                             "policy_ratio/max": jnp.max(ratio),
                             "policy_ratio/clip_fraction": jnp.mean(jnp.abs(ratio - 1.0) > self.clipping_epsilon),
+                            "policy_ratio/log_ratio_unclamped_max": jnp.max(
+                                unclamped_log_ratio
+                            ),
+                            "policy_ratio/nonfinite_fraction": jnp.mean(
+                                ~jnp.isfinite(ratio)
+                            ),
                             "policy/latent_action_abs_mean": jnp.mean(jnp.abs(action_b)),
+                            "cfm/initial_loss_mean": jnp.mean(
+                                initial_statistic_b
+                            ),
+                            "cfm/current_loss_mean": jnp.mean(
+                                current_statistic
+                            ),
                         }
                         return total_loss, metrics
 
@@ -331,8 +417,27 @@ class FPO:
                             batch_timestep[minibatch_indices],
                             batch_initial_statistic[minibatch_indices],
                         )
-                        policy_state = policy_state.apply_gradients(grads=policy_gradients)
-                        critic_state = critic_state.apply_gradients(grads=critic_gradients)
+                        combined_gradient_norm = jnp.sqrt(
+                            optax.global_norm(policy_gradients) ** 2
+                            + optax.global_norm(critic_gradients) ** 2
+                        )
+                        gradient_scale = jnp.minimum(
+                            1.0,
+                            self.max_grad_norm
+                            / (combined_gradient_norm + 1e-6),
+                        )
+                        policy_state = policy_state.apply_gradients(
+                            grads=tree.map_structure(
+                                lambda gradient: gradient * gradient_scale,
+                                policy_gradients,
+                            )
+                        )
+                        critic_state = critic_state.apply_gradients(
+                            grads=tree.map_structure(
+                                lambda gradient: gradient * gradient_scale,
+                                critic_gradients,
+                            )
+                        )
                         metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
                         metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
                         return (policy_state, critic_state), metrics
@@ -340,7 +445,7 @@ class FPO:
                     (policy_state, critic_state), optimization_metrics = jax.lax.scan(
                         minibatch_update, (policy_state, critic_state), batch_indices
                     )
-                    optimization_metrics["lr/learning_rate"] = policy_state.opt_state[1].hyperparams["learning_rate"]
+                    optimization_metrics["lr/learning_rate"] = policy_state.opt_state[0].hyperparams["learning_rate"]
                     optimization_metrics["v_value/explained_variance"] = 1.0 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
                     combined_metrics = tree.map_structure(
                         jnp.mean, {**infos, **optimization_metrics}

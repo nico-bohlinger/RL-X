@@ -2,17 +2,21 @@
 
 Contains a native RL-X implementation of [Flow Policy Optimization (FPO)](https://flowreinforce.github.io/).
 
-The implementation follows the authors' Apache-2.0 JAX reference implementation. It samples actions by integrating a conditional flow, stores conditional-flow-matching losses under the behavior policy, and uses their difference as a PPO-style likelihood-ratio surrogate. The implementation is adapted to the RL-X fully JIT-compiled environment interface and supports training from rewards without a pretrained policy.
+The implementation follows the authors' current G1 locomotion reference configuration. It samples actions by integrating a conditional flow, stores conditional-flow-matching losses under the behavior policy, and uses their difference as an asymmetric SPO likelihood-ratio surrogate. The implementation is adapted to the RL-X fully JIT-compiled environment interface and supports training from rewards without a pretrained policy.
 
 
 ## RL-X implementation
 
 **Implementation details**
 - Conditional flow-matching policy with Euler integration
-- Configurable flow steps, timestep embedding, flow samples per action, stochastic sampling and feather noise
-- Advantage-weighted FPO ratio with PPO clipping
+- Sixty-four-step conditional flow with the reference G1 actor and critic networks
+- Thirty-two per-action CFM samples with variance-preserving action-dimension reduction
+- Per-sample ratios, symmetric CFM-loss clamps, negative-advantage protection and straight-through loss-difference bounding
+- ASPO trust region: PPO for positive advantages and SPO for negative advantages
 - GAE value targets, observation normalization and separate actor/critic diagnostics
-- Tanh action squashing followed by environment-bound rescaling
+- AdamW and the reference 32-epoch, four-minibatch G1 update geometry
+- Latent-action clipping to `[-2, 2]`, matching the reference G1 runner
+- Joint actor-critic gradient clipping matching the reference single-optimizer geometry
 - Fully JIT-compiled JAX rollout and update loop
 
 **Supported frameworks**
@@ -27,5 +31,5 @@ The implementation follows the authors' Apache-2.0 JAX reference implementation.
 ## Resources
 
 - Paper and project: [Flow Matching Policy Gradients](https://flowreinforce.github.io/)
-- Reference code: [akanazawa/fpo](https://github.com/akanazawa/fpo)
+- Reference code: [amazon-far/fpo-control](https://github.com/amazon-far/fpo-control)
 - The adapted reference implementation is Apache-2.0 licensed

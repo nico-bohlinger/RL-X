@@ -9,6 +9,8 @@ SPO replaces PPO's clipped policy objective with a differentiable quadratic pena
 
 **Implementation details**
 - Implements the paper's policy loss exactly: `-advantage * ratio + abs(advantage) * (ratio - 1)^2 / (2 * epsilon)`
+- Normalizes observations and discounted-return rewards with the reference clipping rules, clips actions at the environment bounds, and normalizes advantages in each optimization minibatch
+- Uses the authors' MuJoCo seven-layer Tanh policy, two-layer value network, clipped value loss, joint actor-critic gradient clipping, rollout horizon, optimizer settings, epoch count, and four-minibatch update geometry
 - Logs the per-sample ratio-deviation penalty
 - Supports the fully JIT-compiled JAX data path used by MJX environments
 
