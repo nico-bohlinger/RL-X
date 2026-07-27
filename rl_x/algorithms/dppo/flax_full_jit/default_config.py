@@ -27,6 +27,7 @@ def get_config(algorithm_name):
     config.normalize_reward = True
     config.reward_clip = 10.0
     config.normalize_observation = True
+    config.action_rescaling = False
 
     config.diffusion_steps = 10
     config.timestep_embed_dim = 16

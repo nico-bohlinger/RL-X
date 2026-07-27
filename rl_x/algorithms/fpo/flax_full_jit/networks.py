@@ -16,7 +16,7 @@ class FlowPolicy(nn.Module):
         frequencies = 2 ** jnp.arange(self.timestep_embed_dim // 2)
         scaled_timestep = timestep * frequencies
         timestep_embedding = jnp.concatenate([jnp.cos(scaled_timestep), jnp.sin(scaled_timestep)], axis=-1)
-        x = jnp.concatenate([observation, noisy_action, timestep_embedding], axis=-1)
+        x = jnp.concatenate([observation, timestep_embedding, noisy_action], axis=-1)
         for hidden_dimension in self.hidden_dims:
             x = nn.Dense(hidden_dimension, kernel_init=nn.initializers.lecun_uniform())(x)
             x = nn.elu(x)

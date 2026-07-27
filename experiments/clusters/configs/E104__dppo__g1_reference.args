@@ -1,4 +1,0 @@
---algorithm.name=dppo.flax_full_jit
---algorithm.total_timesteps=2000158720
---runner.exp_name=E104__G1__hfield__algorithm_comparison__dppo__reference__noeval_nosave
---runner.notes=Standalone DPPO reference-method comparison on unchanged G1; seed0, no evaluation, no checkpoints; outcome is curriculum versus global step and wall clock.

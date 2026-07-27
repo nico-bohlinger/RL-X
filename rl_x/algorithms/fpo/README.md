@@ -17,7 +17,10 @@ The implementation follows the authors' current G1 locomotion reference configur
 - AdamW and the reference 32-epoch, four-minibatch G1 update geometry
 - Latent-action clipping to `[-2, 2]`, matching the reference G1 runner
 - Joint actor-critic gradient clipping matching the reference single-optimizer geometry
+- Reference observation-normalizer epsilon and update horizon, configurable actor scaling, and actor EMA after the 500-update warmup
 - Fully JIT-compiled JAX rollout and update loop
+
+The port was audited against official reference revision `b80112be1e8362263c4cd176e7aef21a275ff1c6`. The default profile is the authors' from-scratch G1 locomotion profile; it does not depend on a pretrained flow policy.
 
 **Supported frameworks**
 - JAX (Flax, fully JIT-compiled)

@@ -24,7 +24,7 @@ def get_config(algorithm_name):
     config.std_dev = 1.0
     config.normalize_observation = True
     config.normalize_reward = True
-    config.action_clipping_and_rescaling = True
+    config.action_clipping_and_rescaling = False
     config.evaluation_and_save_frequency = -1
     config.evaluation_active = False
 

@@ -58,7 +58,7 @@ class ScorePolicy(nn.Module):
             timestep_embedding
         )
         x = jnp.concatenate(
-            [observation, action, timestep_embedding], axis=-1
+            [action, observation, timestep_embedding], axis=-1
         )
         for hidden_dimension in self.hidden_dims:
             x = nn.Dense(hidden_dimension)(x)

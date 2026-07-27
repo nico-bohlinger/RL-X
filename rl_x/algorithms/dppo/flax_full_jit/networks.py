@@ -30,7 +30,7 @@ class DiffusionPolicy(nn.Module):
         timestep_embedding = nn.Dense(self.timestep_embed_dim)(
             timestep_embedding
         )
-        x = jnp.concatenate([observation, noisy_action, timestep_embedding], axis=-1)
+        x = jnp.concatenate([noisy_action, timestep_embedding, observation], axis=-1)
         x = nn.Dense(
             self.hidden_dims[0],
             kernel_init=nn.initializers.lecun_uniform(),

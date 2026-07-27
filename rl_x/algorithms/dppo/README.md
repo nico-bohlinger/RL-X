@@ -16,9 +16,18 @@ The original DPPO repository includes a from-scratch MuJoCo locomotion configura
 - Clamps per-action-dimension transition log probabilities before averaging, matching the reference objective
 - Applies denoising-step discounting and denoising-step-dependent PPO clipping
 - Uses the reference residual actor and value networks, separate actor and critic learning rates, observation normalization, and target-KL early stopping
+- Uses the original stochastic DDPM evaluation rule: posterior noise remains active above the final denoising step, with the reference `1e-3` floor
+- Keeps RL-X fully-jitted environments in their native action domain by default; set `action_rescaling=True` for environments that expect normalized actions mapped to their Box bounds
+
+The port was audited against official reference revision `cc7234ad7ff39a8f32de3af903606723a16f0648`. The default optimizer and network profile follows the repository's from-scratch Hopper configuration. RL-X replaces its offline normalization file with online running observation statistics so the algorithm can train from scratch on arbitrary RL-X environments.
 
 **Supported frameworks**
 - JAX (Flax, fully JIT-compiled)
+
+**Supported action space, observation space and data interface types**
+| Version | Flat value obs | Image obs | Continuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
+| :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
+| JAX (Flax, fully JIT-compiled) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 
 ## Resources

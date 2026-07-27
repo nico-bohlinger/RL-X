@@ -53,10 +53,13 @@ class FPO:
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.reward_scaling = config.algorithm.reward_scaling
         self.normalize_observation = config.algorithm.normalize_observation
+        self.observation_normalizer_epsilon = config.algorithm.observation_normalizer_epsilon
+        self.observation_normalizer_max_count = config.algorithm.observation_normalizer_max_count
         self.flow_steps = config.algorithm.flow_steps
         self.timestep_embed_dim = config.algorithm.timestep_embed_dim
         self.policy_hidden_dims = tuple(config.algorithm.policy_hidden_dims)
         self.critic_hidden_dims = tuple(config.algorithm.critic_hidden_dims)
+        self.actor_scale = config.algorithm.actor_scale
         self.policy_output_scale = config.algorithm.policy_output_scale
         self.action_clip = config.algorithm.action_clip
         self.nr_flow_samples_per_action = config.algorithm.nr_flow_samples_per_action
@@ -69,6 +72,8 @@ class FPO:
         self.cfm_difference_clamp_max = config.algorithm.cfm_difference_clamp_max
         self.trust_region_mode = config.algorithm.trust_region_mode
         self.advantage_clamp = config.algorithm.advantage_clamp
+        self.ema_decay = config.algorithm.ema_decay
+        self.ema_warmup_steps = config.algorithm.ema_warmup_steps
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
 
@@ -104,6 +109,12 @@ class FPO:
             raise ValueError("The number of flow samples per action must be positive.")
         if self.timestep_inverse_cdf_beta <= 0.0:
             raise ValueError("The timestep inverse-CDF beta must be positive.")
+        if self.observation_normalizer_epsilon < 0.0 or self.observation_normalizer_max_count <= 0:
+            raise ValueError("Observation normalizer epsilon and maximum count are invalid.")
+        if self.actor_scale <= 0.0:
+            raise ValueError("Actor scale must be positive.")
+        if self.ema_decay < 0.0 or self.ema_decay >= 1.0 or self.ema_warmup_steps < 0:
+            raise ValueError("EMA decay and warmup are invalid.")
         if self.trust_region_mode not in ["ppo", "spo", "aspo"]:
             raise ValueError("Trust-region mode must be ppo, spo or aspo.")
         rlx_logger.info(f"Using device: {jax.default_backend()}")
@@ -149,6 +160,8 @@ class FPO:
             tx=optimizer,
         )
         self.observation_normalizer_state = observation_normalizer.init_observation_normalizer_state(self.os_shape)
+        self.ema_policy_params = self.policy_state.params
+        self.completed_updates = jnp.zeros((), dtype=jnp.int32)
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -158,16 +171,19 @@ class FPO:
 
     def normalize(self, normalizer_state, observation):
         if self.normalize_observation:
-            return observation_normalizer.normalize_observation(normalizer_state, observation)
+            return observation_normalizer.normalize_observation(
+                normalizer_state, observation, self.observation_normalizer_epsilon
+            )
         return observation
 
 
     def compute_cfm_loss(self, policy_params, normalized_observation, action, epsilon, timestep):
         sample_shape = action.shape[:-1] + (self.nr_flow_samples_per_action,)
         observation = jnp.broadcast_to(normalized_observation[..., None, :], sample_shape + (normalized_observation.shape[-1],))
-        noisy_action = timestep * epsilon + (1.0 - timestep) * action[..., None, :]
+        scaled_action = action / self.actor_scale
+        noisy_action = timestep * epsilon + (1.0 - timestep) * scaled_action[..., None, :]
         network_prediction = self.policy.apply(policy_params, observation, noisy_action, timestep)
-        target = epsilon - action[..., None, :]
+        target = epsilon - scaled_action[..., None, :]
         return jnp.sum(
             (network_prediction - target) ** 2, axis=-1
         ) / jnp.sqrt(self.action_dimension)
@@ -190,6 +206,7 @@ class FPO:
             initial_action,
             (self.schedule_current, self.schedule_next),
         )
+        action *= self.actor_scale
         if not deterministic:
             action += self.action_perturb_std * jax.random.normal(
                 perturb_key, action.shape
@@ -225,20 +242,21 @@ class FPO:
             env_state = self.train_env.reset(jax.random.split(reset_key, self.nr_envs), False)
             policy_state = self.policy_state
             critic_state = self.critic_state
+            ema_policy_params = self.ema_policy_params
             normalizer_state = self.observation_normalizer_state
 
             def multi_iteration(carry, multi_iteration_step):
-                policy_state, critic_state, normalizer_state, env_state, key = carry
+                policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key = carry
 
                 def learning_iteration(carry, learning_iteration_step):
-                    policy_state, critic_state, normalizer_state, env_state, key = carry
+                    policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key = carry
 
                     def rollout_step(carry, _):
                         env_state, normalizer_state, key = carry
                         observation = env_state.next_observation
                         if self.normalize_observation:
                             normalizer_state = observation_normalizer.update_observation_normalizer(
-                                normalizer_state, observation
+                                normalizer_state, observation, self.observation_normalizer_max_count
                             )
                         key, action, processed_action, action_info = self.sample_action(
                             policy_state.params, normalizer_state, observation, key
@@ -445,7 +463,23 @@ class FPO:
                     (policy_state, critic_state), optimization_metrics = jax.lax.scan(
                         minibatch_update, (policy_state, critic_state), batch_indices
                     )
+                    combined_step = multi_iteration_step * self.nr_updates_per_multi_learning_iteration + learning_iteration_step + 1
+                    if self.ema_decay > 0.0:
+                        ema_policy_params = jax.tree.map(
+                            lambda ema_parameter, policy_parameter: jnp.where(
+                                combined_step == self.ema_warmup_steps,
+                                policy_parameter,
+                                jnp.where(
+                                    combined_step > self.ema_warmup_steps,
+                                    self.ema_decay * ema_parameter + (1.0 - self.ema_decay) * policy_parameter,
+                                    ema_parameter,
+                                ),
+                            ),
+                            ema_policy_params,
+                            policy_state.params,
+                        )
                     optimization_metrics["lr/learning_rate"] = policy_state.opt_state[0].hyperparams["learning_rate"]
+                    optimization_metrics["policy/ema_active"] = combined_step > self.ema_warmup_steps
                     optimization_metrics["v_value/explained_variance"] = 1.0 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
                     combined_metrics = tree.map_structure(
                         jnp.mean, {**infos, **optimization_metrics}
@@ -469,23 +503,31 @@ class FPO:
                         callback,
                         (combined_metrics, learning_iteration_step, multi_iteration_step, parallel_seed_id),
                     )
-                    return (policy_state, critic_state, normalizer_state, env_state, key), None
+                    return (policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key), None
 
                 carry, _ = jax.lax.scan(
                     learning_iteration,
-                    (policy_state, critic_state, normalizer_state, env_state, key),
+                    (policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key),
                     jnp.arange(self.nr_updates_per_multi_learning_iteration),
                 )
-                policy_state, critic_state, normalizer_state, env_state, key = carry
+                policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key = carry
+                completed_updates = (multi_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration
 
                 if self.save_model:
-                    jax.debug.callback(self.save, policy_state, critic_state, normalizer_state)
+                    jax.debug.callback(
+                        self.save,
+                        policy_state,
+                        critic_state,
+                        ema_policy_params,
+                        normalizer_state,
+                        completed_updates,
+                    )
 
-                return (policy_state, critic_state, normalizer_state, env_state, key), None
+                return (policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key), None
 
             jax.lax.scan(
                 multi_iteration,
-                (policy_state, critic_state, normalizer_state, env_state, key),
+                (policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key),
                 jnp.arange(self.nr_multi_learning_and_eval_save_iterations),
             )
 
@@ -524,11 +566,13 @@ class FPO:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
 
-    def save(self, policy_state, critic_state, normalizer_state):
+    def save(self, policy_state, critic_state, ema_policy_params, normalizer_state, completed_updates):
         checkpoint = {
             "policy": policy_state,
             "critic": critic_state,
+            "ema_policy": ema_policy_params,
             "observation_normalizer": normalizer_state,
+            "completed_updates": completed_updates,
         }
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
@@ -564,7 +608,9 @@ class FPO:
         target = {
             "policy": model.policy_state,
             "critic": model.critic_state,
+            "ema_policy": model.ema_policy_params,
             "observation_normalizer": model.observation_normalizer_state,
+            "completed_updates": model.completed_updates,
         }
         restore_args = orbax_utils.restore_args_from_target(target)
         checkpoint = orbax.checkpoint.PyTreeCheckpointer().restore(
@@ -572,7 +618,9 @@ class FPO:
         )
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
+        model.ema_policy_params = checkpoint["ema_policy"]
         model.observation_normalizer_state = checkpoint["observation_normalizer"]
+        model.completed_updates = checkpoint["completed_updates"]
         shutil.rmtree(checkpoint_directory)
         return model
 
@@ -581,13 +629,18 @@ class FPO:
         rlx_logger.info("Testing runs infinitely. The episodes parameter is ignored.")
         key, reset_key = jax.random.split(self.key)
         env_state = self.eval_env.reset(jax.random.split(reset_key, self.nr_envs), True)
+        policy_params = (
+            self.ema_policy_params
+            if self.ema_decay > 0.0 and int(self.completed_updates) > self.ema_warmup_steps
+            else self.policy_state.params
+        )
 
         @jax.jit
         def rollout(env_state, key):
             def step(carry, _):
                 env_state, key = carry
                 key, _, processed_action, _ = self.sample_action(
-                    self.policy_state.params,
+                    policy_params,
                     self.observation_normalizer_state,
                     env_state.next_observation,
                     key,

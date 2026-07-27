@@ -24,11 +24,14 @@ def get_config(algorithm_name):
     config.max_grad_norm = 1.0
     config.reward_scaling = 1.0
     config.normalize_observation = True
+    config.observation_normalizer_epsilon = 1e-2
+    config.observation_normalizer_max_count = 100_000_000
 
     config.flow_steps = 64
     config.timestep_embed_dim = 8
     config.policy_hidden_dims = (256, 256, 256)
     config.critic_hidden_dims = (768, 768, 768)
+    config.actor_scale = 1.0
     config.policy_output_scale = 1.0
     config.action_clip = 2.0
     config.nr_flow_samples_per_action = 32
@@ -39,6 +42,8 @@ def get_config(algorithm_name):
     config.cfm_difference_clamp_max = 10.0
     config.trust_region_mode = "aspo"
     config.advantage_clamp = 100.0
+    config.ema_decay = 0.95
+    config.ema_warmup_steps = 500
 
     config.evaluation_and_save_frequency = -1
     config.evaluation_active = False

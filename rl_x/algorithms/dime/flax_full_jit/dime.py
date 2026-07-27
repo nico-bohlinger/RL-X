@@ -91,6 +91,7 @@ class DIME:
             config.algorithm.enable_observation_normalization
         )
         self.normalizer_epsilon = config.algorithm.normalizer_epsilon
+        self.action_rescaling = config.algorithm.action_rescaling
         self.logging_frequency = config.algorithm.logging_frequency
         self.evaluation_and_save_frequency = (
             config.algorithm.evaluation_and_save_frequency
@@ -381,16 +382,10 @@ class DIME:
             - 0.5 * jnp.log(2.0 * jnp.pi),
             axis=-1,
         )
-        action = (
-            self.action_low
-            + 0.5
-            * (normalized_action + 1.0)
-            * (self.action_high - self.action_low)
-        )
         latent_path = jnp.moveaxis(latent_path, 0, -2)
         return (
             key,
-            action,
+            normalized_action,
             running_cost,
             jnp.zeros_like(running_cost),
             terminal_cost,
@@ -537,8 +532,17 @@ class DIME:
                     normalized_observation,
                     key,
                 )
+                if self.action_rescaling:
+                    processed_action = (
+                        self.action_low
+                        + 0.5
+                        * (action + 1.0)
+                        * (self.action_high - self.action_low)
+                    )
+                else:
+                    processed_action = action
                 env_state = self.train_env.step(
-                    env_state, action
+                    env_state, processed_action
                 )
                 normalized_next_observation = self.normalize(
                     normalizer_state,
@@ -1343,6 +1347,8 @@ class DIME:
                     key,
                     deterministic=True,
                 )
+                if self.action_rescaling:
+                    action = self.action_low + 0.5 * (action + 1.0) * (self.action_high - self.action_low)
                 env_state = self.eval_env.step(
                     env_state, action
                 )

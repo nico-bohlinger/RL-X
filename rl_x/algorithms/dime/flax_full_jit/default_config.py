@@ -42,6 +42,7 @@ def get_config(algorithm_name):
     config.max_grad_norm = 1.0
     config.enable_observation_normalization = False
     config.normalizer_epsilon = 1e-8
+    config.action_rescaling = False
 
     config.logging_frequency = 40960
     config.evaluation_and_save_frequency = 17_301_504

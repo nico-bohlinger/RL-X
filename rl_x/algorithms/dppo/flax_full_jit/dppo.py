@@ -57,6 +57,7 @@ class DPPO:
         self.normalize_reward = config.algorithm.normalize_reward
         self.reward_clip = config.algorithm.reward_clip
         self.normalize_observation = config.algorithm.normalize_observation
+        self.action_rescaling = config.algorithm.action_rescaling
         self.diffusion_steps = config.algorithm.diffusion_steps
         self.timestep_embed_dim = config.algorithm.timestep_embed_dim
         self.policy_hidden_dims = tuple(config.algorithm.policy_hidden_dims)
@@ -301,8 +302,6 @@ class DPPO:
         key, initial_key, noise_key = jax.random.split(key, 3)
         initial_action = jax.random.normal(initial_key, observation.shape[:-1] + self.as_shape)
         noise_path = jax.random.normal(noise_key, (self.diffusion_steps,) + initial_action.shape)
-        if deterministic:
-            noise_path = jnp.zeros_like(noise_path)
 
         def denoising_step(noisy_action, inputs):
             diffusion_timestep, noise = inputs
@@ -343,10 +342,13 @@ class DPPO:
                 * noisy_action
             )
             transition_std = jnp.maximum(
-                jnp.sqrt(
-                    self.posterior_variance[diffusion_timestep]
-                ),
-                self.denoising_std,
+                jnp.sqrt(self.posterior_variance[diffusion_timestep]),
+                1e-3 if deterministic else self.denoising_std,
+            )
+            transition_std = jnp.where(
+                deterministic & (diffusion_timestep == 0),
+                0.0,
+                transition_std,
             )
             next_action = transition_mean + transition_std * jnp.clip(
                 noise,
@@ -376,9 +378,12 @@ class DPPO:
             full_path[..., 1:, :],
             jnp.arange(self.diffusion_steps),
         )
-        processed_action = self.action_low + 0.5 * (
-            action + 1.0
-        ) * (self.action_high - self.action_low)
+        if self.action_rescaling:
+            processed_action = self.action_low + 0.5 * (
+                action + 1.0
+            ) * (self.action_high - self.action_low)
+        else:
+            processed_action = action
         return key, action, processed_action, full_path, behavior_log_likelihood
 
 
