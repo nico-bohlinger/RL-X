@@ -51,7 +51,7 @@ A framework for Reinforcement Learning research.
 - [Randomized Ensembled Double Q-Learning (REDQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/redq) in Flax
 - [Dropout Q-Functions (DroQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/droq) in Flax
 - [Bigger, Regularized, Optimistic (BRO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/bro) in Flax
-- [CrossQ](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/crossq) in Flax
+- [CrossQ](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/crossq) in Flax and PyTorch
 - [XQC](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/xqc) in Flax and PyTorch
 - [Simplicity Bias (SimBa)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simba) in Flax
 - [Simplicity Bias V2 (SimBaV2)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simbav2) in Flax
