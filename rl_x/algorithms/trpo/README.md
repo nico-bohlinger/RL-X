@@ -12,6 +12,7 @@ On how the algorithm works, refer to the [Resources](#resources) section.
 
 **Supported frameworks**
 - JAX (Flax)
+- PyTorch
 - JAX (Flax, full JIT)
 
 **Supported action space, observation space and data interface types**
@@ -19,6 +20,7 @@ On how the algorithm works, refer to the [Resources](#resources) section.
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) full JIT | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| PyTorch | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 
 ## Resources
