@@ -28,7 +28,7 @@ A framework for Reinforcement Learning research.
 
 ### Implemented Algorithms
 - [Proximal Policy Optimization (PPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo) in PyTorch, Flax
-- [Proximal Policy Optimization + Differentiable Trust Region Layers (PPO+DTRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl) in Flax
+- [Proximal Policy Optimization + Differentiable Trust Region Layers (PPO+DTRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl) in PyTorch and Flax
 - [Proximal Policy Optimization + Gated Recurrent Unit (PPO+GRU)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_gru) in PyTorch and Flax
 - [Proximal Policy Optimization + Long Short-Term Memory (PPO+LSTM)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_lstm) in PyTorch and Flax
 - [Proximal Policy Optimization + Transformer (PPO+Transformer)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_transformer) in Flax
