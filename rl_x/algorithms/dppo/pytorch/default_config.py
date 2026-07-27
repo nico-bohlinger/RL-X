@@ -5,7 +5,9 @@ def get_config(algorithm_name):
     config = config_dict.ConfigDict()
 
     config.name = algorithm_name
-    config.device = "gpu"
+    config.device = "gpu"  # cpu, gpu, mps
+    config.compile_mode = "default"
+    config.bf16_mixed_precision_training = False
     config.total_timesteps = 1e9
     config.policy_learning_rate = 1e-4
     config.critic_learning_rate = 1e-3
