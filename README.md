@@ -50,7 +50,7 @@ A framework for Reinforcement Learning research.
 - [Flash Soft Actor Critic (FlashSAC)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/flashsac) in PyTorch, Flax
 - [Randomized Ensembled Double Q-Learning (REDQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/redq) in Flax
 - [Dropout Q-Functions (DroQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/droq) in Flax
-- [Bigger, Regularized, Optimistic (BRO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/bro) in Flax
+- [Bigger, Regularized, Optimistic (BRO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/bro) in Flax and PyTorch
 - [CrossQ](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/crossq) in Flax and PyTorch
 - [XQC](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/xqc) in Flax and PyTorch
 - [Simplicity Bias (SimBa)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simba) in Flax and PyTorch

@@ -4,15 +4,15 @@ import torch
 
 class ReplayBuffer:
     def __init__(self, buffer_size, nr_envs, observation_shape, action_shape, rng, device):
-        self.buffer_size = buffer_size
+        self.buffer_size = buffer_size // nr_envs
         self.nr_envs = nr_envs
         self.rng = rng
         self.device = device
-        self.states = np.zeros((buffer_size, nr_envs) + observation_shape, dtype=np.float32)
-        self.next_states = np.zeros((buffer_size, nr_envs) + observation_shape, dtype=np.float32)
-        self.actions = np.zeros((buffer_size, nr_envs) + action_shape, dtype=np.float32)
-        self.rewards = np.zeros((buffer_size, nr_envs), dtype=np.float32)
-        self.terminations = np.zeros((buffer_size, nr_envs), dtype=np.float32)
+        self.states = np.zeros((self.buffer_size, nr_envs) + observation_shape, dtype=np.float32)
+        self.next_states = np.zeros((self.buffer_size, nr_envs) + observation_shape, dtype=np.float32)
+        self.actions = np.zeros((self.buffer_size, nr_envs) + action_shape, dtype=np.float32)
+        self.rewards = np.zeros((self.buffer_size, nr_envs), dtype=np.float32)
+        self.terminations = np.zeros((self.buffer_size, nr_envs), dtype=np.float32)
         self.pos = 0
         self.full = False
 
