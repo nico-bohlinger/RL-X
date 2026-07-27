@@ -52,7 +52,7 @@ A framework for Reinforcement Learning research.
 - [Dropout Q-Functions (DroQ)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/droq) in Flax
 - [Bigger, Regularized, Optimistic (BRO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/bro) in Flax
 - [CrossQ](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/crossq) in Flax
-- [XQC](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/xqc) in Flax
+- [XQC](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/xqc) in Flax and PyTorch
 - [Simplicity Bias (SimBa)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simba) in Flax
 - [Simplicity Bias V2 (SimBaV2)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simbav2) in Flax
 - [Truncated Quantile Critics (TQC)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/tqc) in Flax
