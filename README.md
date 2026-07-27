@@ -40,7 +40,7 @@ A framework for Reinforcement Learning research.
 - [Simple Policy Optimization (SPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/spo) in Flax and PyTorch
 - [Flow Policy Optimization (FPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fpo) in Flax and PyTorch
 - [Diffusion Policy Policy Optimization (DPPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dppo) in Flax and PyTorch
-- [Diffusion Models for Maximum Entropy Reinforcement Learning (DIME)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dime) in Flax
+- [Diffusion Models for Maximum Entropy Reinforcement Learning (DIME)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dime) in Flax and PyTorch
 - [Relative Entropy Pathwise Policy Optimization (REPPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/reppo) in PyTorch, Flax
 - [Deep Deterministic Policy Gradient (DDPG)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ddpg) in Flax
 - [Twin Delayed Deep Deterministic Gradient (TD3)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/td3) in Flax
