@@ -37,7 +37,7 @@ A framework for Reinforcement Learning research.
 - [Proximal Policy Optimization + Memory Actions (PPO+MemoryActions)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_memory_actions) in Flax
 - [Early Stopping Policy Optimization (ESPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/espo) in PyTorch, Flax
 - [Trust Region Policy Optimization (TRPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trpo) in Flax and PyTorch
-- [Simple Policy Optimization (SPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/spo) in Flax
+- [Simple Policy Optimization (SPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/spo) in Flax and PyTorch
 - [Flow Policy Optimization (FPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fpo) in Flax
 - [Diffusion Policy Policy Optimization (DPPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dppo) in Flax
 - [Diffusion Models for Maximum Entropy Reinforcement Learning (DIME)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dime) in Flax
