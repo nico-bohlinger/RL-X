@@ -4,5 +4,5 @@ from rl_x.algorithms.ppo_gru.flax.default_config import get_config
 from rl_x.algorithms.ppo_gru.flax.general_properties import GeneralProperties
 
 
-PPO_GRU_FLAX_FULL_JIT = extract_algorithm_name_from_file(__file__)
-register_algorithm(PPO_GRU_FLAX_FULL_JIT, get_config, PPO_GRU, GeneralProperties)
+PPO_GRU_FLAX = extract_algorithm_name_from_file(__file__)
+register_algorithm(PPO_GRU_FLAX, get_config, PPO_GRU, GeneralProperties)
