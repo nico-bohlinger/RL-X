@@ -51,6 +51,7 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/simbav2/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simbav2/README.md): Implementation details of the Simplicity Bias V2 (SimBaV2) algorithm
 - [```/rl_x/algorithms/spo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/spo/README.md): Implementation details of Simple Policy Optimization (SPO)
 - [```/rl_x/algorithms/td3/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/td3/README.md): Implementation details of the Twin Delayed Deep Deterministic Gradient (TD3) algorithm
+- [```/rl_x/algorithms/trpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trpo/README.md): Implementation details of Trust Region Policy Optimization (TRPO)
 - [```/rl_x/algorithms/tqc/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/tqc/README.md): Implementation details of the Truncated Quantile Critics (TQC) algorithm
 - [```/rl_x/algorithms/xqc/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/xqc/README.md): Implementation details of the XQC algorithm
 - [```/rl_x/environments/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/README.md): Information on the folder structure of environments, how to add new environments and how to mix and match them with algorithms
