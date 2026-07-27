@@ -89,19 +89,13 @@ class SPO:
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, state),
-            tx=optax.chain(
-                optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
-            )
+            tx=optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate))
         )
 
         self.critic_state = TrainState.create(
             apply_fn=self.critic.apply,
             params=self.critic.init(critic_key, state),
-            tx=optax.chain(
-                optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate),
-            )
+            tx=optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate))
         )
 
         self.observation_normalizer_state = observation_normalizer.init_observation_normalizer_state(self.nr_envs, self.os_shape)
@@ -222,17 +216,10 @@ class SPO:
                     batch_values[minibatch_indices]
                 )
 
-                combined_gradient_norm = jnp.sqrt(
-                    optax.global_norm(policy_gradients) ** 2
-                    + optax.global_norm(critic_gradients) ** 2
-                )
+                combined_gradient_norm = jnp.sqrt(optax.global_norm(policy_gradients) ** 2 + optax.global_norm(critic_gradients) ** 2)
                 gradient_scale = jnp.minimum(1.0, self.max_grad_norm / (combined_gradient_norm + 1e-6))
-                policy_state = policy_state.apply_gradients(
-                    grads=tree.map_structure(lambda gradient: gradient * gradient_scale, policy_gradients)
-                )
-                critic_state = critic_state.apply_gradients(
-                    grads=tree.map_structure(lambda gradient: gradient * gradient_scale, critic_gradients)
-                )
+                policy_state = policy_state.apply_gradients(grads=tree.map_structure(lambda gradient: gradient * gradient_scale, policy_gradients))
+                critic_state = critic_state.apply_gradients(grads=tree.map_structure(lambda gradient: gradient * gradient_scale, critic_gradients))
 
                 metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
                 metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)

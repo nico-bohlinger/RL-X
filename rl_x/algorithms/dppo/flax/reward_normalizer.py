@@ -17,9 +17,7 @@ def normalize_reward(state, reward, terminated, truncated, gamma, reward_clip):
         previous_return, previous_done = carry
         reward_t, terminated_t, truncated_t = inputs
         return_t = reward_t + (1.0 - previous_done) * gamma * previous_return
-        done_t = jnp.maximum(
-            terminated_t, truncated_t
-        ).astype(reward_t.dtype)
+        done_t = jnp.maximum(terminated_t, truncated_t).astype(reward_t.dtype)
         return (return_t, done_t), return_t
 
     (last_return, last_done), discounted_returns = jax.lax.scan(
@@ -46,9 +44,5 @@ def normalize_reward(state, reward, terminated, truncated, gamma, reward_clip):
         "variance": variance,
         "count": total_count,
     }
-    normalized_reward = jnp.clip(
-        reward / jnp.sqrt(variance + 1e-8),
-        -reward_clip,
-        reward_clip,
-    )
+    normalized_reward = jnp.clip(reward / jnp.sqrt(variance + 1e-8), -reward_clip, reward_clip)
     return state, normalized_reward

@@ -87,35 +87,15 @@ class DPPO:
         self.critic_observation_indices = getattr(self.train_env, "critic_observation_indices", jnp.arange(self.os_shape[0]))
         self.action_low = jnp.asarray(self.train_env.single_action_space.low)
         self.action_high = jnp.asarray(self.train_env.single_action_space.high)
-        cosine_positions = jnp.linspace(
-            0.0, self.diffusion_steps + 1, self.diffusion_steps + 1
-        )
-        alpha_cumulative = jnp.cos(
-            (
-                cosine_positions / (self.diffusion_steps + 1)
-                + 0.008
-            )
-            / 1.008
-            * jnp.pi
-            * 0.5
-        ) ** 2
+        cosine_positions = jnp.linspace(0.0, self.diffusion_steps + 1, self.diffusion_steps + 1)
+        alpha_cumulative = jnp.cos((cosine_positions / (self.diffusion_steps + 1) + 0.008) / 1.008 * jnp.pi * 0.5) ** 2
         alpha_cumulative /= alpha_cumulative[0]
-        self.betas = jnp.clip(
-            1.0 - alpha_cumulative[1:] / alpha_cumulative[:-1],
-            0.0,
-            0.999,
-        )
+        self.betas = jnp.clip(1.0 - alpha_cumulative[1:] / alpha_cumulative[:-1], 0.0, 0.999)
         self.alphas = 1.0 - self.betas
         self.alphas_cumulative = jnp.cumprod(self.alphas)
-        self.alphas_cumulative_previous = jnp.concatenate(
-            [jnp.ones(1), self.alphas_cumulative[:-1]]
-        )
-        self.sqrt_reciprocal_alphas_cumulative = jnp.sqrt(
-            1.0 / self.alphas_cumulative
-        )
-        self.sqrt_reciprocal_minus_one_alphas_cumulative = jnp.sqrt(
-            1.0 / self.alphas_cumulative - 1.0
-        )
+        self.alphas_cumulative_previous = jnp.concatenate([jnp.ones(1), self.alphas_cumulative[:-1]])
+        self.sqrt_reciprocal_alphas_cumulative = jnp.sqrt(1.0 / self.alphas_cumulative)
+        self.sqrt_reciprocal_minus_one_alphas_cumulative = jnp.sqrt(1.0 / self.alphas_cumulative - 1.0)
         self.posterior_variance = (
             self.betas
             * (1.0 - self.alphas_cumulative_previous)
@@ -176,21 +156,11 @@ class DPPO:
         if self.max_grad_norm != -1.0:
             policy_optimizer = optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adam)(
-                    learning_rate=policy_learning_rate
-                ),
+                optax.inject_hyperparams(optax.adam)(learning_rate=policy_learning_rate),
             )
         else:
-            policy_optimizer = optax.chain(
-                optax.inject_hyperparams(optax.adam)(
-                    learning_rate=policy_learning_rate
-                ),
-            )
-        critic_optimizer = optax.chain(
-            optax.inject_hyperparams(optax.adam)(
-                learning_rate=self.critic_learning_rate
-            ),
-        )
+            policy_optimizer = optax.chain(optax.inject_hyperparams(optax.adam)(learning_rate=policy_learning_rate))
+        critic_optimizer = optax.chain(optax.inject_hyperparams(optax.adam)(learning_rate=self.critic_learning_rate))
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, dummy_observation, dummy_action, dummy_timestep),
@@ -232,16 +202,8 @@ class DPPO:
             )
         diffusion_timestep = self.diffusion_steps - denoising_index - 1
         timestep = diffusion_timestep[..., None].astype(jnp.float32)
-        timestep = jnp.broadcast_to(
-            timestep,
-            path_current.shape[:-1] + (1,),
-        )
-        predicted_noise = self.policy.apply(
-            policy_params,
-            normalized_observation,
-            path_current,
-            timestep,
-        )
+        timestep = jnp.broadcast_to(timestep, path_current.shape[:-1] + (1,))
+        predicted_noise = self.policy.apply(policy_params, normalized_observation, path_current, timestep)
         reconstructed_action = (
             self.sqrt_reciprocal_alphas_cumulative[
                 diffusion_timestep
@@ -252,11 +214,7 @@ class DPPO:
             ][..., None]
             * predicted_noise
         )
-        reconstructed_action = jnp.clip(
-            reconstructed_action,
-            -self.denoised_clip_value,
-            self.denoised_clip_value,
-        )
+        reconstructed_action = jnp.clip(reconstructed_action, -self.denoised_clip_value, self.denoised_clip_value)
         transition_mean = (
             self.posterior_mean_coefficient_1[
                 diffusion_timestep
@@ -267,21 +225,14 @@ class DPPO:
             ][..., None]
             * path_current
         )
-        transition_std = jnp.maximum(
-            jnp.sqrt(
-                self.posterior_variance[diffusion_timestep]
-            )[..., None],
-            self.denoising_std,
-        )
+        transition_std = jnp.maximum(jnp.sqrt(self.posterior_variance[diffusion_timestep])[..., None], self.denoising_std)
         standardized_noise = (
             path_next - transition_mean
         ) / transition_std
         return (
             -0.5 * standardized_noise ** 2
             - 0.5
-            * jnp.log(
-                2.0 * jnp.pi * transition_std ** 2
-            )
+            * jnp.log(2.0 * jnp.pi * transition_std ** 2)
         )
 
 
@@ -293,17 +244,8 @@ class DPPO:
 
         def denoising_step(noisy_action, inputs):
             diffusion_timestep, noise = inputs
-            timestep = jnp.full(
-                observation.shape[:-1] + (1,),
-                diffusion_timestep,
-                dtype=jnp.float32,
-            )
-            predicted_noise = self.policy.apply(
-                policy_params,
-                normalized_observation,
-                noisy_action,
-                timestep,
-            )
+            timestep = jnp.full(observation.shape[:-1] + (1,), diffusion_timestep, dtype=jnp.float32)
+            predicted_noise = self.policy.apply(policy_params, normalized_observation, noisy_action, timestep)
             reconstructed_action = (
                 self.sqrt_reciprocal_alphas_cumulative[
                     diffusion_timestep
@@ -314,11 +256,7 @@ class DPPO:
                 ]
                 * predicted_noise
             )
-            reconstructed_action = jnp.clip(
-                reconstructed_action,
-                -self.denoised_clip_value,
-                self.denoised_clip_value,
-            )
+            reconstructed_action = jnp.clip(reconstructed_action, -self.denoised_clip_value, self.denoised_clip_value)
             transition_mean = (
                 self.posterior_mean_coefficient_1[
                     diffusion_timestep
@@ -329,34 +267,12 @@ class DPPO:
                 ]
                 * noisy_action
             )
-            transition_std = jnp.maximum(
-                jnp.sqrt(self.posterior_variance[diffusion_timestep]),
-                1e-3 if deterministic else self.denoising_std,
-            )
-            transition_std = jnp.where(
-                deterministic & (diffusion_timestep == 0),
-                0.0,
-                transition_std,
-            )
-            next_action = transition_mean + transition_std * jnp.clip(
-                noise,
-                -self.noise_clip_value,
-                self.noise_clip_value,
-            )
+            transition_std = jnp.maximum(jnp.sqrt(self.posterior_variance[diffusion_timestep]), 1e-3 if deterministic else self.denoising_std)
+            transition_std = jnp.where(deterministic & (diffusion_timestep == 0), 0.0, transition_std)
+            next_action = transition_mean + transition_std * jnp.clip(noise, -self.noise_clip_value, self.noise_clip_value)
             return next_action, noisy_action
 
-        action, path = jax.lax.scan(
-            denoising_step,
-            initial_action,
-            (
-                jnp.arange(
-                    self.diffusion_steps - 1,
-                    -1,
-                    -1,
-                ),
-                noise_path,
-            ),
-        )
+        action, path = jax.lax.scan(denoising_step, initial_action, (jnp.arange(self.diffusion_steps - 1, -1, -1), noise_path))
         path = jnp.moveaxis(path, 0, -2)
         full_path = jnp.concatenate([path, action[..., None, :]], axis=-2)
         behavior_log_likelihood = self.compute_transition_log_likelihood(
@@ -406,9 +322,7 @@ class DPPO:
             batch_states = states.reshape((-1,) + self.os_shape)
             batch_actions = actions.reshape((-1,) + self.as_shape)
             batch_full_paths = full_paths.reshape((-1, self.diffusion_steps + 1) + self.as_shape)
-            batch_behavior_log_likelihoods = behavior_log_likelihoods.reshape(
-                (-1, self.diffusion_steps, self.action_dimension)
-            )
+            batch_behavior_log_likelihoods = behavior_log_likelihoods.reshape((-1, self.diffusion_steps, self.action_dimension))
             batch_advantages = advantages.reshape(-1)
             batch_returns = returns.reshape(-1)
 
@@ -420,12 +334,8 @@ class DPPO:
                     full_path_b[..., 1, :],
                     denoising_index_b,
                 )
-                current_log_likelihood = jnp.clip(
-                    current_log_likelihood, self.log_probability_min, self.log_probability_max
-                )
-                behavior_log_likelihood_b = jnp.clip(
-                    behavior_log_likelihood_b, self.log_probability_min, self.log_probability_max
-                )
+                current_log_likelihood = jnp.clip(current_log_likelihood, self.log_probability_min, self.log_probability_max)
+                behavior_log_likelihood_b = jnp.clip(behavior_log_likelihood_b, self.log_probability_min, self.log_probability_max)
                 log_ratio = jnp.mean(current_log_likelihood - behavior_log_likelihood_b, axis=-1)
                 ratio = jnp.exp(log_ratio)
                 normalized_advantage = (advantage_b - jnp.mean(advantage_b)) / (jnp.std(advantage_b) + 1e-8)
@@ -444,9 +354,7 @@ class DPPO:
                     jnp.exp(self.clipping_epsilon_rate) - 1.0
                 )
                 surrogate = ratio * normalized_advantage
-                clipped_surrogate = jnp.clip(
-                    ratio, 1.0 - clipping_epsilon, 1.0 + clipping_epsilon
-                ) * normalized_advantage
+                clipped_surrogate = jnp.clip(ratio, 1.0 - clipping_epsilon, 1.0 + clipping_epsilon) * normalized_advantage
                 policy_loss = -jnp.mean(jnp.minimum(surrogate, clipped_surrogate))
                 value = self.critic.apply(critic_params, state_b).squeeze(-1)
                 critic_loss = 0.5 * jnp.mean((value - return_b) ** 2)
@@ -468,9 +376,7 @@ class DPPO:
             grad_loss_fn = jax.value_and_grad(loss_fn, argnums=(0, 1), has_aux=True)
             key, shuffle_key = jax.random.split(key)
             batch_indices = jnp.tile(jnp.arange(self.optimization_batch_size), (self.nr_epochs, 1))
-            batch_indices = jax.random.permutation(
-                shuffle_key, batch_indices, axis=1, independent=True
-            ).reshape((self.nr_epochs * self.nr_minibatches, self.minibatch_size))
+            batch_indices = jax.random.permutation(shuffle_key, batch_indices, axis=1, independent=True).reshape((self.nr_epochs * self.nr_minibatches, self.minibatch_size))
 
             def minibatch_update(carry, minibatch_indices):
                 policy_state, critic_state, update_active = carry
@@ -521,9 +427,7 @@ class DPPO:
                         "optimization/update_active": jnp.zeros(()),
                     }
 
-                (policy_state, critic_state), metrics = jax.lax.cond(
-                    update_active, perform_update, skip_update, (policy_state, critic_state)
-                )
+                (policy_state, critic_state), metrics = jax.lax.cond(update_active, perform_update, skip_update, (policy_state, critic_state))
                 if self.target_kl is not None:
                     update_active &= metrics["policy_ratio/approx_kl"] <= self.target_kl
                 return (policy_state, critic_state, update_active), metrics
@@ -547,19 +451,15 @@ class DPPO:
             states = np.zeros((self.nr_steps, self.nr_envs) + self.os_shape, dtype=np.float32)
             next_states = np.zeros_like(states)
             actions = np.zeros((self.nr_steps, self.nr_envs) + self.as_shape, dtype=np.float32)
-            full_paths = np.zeros(
-                (self.nr_steps, self.nr_envs, self.diffusion_steps + 1) + self.as_shape,
-                dtype=np.float32,
-            )
-            behavior_log_likelihoods = np.zeros(
-                (self.nr_steps, self.nr_envs, self.diffusion_steps, self.action_dimension),
-                dtype=np.float32,
-            )
+            full_paths = np.zeros((self.nr_steps, self.nr_envs, self.diffusion_steps + 1) + self.as_shape, dtype=np.float32)
+            behavior_log_likelihoods = np.zeros((self.nr_steps, self.nr_envs, self.diffusion_steps, self.action_dimension), dtype=np.float32)
             rewards = np.zeros((self.nr_steps, self.nr_envs), dtype=np.float32)
             values = np.zeros_like(rewards)
             terminations = np.zeros_like(rewards)
             truncations = np.zeros_like(rewards)
             step_info_collection = {}
+
+            # Acting
             for step in range(self.nr_steps):
                 if self.normalize_observation:
                     self.observation_normalizer_state = observation_normalizer.update_observation_normalizer(
@@ -589,6 +489,7 @@ class DPPO:
                 state = next_state
                 global_step += self.nr_envs
 
+            # Calculating advantages and returns
             normalized_rewards = rewards
             if self.normalize_reward:
                 self.reward_normalizer_state, normalized_rewards = reward_normalizer.normalize_reward(
@@ -599,14 +500,8 @@ class DPPO:
                     self.gamma,
                     self.reward_clip,
                 )
-            advantages, returns = calculate_advantages(
-                self.critic_state,
-                next_states,
-                normalized_rewards,
-                values,
-                terminations,
-                truncations,
-            )
+            advantages, returns = calculate_advantages(self.critic_state, next_states, normalized_rewards, values, terminations, truncations)
+            # Optimizing
             self.policy_state, self.critic_state, metrics, self.key = update(
                 self.policy_state,
                 self.critic_state,
@@ -626,11 +521,14 @@ class DPPO:
             for name, values_collection in step_info_collection.items():
                 metric_group = "rollout" if name in ["episode_return", "episode_length"] else "env_info"
                 metrics[f"{metric_group}/{name}"] = np.mean(values_collection)
+
+            # Logging
             self.start_logging(global_step)
             for name, value in metrics.items():
                 self.log(name, np.asarray(value), global_step)
             self.end_logging()
 
+            # Evaluating
             if self.evaluation_frequency != -1 and global_step % self.evaluation_frequency == 0:
                 eval_state, unused_info = self.eval_env.reset()
                 completed_episodes = 0
@@ -645,13 +543,9 @@ class DPPO:
                     eval_state, unused_reward, eval_terminated, eval_truncated, unused_info = self.eval_env.step(jax.device_get(eval_action))
                     completed_episodes += int(np.sum(eval_terminated | eval_truncated))
 
+        # Saving
         if self.save_model:
-            self.save(
-                self.policy_state,
-                self.critic_state,
-                self.observation_normalizer_state,
-                self.reward_normalizer_state,
-            )
+            self.save(self.policy_state, self.critic_state, self.observation_normalizer_state, self.reward_normalizer_state)
 
 
     def log(self, name, value, step):
@@ -661,9 +555,7 @@ class DPPO:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
             value = np.format_float_positional(value, trim="-")
-            rlx_logger.info(
-                f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │", flush=False
-            )
+            rlx_logger.info(f"│ {name.ljust(30)}│ {str(value).ljust(14)[:14]} │", flush=False)
 
 
     def start_logging(self, step):
@@ -696,26 +588,14 @@ class DPPO:
             "reward_normalizer": reward_normalizer_state,
         }
         save_args = orbax_utils.save_args_from_target(checkpoint)
-        self.latest_model_checkpointer.save(
-            f"{self.save_path}/tmp", checkpoint, save_args=save_args
-        )
+        self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
         with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as stream:
             json.dump(self.config.algorithm.to_dict(), stream)
-        shutil.make_archive(
-            f"{self.save_path}/{self.latest_model_file_name}",
-            "zip",
-            f"{self.save_path}/tmp",
-        )
-        os.rename(
-            f"{self.save_path}/{self.latest_model_file_name}.zip",
-            f"{self.save_path}/{self.latest_model_file_name}",
-        )
+        shutil.make_archive(f"{self.save_path}/{self.latest_model_file_name}", "zip", f"{self.save_path}/tmp")
+        os.rename(f"{self.save_path}/{self.latest_model_file_name}.zip", f"{self.save_path}/{self.latest_model_file_name}")
         shutil.rmtree(f"{self.save_path}/tmp")
         if self.track_wandb:
-            wandb.save(
-                f"{self.save_path}/{self.latest_model_file_name}",
-                base_path=self.save_path,
-            )
+            wandb.save(f"{self.save_path}/{self.latest_model_file_name}", base_path=self.save_path)
 
 
     @staticmethod
@@ -730,11 +610,7 @@ class DPPO:
         split_path = config.runner.load_model.split("/")
         checkpoint_directory = os.path.abspath("/".join(split_path[:-1]))
         checkpoint_file_name = split_path[-1]
-        shutil.unpack_archive(
-            f"{checkpoint_directory}/{checkpoint_file_name}",
-            f"{checkpoint_directory}/tmp",
-            "zip",
-        )
+        shutil.unpack_archive(f"{checkpoint_directory}/{checkpoint_file_name}", f"{checkpoint_directory}/tmp", "zip")
         checkpoint_directory = f"{checkpoint_directory}/tmp"
         with open(f"{checkpoint_directory}/config_algorithm.json") as stream:
             loaded_algorithm_config = json.load(stream)
@@ -752,9 +628,7 @@ class DPPO:
             "reward_normalizer": model.reward_normalizer_state,
         }
         restore_args = orbax_utils.restore_args_from_target(target)
-        checkpoint = orbax.checkpoint.PyTreeCheckpointer().restore(
-            checkpoint_directory, item=target, restore_args=restore_args
-        )
+        checkpoint = orbax.checkpoint.PyTreeCheckpointer().restore(checkpoint_directory, item=target, restore_args=restore_args)
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
         model.observation_normalizer_state = checkpoint["observation_normalizer"]

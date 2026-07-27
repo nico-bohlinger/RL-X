@@ -154,11 +154,7 @@ class FPO:
             params=self.policy.init(policy_key, dummy_observation, dummy_action, dummy_timestep),
             tx=optimizer,
         )
-        self.critic_state = TrainState.create(
-            apply_fn=self.critic.apply,
-            params=self.critic.init(critic_key, dummy_observation),
-            tx=optimizer,
-        )
+        self.critic_state = TrainState.create(apply_fn=self.critic.apply, params=self.critic.init(critic_key, dummy_observation), tx=optimizer)
         self.observation_normalizer_state = observation_normalizer.init_observation_normalizer_state(self.os_shape)
         self.ema_policy_params = self.policy_state.params
         self.completed_updates = jnp.zeros((), dtype=jnp.int32)
@@ -171,9 +167,7 @@ class FPO:
 
     def normalize(self, normalizer_state, observation):
         if self.normalize_observation:
-            return observation_normalizer.normalize_observation(
-                normalizer_state, observation, self.observation_normalizer_epsilon
-            )
+            return observation_normalizer.normalize_observation(normalizer_state, observation, self.observation_normalizer_epsilon)
         return observation
 
 
@@ -184,9 +178,7 @@ class FPO:
         noisy_action = timestep * epsilon + (1.0 - timestep) * scaled_action[..., None, :]
         network_prediction = self.policy.apply(policy_params, observation, noisy_action, timestep)
         target = epsilon - scaled_action[..., None, :]
-        return jnp.sum(
-            (network_prediction - target) ** 2, axis=-1
-        ) / jnp.sqrt(self.action_dimension)
+        return jnp.sum((network_prediction - target) ** 2, axis=-1) / jnp.sqrt(self.action_dimension)
 
 
     def sample_action(self, policy_params, normalizer_state, observation, key, deterministic=False):
@@ -201,38 +193,24 @@ class FPO:
             next_action = noisy_action + (next_timestep - current_timestep) * velocity
             return next_action, None
 
-        action, _ = jax.lax.scan(
-            euler_step,
-            initial_action,
-            (self.schedule_current, self.schedule_next),
-        )
+        action, _ = jax.lax.scan(euler_step, initial_action, (self.schedule_current, self.schedule_next))
         action *= self.actor_scale
         if not deterministic:
-            action += self.action_perturb_std * jax.random.normal(
-                perturb_key, action.shape
-            )
+            action += self.action_perturb_std * jax.random.normal(perturb_key, action.shape)
 
         loss_shape = observation.shape[:-1] + (self.nr_flow_samples_per_action,)
         epsilon_key, timestep_key = jax.random.split(loss_key)
         epsilon = jax.random.normal(epsilon_key, loss_shape + self.as_shape)
-        uniform_timestep = jax.random.uniform(
-            timestep_key, loss_shape + (1,)
-        )
+        uniform_timestep = jax.random.uniform(timestep_key, loss_shape + (1,))
         timestep = 0.005 + 0.99 * (
             1.0
             - (1.0 - uniform_timestep)
             ** (1.0 / self.timestep_inverse_cdf_beta)
         )
-        initial_statistic = self.compute_cfm_loss(
-            policy_params, normalized_observation, action, epsilon, timestep
-        )
+        initial_statistic = self.compute_cfm_loss(policy_params, normalized_observation, action, epsilon, timestep)
         action_info = (epsilon, timestep, initial_statistic)
 
-        processed_action = jnp.clip(
-            action,
-            -self.action_clip,
-            self.action_clip,
-        )
+        processed_action = jnp.clip(action, -self.action_clip, self.action_clip)
         return key, action, processed_action, action_info
 
 
@@ -251,6 +229,7 @@ class FPO:
                 def learning_iteration(carry, learning_iteration_step):
                     policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key = carry
 
+                    # Acting
                     def rollout_step(carry, _):
                         env_state, normalizer_state, key = carry
                         observation = env_state.next_observation
@@ -258,15 +237,11 @@ class FPO:
                             normalizer_state = observation_normalizer.update_observation_normalizer(
                                 normalizer_state, observation, self.observation_normalizer_max_count
                             )
-                        key, action, processed_action, action_info = self.sample_action(
-                            policy_state.params, normalizer_state, observation, key
-                        )
+                        key, action, processed_action, action_info = self.sample_action(policy_state.params, normalizer_state, observation, key)
                         normalized_observation = self.normalize(normalizer_state, observation)
                         value = self.critic.apply(critic_state.params, normalized_observation).squeeze(-1)
                         env_state = self.train_env.step(env_state, processed_action)
-                        normalized_next_observation = self.normalize(
-                            normalizer_state, env_state.actual_next_observation
-                        )
+                        normalized_next_observation = self.normalize(normalizer_state, env_state.actual_next_observation)
                         transition = (
                             normalized_observation,
                             normalized_next_observation,
@@ -285,12 +260,11 @@ class FPO:
                                 env_state = jax.experimental.io_callback(self.train_env.render, env_state, env_state)
                         return (env_state, normalizer_state, key), transition
 
-                    (env_state, normalizer_state, key), batch = jax.lax.scan(
-                        rollout_step, (env_state, normalizer_state, key), None, self.nr_steps
-                    )
+                    (env_state, normalizer_state, key), batch = jax.lax.scan(rollout_step, (env_state, normalizer_state, key), None, self.nr_steps)
                     states, next_states, actions, action_info, rewards, values, terminations, truncations, infos = batch
                     next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
 
+                    # Calculating advantages and returns
                     def advantage_step(next_advantage, inputs):
                         reward, value, next_value, terminated, truncated = inputs
                         delta = self.reward_scaling * reward + self.gamma * (1.0 - terminated) * next_value - value
@@ -310,51 +284,32 @@ class FPO:
                     batch_actions = actions.reshape((-1,) + self.as_shape)
                     batch_advantages = advantages.reshape(-1)
                     batch_returns = returns.reshape(-1)
-                    batch_epsilon = action_info[0].reshape(
-                        (-1, self.nr_flow_samples_per_action) + self.as_shape
-                    )
+                    batch_epsilon = action_info[0].reshape((-1, self.nr_flow_samples_per_action) + self.as_shape)
                     batch_timestep = action_info[1].reshape((-1, self.nr_flow_samples_per_action, 1))
                     batch_initial_statistic = action_info[2].reshape((-1, self.nr_flow_samples_per_action))
                     batch_advantages = (
                         batch_advantages - jnp.mean(batch_advantages)
                     ) / (jnp.std(batch_advantages) + 1e-8)
-                    batch_advantages = jnp.clip(
-                        batch_advantages,
-                        -self.advantage_clamp,
-                        self.advantage_clamp,
-                    )
+                    batch_advantages = jnp.clip(batch_advantages, -self.advantage_clamp, self.advantage_clamp)
 
+                    # Optimizing
                     def loss_fn(policy_params, critic_params, state_b, action_b, advantage_b, return_b,
                                 epsilon_b, timestep_b, initial_statistic_b):
-                        current_statistic = self.compute_cfm_loss(
-                            policy_params, state_b, action_b, epsilon_b, timestep_b
-                        )
-                        initial_statistic_b = jnp.minimum(
-                            initial_statistic_b, self.cfm_loss_clamp
-                        )
-                        current_statistic = jnp.minimum(
-                            current_statistic, self.cfm_loss_clamp
-                        )
+                        current_statistic = self.compute_cfm_loss(policy_params, state_b, action_b, epsilon_b, timestep_b)
+                        initial_statistic_b = jnp.minimum(initial_statistic_b, self.cfm_loss_clamp)
+                        current_statistic = jnp.minimum(current_statistic, self.cfm_loss_clamp)
                         current_statistic = jnp.where(
                             advantage_b[..., None] < 0.0,
-                            jnp.minimum(
-                                current_statistic,
-                                self.cfm_loss_clamp_negative_advantages_max,
-                            ),
+                            jnp.minimum(current_statistic, self.cfm_loss_clamp_negative_advantages_max),
                             current_statistic,
                         )
                         unclamped_log_ratio = (
                             initial_statistic_b - current_statistic
                         )
-                        clamped_log_ratio = jnp.minimum(
-                            unclamped_log_ratio,
-                            self.cfm_difference_clamp_max,
-                        )
+                        clamped_log_ratio = jnp.minimum(unclamped_log_ratio, self.cfm_difference_clamp_max)
                         log_ratio = (
                             unclamped_log_ratio
-                            + jax.lax.stop_gradient(
-                                clamped_log_ratio - unclamped_log_ratio
-                            )
+                            + jax.lax.stop_gradient(clamped_log_ratio - unclamped_log_ratio)
                         )
                         ratio = jnp.exp(log_ratio)
                         surrogate = (
@@ -362,15 +317,9 @@ class FPO:
                         )
                         clipped_surrogate = (
                             -advantage_b[..., None]
-                            * jnp.clip(
-                                ratio,
-                                1.0 - self.clipping_epsilon,
-                                1.0 + self.clipping_epsilon,
-                            )
+                            * jnp.clip(ratio, 1.0 - self.clipping_epsilon, 1.0 + self.clipping_epsilon)
                         )
-                        ppo_loss = jnp.maximum(
-                            surrogate, clipped_surrogate
-                        )
+                        ppo_loss = jnp.maximum(surrogate, clipped_surrogate)
                         spo_loss = -(
                             ratio * advantage_b[..., None]
                             - jnp.abs(advantage_b[..., None])
@@ -382,13 +331,7 @@ class FPO:
                         elif self.trust_region_mode == "spo":
                             policy_loss = jnp.mean(spo_loss)
                         else:
-                            policy_loss = jnp.mean(
-                                jnp.where(
-                                    advantage_b[..., None] > 0.0,
-                                    ppo_loss,
-                                    spo_loss,
-                                )
-                            )
+                            policy_loss = jnp.mean(jnp.where(advantage_b[..., None] > 0.0, ppo_loss, spo_loss))
                         value = self.critic.apply(critic_params, state_b).squeeze(-1)
                         critic_loss = jnp.mean((value - return_b) ** 2)
                         total_loss = policy_loss + self.critic_coef * critic_loss
@@ -399,28 +342,18 @@ class FPO:
                             "policy_ratio/min": jnp.min(ratio),
                             "policy_ratio/max": jnp.max(ratio),
                             "policy_ratio/clip_fraction": jnp.mean(jnp.abs(ratio - 1.0) > self.clipping_epsilon),
-                            "policy_ratio/log_ratio_unclamped_max": jnp.max(
-                                unclamped_log_ratio
-                            ),
-                            "policy_ratio/nonfinite_fraction": jnp.mean(
-                                ~jnp.isfinite(ratio)
-                            ),
+                            "policy_ratio/log_ratio_unclamped_max": jnp.max(unclamped_log_ratio),
+                            "policy_ratio/nonfinite_fraction": jnp.mean(~jnp.isfinite(ratio)),
                             "policy/latent_action_abs_mean": jnp.mean(jnp.abs(action_b)),
-                            "cfm/initial_loss_mean": jnp.mean(
-                                initial_statistic_b
-                            ),
-                            "cfm/current_loss_mean": jnp.mean(
-                                current_statistic
-                            ),
+                            "cfm/initial_loss_mean": jnp.mean(initial_statistic_b),
+                            "cfm/current_loss_mean": jnp.mean(current_statistic),
                         }
                         return total_loss, metrics
 
                     grad_loss_fn = jax.value_and_grad(loss_fn, argnums=(0, 1), has_aux=True)
                     key, shuffle_key = jax.random.split(key)
                     batch_indices = jnp.tile(jnp.arange(self.batch_size), (self.nr_epochs, 1))
-                    batch_indices = jax.random.permutation(
-                        shuffle_key, batch_indices, axis=1, independent=True
-                    ).reshape((self.nr_epochs * self.nr_minibatches, self.minibatch_size))
+                    batch_indices = jax.random.permutation(shuffle_key, batch_indices, axis=1, independent=True).reshape((self.nr_epochs * self.nr_minibatches, self.minibatch_size))
 
                     def minibatch_update(carry, minibatch_indices):
                         policy_state, critic_state = carry
@@ -435,34 +368,19 @@ class FPO:
                             batch_timestep[minibatch_indices],
                             batch_initial_statistic[minibatch_indices],
                         )
-                        combined_gradient_norm = jnp.sqrt(
-                            optax.global_norm(policy_gradients) ** 2
-                            + optax.global_norm(critic_gradients) ** 2
-                        )
-                        gradient_scale = jnp.minimum(
-                            1.0,
-                            self.max_grad_norm
-                            / (combined_gradient_norm + 1e-6),
-                        )
+                        combined_gradient_norm = jnp.sqrt(optax.global_norm(policy_gradients) ** 2 + optax.global_norm(critic_gradients) ** 2)
+                        gradient_scale = jnp.minimum(1.0, self.max_grad_norm / (combined_gradient_norm + 1e-6))
                         policy_state = policy_state.apply_gradients(
-                            grads=tree.map_structure(
-                                lambda gradient: gradient * gradient_scale,
-                                policy_gradients,
-                            )
+                            grads=tree.map_structure(lambda gradient: gradient * gradient_scale, policy_gradients)
                         )
                         critic_state = critic_state.apply_gradients(
-                            grads=tree.map_structure(
-                                lambda gradient: gradient * gradient_scale,
-                                critic_gradients,
-                            )
+                            grads=tree.map_structure(lambda gradient: gradient * gradient_scale, critic_gradients)
                         )
                         metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
                         metrics["gradients/critic_grad_norm"] = optax.global_norm(critic_gradients)
                         return (policy_state, critic_state), metrics
 
-                    (policy_state, critic_state), optimization_metrics = jax.lax.scan(
-                        minibatch_update, (policy_state, critic_state), batch_indices
-                    )
+                    (policy_state, critic_state), optimization_metrics = jax.lax.scan(minibatch_update, (policy_state, critic_state), batch_indices)
                     combined_step = multi_iteration_step * self.nr_updates_per_multi_learning_iteration + learning_iteration_step + 1
                     if self.ema_decay > 0.0:
                         ema_policy_params = jax.tree.map(
@@ -481,10 +399,9 @@ class FPO:
                     optimization_metrics["lr/learning_rate"] = policy_state.opt_state[0].hyperparams["learning_rate"]
                     optimization_metrics["policy/ema_active"] = combined_step > self.ema_warmup_steps
                     optimization_metrics["v_value/explained_variance"] = 1.0 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
-                    combined_metrics = tree.map_structure(
-                        jnp.mean, {**infos, **optimization_metrics}
-                    )
+                    combined_metrics = tree.map_structure(jnp.mean, {**infos, **optimization_metrics})
 
+                    # Logging
                     def callback(callback_carry):
                         metrics, learning_iteration_step, multi_iteration_step, parallel_seed_id = callback_carry
                         current_time = time.time()
@@ -499,10 +416,7 @@ class FPO:
                             self.log(name, np.asarray(value), global_step)
                         self.end_logging()
 
-                    jax.debug.callback(
-                        callback,
-                        (combined_metrics, learning_iteration_step, multi_iteration_step, parallel_seed_id),
-                    )
+                    jax.debug.callback(callback, (combined_metrics, learning_iteration_step, multi_iteration_step, parallel_seed_id))
                     return (policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key), None
 
                 carry, _ = jax.lax.scan(
@@ -513,15 +427,42 @@ class FPO:
                 policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key = carry
                 completed_updates = (multi_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration
 
+                # Evaluating
+                if self.evaluation_active:
+                    def eval_rollout(eval_carry, _):
+                        eval_env_state, key = eval_carry
+                        policy_params = jax.tree.map(
+                            lambda ema_parameter, policy_parameter: jnp.where(completed_updates > self.ema_warmup_steps, ema_parameter, policy_parameter),
+                            ema_policy_params,
+                            policy_state.params,
+                        )
+                        key, unused_action, processed_action, unused_action_info = self.sample_action(
+                            policy_params, normalizer_state, eval_env_state.next_observation, key, True
+                        )
+                        eval_env_state = self.eval_env.step(eval_env_state, processed_action)
+                        return (eval_env_state, key), None
+
+                    key, reset_key = jax.random.split(key)
+                    eval_env_state = self.eval_env.reset(jax.random.split(reset_key, self.nr_envs), True)
+                    (eval_env_state, key), _ = jax.lax.scan(eval_rollout, (eval_env_state, key), None, self.horizon)
+                    evaluation_metrics = {
+                        "eval/episode_return": jnp.mean(eval_env_state.info["rollout/episode_return"]),
+                        "eval/episode_length": jnp.mean(eval_env_state.info["rollout/episode_length"]),
+                    }
+
+                    def callback(metrics_and_step):
+                        metrics, combined_step = metrics_and_step
+                        global_step = int(combined_step.item() * self.batch_size)
+                        self.start_logging(global_step)
+                        for name, value in metrics.items():
+                            self.log(name, np.asarray(value), global_step)
+                        self.end_logging()
+
+                    jax.debug.callback(callback, (evaluation_metrics, completed_updates))
+
+                # Saving
                 if self.save_model:
-                    jax.debug.callback(
-                        self.save,
-                        policy_state,
-                        critic_state,
-                        ema_policy_params,
-                        normalizer_state,
-                        completed_updates,
-                    )
+                    jax.debug.callback(self.save, policy_state, critic_state, ema_policy_params, normalizer_state, completed_updates)
 
                 return (policy_state, critic_state, ema_policy_params, normalizer_state, env_state, key), None
 
@@ -578,13 +519,8 @@ class FPO:
         self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
         with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as stream:
             json.dump(self.config.algorithm.to_dict(), stream)
-        shutil.make_archive(
-            f"{self.save_path}/{self.latest_model_file_name}", "zip", f"{self.save_path}/tmp"
-        )
-        os.rename(
-            f"{self.save_path}/{self.latest_model_file_name}.zip",
-            f"{self.save_path}/{self.latest_model_file_name}",
-        )
+        shutil.make_archive(f"{self.save_path}/{self.latest_model_file_name}", "zip", f"{self.save_path}/tmp")
+        os.rename(f"{self.save_path}/{self.latest_model_file_name}.zip", f"{self.save_path}/{self.latest_model_file_name}")
         shutil.rmtree(f"{self.save_path}/tmp")
         if self.track_wandb:
             wandb.save(f"{self.save_path}/{self.latest_model_file_name}", base_path=self.save_path)
@@ -595,9 +531,7 @@ class FPO:
         split_path = config.runner.load_model.split("/")
         checkpoint_directory = os.path.abspath("/".join(split_path[:-1]))
         checkpoint_file_name = split_path[-1]
-        shutil.unpack_archive(
-            f"{checkpoint_directory}/{checkpoint_file_name}", f"{checkpoint_directory}/tmp", "zip"
-        )
+        shutil.unpack_archive(f"{checkpoint_directory}/{checkpoint_file_name}", f"{checkpoint_directory}/tmp", "zip")
         checkpoint_directory = f"{checkpoint_directory}/tmp"
         with open(f"{checkpoint_directory}/config_algorithm.json") as stream:
             loaded_algorithm_config = json.load(stream)
@@ -613,9 +547,7 @@ class FPO:
             "completed_updates": model.completed_updates,
         }
         restore_args = orbax_utils.restore_args_from_target(target)
-        checkpoint = orbax.checkpoint.PyTreeCheckpointer().restore(
-            checkpoint_directory, item=target, restore_args=restore_args
-        )
+        checkpoint = orbax.checkpoint.PyTreeCheckpointer().restore(checkpoint_directory, item=target, restore_args=restore_args)
         model.policy_state = checkpoint["policy"]
         model.critic_state = checkpoint["critic"]
         model.ema_policy_params = checkpoint["ema_policy"]

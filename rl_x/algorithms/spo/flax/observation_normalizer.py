@@ -27,9 +27,4 @@ def update_observation_normalizer(state, observations):
 
 
 def normalize_observation(state, observation):
-    return jnp.clip(
-        (observation - state["mean"])
-        / jnp.sqrt(state["var"] + 1e-8),
-        -10.0,
-        10.0,
-    )
+    return jnp.clip((observation - state["mean"]) / jnp.sqrt(state["var"] + 1e-8), -10.0, 10.0)

@@ -17,60 +17,27 @@ class ScorePolicy(nn.Module):
 
     @nn.compact
     def __call__(self, observation, action, timestep):
-        self.param(
-            "log_timestep",
-            lambda key: jnp.full(
-                (1,), jnp.log(jnp.expm1(self.initial_timestep))
-            ),
-        )
-        self.param(
-            "log_friction",
-            lambda key: jnp.full(
-                (self.action_dimension,),
-                jnp.log(jnp.expm1(self.initial_friction)),
-            ),
-        )
+        self.param("log_timestep", lambda key: jnp.full((1,), jnp.log(jnp.expm1(self.initial_timestep))))
+        self.param("log_friction", lambda key: jnp.full((self.action_dimension,), jnp.log(jnp.expm1(self.initial_friction))))
         observation = observation[..., self.policy_observation_indices]
-        timestep_phase = self.param(
-            "timestep_phase",
-            nn.initializers.zeros_init(),
-            (1, self.timestep_embed_dim),
-        )
-        timestep_coefficients = jnp.linspace(
-            0.1, 100.0, self.timestep_embed_dim
-        )[None]
+        timestep_phase = self.param("timestep_phase", nn.initializers.zeros_init(), (1, self.timestep_embed_dim))
+        timestep_coefficients = jnp.linspace(0.1, 100.0, self.timestep_embed_dim)[None]
         timestep_embedding = jnp.concatenate(
             [
-                jnp.sin(
-                    timestep_coefficients * timestep + timestep_phase
-                ),
-                jnp.cos(
-                    timestep_coefficients * timestep + timestep_phase
-                ),
+                jnp.sin(timestep_coefficients * timestep + timestep_phase),
+                jnp.cos(timestep_coefficients * timestep + timestep_phase),
             ],
             axis=-1,
         )
-        timestep_embedding = nn.Dense(self.timestep_embed_dim)(
-            timestep_embedding
-        )
+        timestep_embedding = nn.Dense(self.timestep_embed_dim)(timestep_embedding)
         timestep_embedding = nn.gelu(timestep_embedding)
-        timestep_embedding = nn.Dense(self.timestep_embed_dim)(
-            timestep_embedding
-        )
-        x = jnp.concatenate(
-            [action, observation, timestep_embedding], axis=-1
-        )
+        timestep_embedding = nn.Dense(self.timestep_embed_dim)(timestep_embedding)
+        x = jnp.concatenate([action, observation, timestep_embedding], axis=-1)
         for hidden_dimension in self.hidden_dims:
             x = nn.Dense(hidden_dimension)(x)
             x = nn.gelu(x)
         return jnp.clip(
-            nn.Dense(
-                self.action_dimension,
-                kernel_init=nn.initializers.constant(
-                    self.output_scale
-                ),
-                bias_init=nn.initializers.zeros_init(),
-            )(x),
+            nn.Dense(self.action_dimension, kernel_init=nn.initializers.constant(self.output_scale), bias_init=nn.initializers.zeros_init())(x),
             -1e4,
             1e4,
         )
@@ -85,24 +52,12 @@ class DistributionalCritic(nn.Module):
 
     @nn.compact
     def __call__(self, observation, action, train):
-        x = jnp.concatenate(
-            [
-                observation[..., self.critic_observation_indices],
-                action,
-            ],
-            axis=-1,
-        )
-        x = BatchRenorm(
-            self.batch_renorm_momentum,
-            self.batch_renorm_warmup_steps,
-        )(x, train)
+        x = jnp.concatenate([observation[..., self.critic_observation_indices], action], axis=-1)
+        x = BatchRenorm(self.batch_renorm_momentum, self.batch_renorm_warmup_steps)(x, train)
         for hidden_dimension in self.hidden_dims:
             x = nn.Dense(hidden_dimension)(x)
             x = nn.relu(x)
-            x = BatchRenorm(
-                self.batch_renorm_momentum,
-                self.batch_renorm_warmup_steps,
-            )(x, train)
+            x = BatchRenorm(self.batch_renorm_momentum, self.batch_renorm_warmup_steps)(x, train)
         return jax.nn.softmax(nn.Dense(self.nr_atoms)(x), axis=-1)
 
 
@@ -138,8 +93,5 @@ class EntropyCoefficient(nn.Module):
 
     @nn.compact
     def __call__(self):
-        log_coefficient = self.param(
-            "log_coefficient",
-            lambda key: jnp.asarray(jnp.log(self.initial_value)),
-        )
+        log_coefficient = self.param("log_coefficient", lambda key: jnp.asarray(jnp.log(self.initial_value)))
         return jnp.exp(log_coefficient)

@@ -145,6 +145,7 @@ class TRPO:
                 def learning_iteration(learning_iteration_carry, learning_iteration_step):
                     policy_state, critic_state, env_state, key = learning_iteration_carry
 
+                    # Acting
                     def single_rollout(single_rollout_carry, _):
                         policy_state, critic_state, env_state, key = single_rollout_carry
 
@@ -174,6 +175,7 @@ class TRPO:
                     policy_state, critic_state, env_state, key = single_rollout_carry
                     states, next_states, actions, rewards, values, terminations, log_probs, infos = batch
 
+                    # Calculating advantages and returns
                     def compute_advantages(carry, t):
                         advantage = deltas[t] + self.gamma * self.gae_lambda * (1 - terminations[t]) * carry
                         return advantage, advantage
@@ -185,6 +187,7 @@ class TRPO:
                     advantages = jnp.concatenate([earlier_advantages[::-1], last_advantage[None]])
                     returns = advantages + values
 
+                    # Optimizing
                     batch_states = states.reshape((-1,) + self.os_shape)
                     batch_actions = actions.reshape((-1,) + self.as_shape)
                     batch_advantages = advantages.reshape(-1)
@@ -308,6 +311,7 @@ class TRPO:
                     combined_metrics = {**infos, **optimization_metrics}
                     combined_metrics = tree.map_structure(lambda x: jnp.mean(x), combined_metrics)
 
+                    # Logging
                     def callback(carry):
                         metrics, learning_iteration_step, combined_learning_iteration_step, parallel_seed_id = carry
                         current_time = time.time()
@@ -332,6 +336,7 @@ class TRPO:
                 learning_iteration_carry, _ = jax.lax.scan(learning_iteration, (policy_state, critic_state, env_state, subkey), jnp.arange(self.nr_updates_per_multi_learning_iteration))
                 policy_state, critic_state, env_state, key = learning_iteration_carry
 
+                # Evaluating
                 if self.evaluation_active:
                     def single_eval_rollout(single_eval_rollout_carry, _):
                         policy_state, eval_env_state = single_eval_rollout_carry
@@ -361,6 +366,7 @@ class TRPO:
                     combined_learning_iteration_step = (multi_learning_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration
                     jax.debug.callback(callback, (eval_metrics, combined_learning_iteration_step))
 
+                # Saving
                 if self.save_model:
                     jax.debug.callback(self.save, policy_state, critic_state)
 

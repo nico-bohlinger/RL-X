@@ -20,11 +20,7 @@ def normalize_reward(state, reward, terminated, truncated, gamma):
         )
         return return_t, return_t
 
-    last_return, discounted_returns = jax.lax.scan(
-        discounted_return_step,
-        state["return"],
-        (reward, terminated),
-    )
+    last_return, discounted_returns = jax.lax.scan(discounted_return_step, state["return"], (reward, terminated))
     batch_mean = jnp.mean(discounted_returns, axis=0)
     batch_variance = jnp.var(discounted_returns, axis=0)
     batch_count = discounted_returns.shape[0]
@@ -45,8 +41,4 @@ def normalize_reward(state, reward, terminated, truncated, gamma):
         "mean": mean,
         "variance": variance,
         "count": total_count,
-    }, jnp.clip(
-        reward / jnp.sqrt(variance[None] + 1e-8),
-        -10.0,
-        10.0,
-    )
+    }, jnp.clip(reward / jnp.sqrt(variance[None] + 1e-8), -10.0, 10.0)

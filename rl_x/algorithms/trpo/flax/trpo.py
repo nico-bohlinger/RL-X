@@ -88,11 +88,7 @@ class TRPO:
 
         state = jnp.array([self.train_env.single_observation_space.sample()])
 
-        self.policy_state = TrainState.create(
-            apply_fn=self.policy.apply,
-            params=self.policy.init(policy_key, state),
-            tx=optax.set_to_zero()
-        )
+        self.policy_state = TrainState.create(apply_fn=self.policy.apply, params=self.policy.init(policy_key, state), tx=optax.set_to_zero())
 
         self.critic_state = TrainState.create(
             apply_fn=self.critic.apply,
@@ -241,11 +237,7 @@ class TRPO:
                 jnp.array(0.0),
                 jnp.array(self.line_search_max_steps),
             )
-            line_search_carry, _ = jax.lax.scan(
-                line_search_iteration,
-                line_search_carry,
-                jnp.arange(self.line_search_max_steps),
-            )
+            line_search_carry, _ = jax.lax.scan(line_search_iteration, line_search_carry, jnp.arange(self.line_search_max_steps))
             accepted_params, line_search_success, new_policy_objective, new_kl, accepted_step = line_search_carry
             policy_state = policy_state.replace(params=unravel_policy_params(accepted_params))
 
@@ -256,30 +248,20 @@ class TRPO:
             critic_grad_loss = jax.value_and_grad(critic_loss)
             key, subkey = jax.random.split(key)
             critic_batch_indices = jnp.tile(jnp.arange(self.batch_size), (self.nr_critic_updates, 1))
-            critic_batch_indices = jax.random.permutation(
-                subkey, critic_batch_indices, axis=1, independent=True
-            ).reshape((self.nr_critic_updates * self.nr_critic_minibatches, self.critic_minibatch_size))
+            critic_batch_indices = jax.random.permutation(subkey, critic_batch_indices, axis=1, independent=True).reshape((self.nr_critic_updates * self.nr_critic_minibatches, self.critic_minibatch_size))
 
             def critic_minibatch_update(state, minibatch_indices):
-                loss, gradients = critic_grad_loss(
-                    state.params,
-                    batch_states[minibatch_indices],
-                    batch_returns[minibatch_indices],
-                )
+                loss, gradients = critic_grad_loss(state.params, batch_states[minibatch_indices], batch_returns[minibatch_indices])
                 return state.apply_gradients(grads=gradients), (loss, optax.global_norm(gradients))
 
-            critic_state, (critic_losses, critic_gradient_norms) = jax.lax.scan(
-                critic_minibatch_update, critic_state, critic_batch_indices
-            )
+            critic_state, (critic_losses, critic_gradient_norms) = jax.lax.scan(critic_minibatch_update, critic_state, critic_batch_indices)
             metrics = {
                 "loss/policy_objective": new_policy_objective,
                 "loss/critic_loss": jnp.mean(critic_losses),
                 "policy/kl_divergence": new_kl,
                 "policy/line_search_success": line_search_success.astype(jnp.float32),
                 "policy/line_search_steps": accepted_step,
-                "policy/line_search_fraction": jnp.where(
-                    line_search_success, self.line_search_shrinking_factor ** accepted_step, 0.0
-                ),
+                "policy/line_search_fraction": jnp.where(line_search_success, self.line_search_shrinking_factor ** accepted_step, 0.0),
                 "policy/objective_improvement": new_policy_objective - old_policy_objective,
                 "policy/expected_improvement": jnp.dot(policy_gradient, full_step),
                 "policy/std_dev": jnp.mean(jnp.exp(policy_state.params["params"]["policy_logstd"])),

@@ -34,6 +34,4 @@ def update_observation_normalizer(state, observations):
 
 
 def normalize_observation(state, observation, epsilon):
-    return (observation - state["mean"]) / jnp.sqrt(
-        state["var"] + epsilon
-    )
+    return (observation - state["mean"]) / jnp.sqrt(state["var"] + epsilon)

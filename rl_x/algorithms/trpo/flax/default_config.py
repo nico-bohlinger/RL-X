@@ -24,6 +24,7 @@ def get_config(algorithm_name):
     config.critic_max_grad_norm = 5.0
     config.std_dev = 1.0
     config.action_clipping_and_rescaling = True
+    config.nr_hidden_units = 256
     config.evaluation_frequency = -1
     config.evaluation_episodes = 10
 

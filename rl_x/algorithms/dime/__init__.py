@@ -1,1 +1,0 @@
-"""DIME algorithm package."""
