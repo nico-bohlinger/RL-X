@@ -11,11 +11,13 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 - Supports automatically adjusted temperature
 
 **Supported frameworks**
+- PyTorch
 - JAX (Flax)
 
 **Supported action space, observation space and data interface types**
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
+| PyTorch | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 
