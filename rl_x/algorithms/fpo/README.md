@@ -18,16 +18,18 @@ The implementation follows the authors' current G1 locomotion reference configur
 - Latent-action clipping to `[-2, 2]`, matching the reference G1 runner
 - Joint actor-critic gradient clipping matching the reference single-optimizer geometry
 - Reference observation-normalizer epsilon and update horizon, configurable actor scaling, and actor EMA after the 500-update warmup
-- Fully JIT-compiled JAX rollout and update loop
+- NumPy-interface Flax rollout/update loop and fully JIT-compiled JAX rollout/update loop with the same CFM sampler, ASPO objective and EMA policy
 
 The port was audited against official reference revision `b80112be1e8362263c4cd176e7aef21a275ff1c6`. The default profile is the authors' from-scratch G1 locomotion profile; it does not depend on a pretrained flow policy.
 
 **Supported frameworks**
+- JAX (Flax)
 - JAX (Flax, fully JIT-compiled)
 
 **Supported action space, observation space and data interface types**
 | Version | Flat value obs | Image obs | Continuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
+| JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax, fully JIT-compiled) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 

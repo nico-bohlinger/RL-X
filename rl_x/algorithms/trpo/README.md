@@ -12,18 +12,20 @@ TRPO maximizes the importance-weighted policy surrogate subject to an empirical 
 - Computes Fisher-vector products with automatic differentiation and conjugate gradient without constructing the Fisher matrix
 - Enforces the hard mean-KL constraint with the reference backtracking acceptance criteria
 - Optimizes the value function separately with Adam over shuffled rollout minibatches so critic gradients cannot bypass the policy trust region
-- Uses GAE, normalized rollout advantages, and the RL-X fully JIT-compiled policy, critic, environment, logging, evaluation, and checkpoint paths
+- Uses timeout-correct GAE and normalized rollout advantages through both RL-X's NumPy and fully JIT-compiled JAX environment interfaces
 - Supports reference-style policy-batch subsampling while using the complete rollout by default
 - Keeps fully JIT-compiled robot environments in their native action domain by default; `action_clipping_and_rescaling=True` enables conventional bounded-environment processing
 
 The port was audited against the original paper, OpenAI Spinning Up revision `038665d62d569055401d91856abb287263096178`, and SB3-Contrib revision `075bd5be8d43848b0f0cd3bc8a32f6892d0d58fb`.
 
 **Supported frameworks**
+- JAX (Flax)
 - JAX (Flax, fully JIT-compiled)
 
 **Supported action space, observation space and data interface types**
 | Version | Flat value obs | Image obs | Continuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
+| JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax, fully JIT-compiled) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 

@@ -13,16 +13,18 @@ SPO replaces PPO's clipped policy objective with a differentiable quadratic pena
 - Uses the authors' MuJoCo seven-layer Tanh policy, two-layer value network, clipped value loss, joint actor-critic gradient clipping, rollout horizon, optimizer settings, epoch count, and four-minibatch update geometry
 - Keeps RL-X fully-jitted environments in their native action domain by default; `action_clipping_and_rescaling=True` enables the reference Gym-style environment-bound clipping path
 - Logs the per-sample ratio-deviation penalty
-- Supports the fully JIT-compiled JAX data path used by MJX environments
+- Supports RL-X's NumPy environment interface through `spo.flax` and the fully JIT-compiled JAX interface through `spo.flax_full_jit`
 
 The port was audited against official reference revision `9fdeda315b00cee82d1dc4e10c01db200c97e909`.
 
 **Supported frameworks**
+- JAX (Flax)
 - JAX (Flax, fully JIT-compiled)
 
 **Supported action space, observation space and data interface types**
 | Version | Flat value obs | Image obs | Continuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
+| JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax, fully JIT-compiled) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 
