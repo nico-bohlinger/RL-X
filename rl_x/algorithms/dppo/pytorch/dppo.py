@@ -9,7 +9,8 @@ from torch.amp import autocast
 import wandb
 
 from rl_x.algorithms.dppo.pytorch.general_properties import GeneralProperties
-from rl_x.algorithms.dppo.pytorch.networks import DiffusionPolicy, ValueCritic
+from rl_x.algorithms.dppo.pytorch.policy import get_policy
+from rl_x.algorithms.dppo.pytorch.critic import get_critic
 from rl_x.algorithms.dppo.pytorch import observation_normalizer
 from rl_x.algorithms.dppo.pytorch import reward_normalizer
 
@@ -56,7 +57,6 @@ class DPPO:
         self.timestep_embed_dim = config.algorithm.timestep_embed_dim
         self.policy_hidden_dims = tuple(config.algorithm.policy_hidden_dims)
         self.critic_hidden_dims = tuple(config.algorithm.critic_hidden_dims)
-        self.policy_output_scale = config.algorithm.policy_output_scale
         self.denoising_std = config.algorithm.denoising_std
         self.denoising_discount = config.algorithm.denoising_discount
         self.denoised_clip_value = config.algorithm.denoised_clip_value
@@ -105,8 +105,6 @@ class DPPO:
         self.rng = np.random.default_rng(self.seed)
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
-        policy_observation_indices = getattr(self.train_env, "policy_observation_indices", np.arange(self.os_shape[0]))
-        critic_observation_indices = getattr(self.train_env, "critic_observation_indices", np.arange(self.os_shape[0]))
         self.action_low = torch.tensor(self.train_env.single_action_space.low, dtype=torch.float32, device=self.device)
         self.action_high = torch.tensor(self.train_env.single_action_space.high, dtype=torch.float32, device=self.device)
         cosine_positions = torch.linspace(0.0, self.diffusion_steps + 1, self.diffusion_steps + 1, device=self.device)
@@ -122,8 +120,8 @@ class DPPO:
         self.posterior_mean_coefficient_1 = self.betas * torch.sqrt(self.alphas_cumulative_previous) / (1.0 - self.alphas_cumulative)
         self.posterior_mean_coefficient_2 = (1.0 - self.alphas_cumulative_previous) * torch.sqrt(self.alphas) / (1.0 - self.alphas_cumulative)
 
-        self.policy = DiffusionPolicy(self.action_dimension, self.timestep_embed_dim, self.policy_hidden_dims, self.policy_output_scale, policy_observation_indices, self.device).to(self.device)
-        self.critic = ValueCritic(self.critic_hidden_dims, critic_observation_indices, self.device).to(self.device)
+        self.policy = get_policy(config, self.train_env, self.device)
+        self.critic = get_critic(config, self.train_env, self.device)
         self.policy.forward = torch.compile(self.policy.forward, mode=self.compile_mode)
         self.critic.forward = torch.compile(self.critic.forward, mode=self.compile_mode)
         fused = self.device.type == "cuda"

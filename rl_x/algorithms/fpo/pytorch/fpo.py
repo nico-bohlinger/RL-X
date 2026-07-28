@@ -10,7 +10,8 @@ from torch.amp import autocast
 import wandb
 
 from rl_x.algorithms.fpo.pytorch.general_properties import GeneralProperties
-from rl_x.algorithms.fpo.pytorch.networks import FlowPolicy, ValueCritic
+from rl_x.algorithms.fpo.pytorch.policy import get_policy
+from rl_x.algorithms.fpo.pytorch.critic import get_critic
 from rl_x.algorithms.fpo.pytorch import observation_normalizer
 
 rlx_logger = logging.getLogger("rl_x")
@@ -52,10 +53,7 @@ class FPO:
         self.observation_normalizer_max_count = config.algorithm.observation_normalizer_max_count
         self.flow_steps = config.algorithm.flow_steps
         self.timestep_embed_dim = config.algorithm.timestep_embed_dim
-        self.policy_hidden_dims = tuple(config.algorithm.policy_hidden_dims)
-        self.critic_hidden_dims = tuple(config.algorithm.critic_hidden_dims)
         self.actor_scale = config.algorithm.actor_scale
-        self.policy_output_scale = config.algorithm.policy_output_scale
         self.action_clip = config.algorithm.action_clip
         self.nr_flow_samples_per_action = config.algorithm.nr_flow_samples_per_action
         self.timestep_inverse_cdf_beta = config.algorithm.timestep_inverse_cdf_beta
@@ -112,10 +110,8 @@ class FPO:
         self.rng = np.random.default_rng(self.seed)
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
-        policy_observation_indices = getattr(self.train_env, "policy_observation_indices", np.arange(self.os_shape[0]))
-        critic_observation_indices = getattr(self.train_env, "critic_observation_indices", np.arange(self.os_shape[0]))
-        self.policy = FlowPolicy(self.action_dimension, self.timestep_embed_dim, self.policy_hidden_dims, self.policy_output_scale, policy_observation_indices, self.device).to(self.device)
-        self.critic = ValueCritic(self.critic_hidden_dims, critic_observation_indices, self.device).to(self.device)
+        self.policy = get_policy(config, self.train_env, self.device)
+        self.critic = get_critic(config, self.train_env, self.device)
         self.ema_policy = deepcopy(self.policy).to(self.device)
         self.ema_policy.requires_grad_(False)
         self.policy.forward = torch.compile(self.policy.forward, mode=self.compile_mode)

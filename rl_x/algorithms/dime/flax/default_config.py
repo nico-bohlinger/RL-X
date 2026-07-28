@@ -34,6 +34,8 @@ def get_config(algorithm_name):
     config.minimum_timestep = 0.001
     config.cosine_schedule_offset = 0.008
     config.score_output_scale = 1e-8
+    config.initial_timestep = 0.1
+    config.initial_friction = 1.0
     config.entropy_coefficient_init = 1.0
     config.target_entropy_per_action_dimension = 4.0
     config.max_grad_norm = 1.0

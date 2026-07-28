@@ -14,7 +14,8 @@ import orbax.checkpoint
 import optax
 import wandb
 
-from rl_x.algorithms.dppo.flax_full_jit.networks import DiffusionPolicy, ValueCritic
+from rl_x.algorithms.dppo.flax_full_jit.policy import get_policy
+from rl_x.algorithms.dppo.flax_full_jit.critic import get_critic
 from rl_x.algorithms.dppo.flax_full_jit import observation_normalizer
 from rl_x.algorithms.dppo.flax_full_jit import reward_normalizer
 
@@ -62,7 +63,6 @@ class DPPO:
         self.timestep_embed_dim = config.algorithm.timestep_embed_dim
         self.policy_hidden_dims = tuple(config.algorithm.policy_hidden_dims)
         self.critic_hidden_dims = tuple(config.algorithm.critic_hidden_dims)
-        self.policy_output_scale = config.algorithm.policy_output_scale
         self.denoising_std = config.algorithm.denoising_std
         self.denoising_discount = config.algorithm.denoising_discount
         self.denoised_clip_value = config.algorithm.denoised_clip_value
@@ -90,8 +90,6 @@ class DPPO:
         self.as_shape = self.train_env.single_action_space.shape
         self.action_dimension = self.as_shape[0]
         self.horizon = self.train_env.horizon
-        self.policy_observation_indices = getattr(self.train_env, "policy_observation_indices", jnp.arange(self.os_shape[0]))
-        self.critic_observation_indices = getattr(self.train_env, "critic_observation_indices", jnp.arange(self.os_shape[0]))
         self.action_low = jnp.asarray(self.train_env.single_action_space.low)
         self.action_high = jnp.asarray(self.train_env.single_action_space.high)
         cosine_positions = jnp.linspace(0.0, self.diffusion_steps + 1, self.diffusion_steps + 1)
@@ -147,14 +145,8 @@ class DPPO:
         dummy_action = jnp.zeros(dummy_observation.shape[:-1] + self.as_shape)
         dummy_timestep = jnp.zeros(dummy_observation.shape[:-1] + (1,))
 
-        self.policy = DiffusionPolicy(
-            self.action_dimension,
-            self.timestep_embed_dim,
-            self.policy_hidden_dims,
-            self.policy_output_scale,
-            self.policy_observation_indices,
-        )
-        self.critic = ValueCritic(self.critic_hidden_dims, self.critic_observation_indices)
+        self.policy = get_policy(config, self.train_env)
+        self.critic = get_critic(config, self.train_env)
 
         def policy_linear_schedule(count):
             fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates

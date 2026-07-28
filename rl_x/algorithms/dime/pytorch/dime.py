@@ -10,7 +10,9 @@ from torch.amp import autocast
 import wandb
 
 from rl_x.algorithms.dime.pytorch.general_properties import GeneralProperties
-from rl_x.algorithms.dime.pytorch.networks import EntropyCoefficient, ScorePolicy, VectorDistributionalCritic
+from rl_x.algorithms.dime.pytorch.policy import get_policy
+from rl_x.algorithms.dime.pytorch.critic import get_critic
+from rl_x.algorithms.dime.pytorch.entropy_coefficient import get_entropy_coefficient
 from rl_x.algorithms.dime.pytorch.replay_buffer import ReplayBuffer
 from rl_x.algorithms.dime.pytorch import observation_normalizer
 
@@ -46,22 +48,15 @@ class DIME:
         self.policy_delay = config.algorithm.policy_delay
         self.gamma = config.algorithm.gamma
         self.policy_tau = config.algorithm.policy_tau
-        self.critic_hidden_dims = tuple(config.algorithm.critic_hidden_dims)
-        self.batch_renorm_momentum = config.algorithm.batch_renorm_momentum
-        self.batch_renorm_warmup_steps = config.algorithm.batch_renorm_warmup_steps
         self.nr_critics = config.algorithm.nr_critics
         self.nr_atoms = config.algorithm.nr_atoms
         self.v_min = config.algorithm.v_min
         self.v_max = config.algorithm.v_max
         self.critic_entropy_coefficient = config.algorithm.critic_entropy_coefficient
         self.diffusion_steps = config.algorithm.diffusion_steps
-        self.score_hidden_dims = tuple(config.algorithm.score_hidden_dims)
-        self.timestep_embed_dim = config.algorithm.timestep_embed_dim
         self.prior_std = config.algorithm.prior_std
         self.minimum_timestep = config.algorithm.minimum_timestep
         self.cosine_schedule_offset = config.algorithm.cosine_schedule_offset
-        self.score_output_scale = config.algorithm.score_output_scale
-        self.entropy_coefficient_init = config.algorithm.entropy_coefficient_init
         self.target_entropy_per_action_dimension = config.algorithm.target_entropy_per_action_dimension
         self.max_grad_norm = config.algorithm.max_grad_norm
         self.enable_observation_normalization = config.algorithm.enable_observation_normalization
@@ -106,16 +101,14 @@ class DIME:
         self.rng = np.random.default_rng(self.seed)
         torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
-        policy_observation_indices = getattr(self.train_env, "policy_observation_indices", np.arange(self.os_shape[0]))
-        critic_observation_indices = getattr(self.train_env, "critic_observation_indices", np.arange(self.os_shape[0]))
         self.action_low = torch.tensor(self.train_env.single_action_space.low, dtype=torch.float32, device=self.device)
         self.action_high = torch.tensor(self.train_env.single_action_space.high, dtype=torch.float32, device=self.device)
         self.support = torch.linspace(self.v_min, self.v_max, self.nr_atoms, device=self.device)
-        self.actor = ScorePolicy(self.action_dimension, self.timestep_embed_dim, self.score_hidden_dims, self.score_output_scale, 0.1, 1.0, policy_observation_indices, self.device).to(self.device)
+        self.actor = get_policy(config, self.train_env, self.device)
         self.target_actor = deepcopy(self.actor).to(self.device)
         self.target_actor.requires_grad_(False)
-        self.critic = VectorDistributionalCritic(self.nr_critics, self.action_dimension, self.critic_hidden_dims, self.nr_atoms, self.batch_renorm_momentum, self.batch_renorm_warmup_steps, critic_observation_indices, self.device).to(self.device)
-        self.entropy_coefficient = EntropyCoefficient(self.entropy_coefficient_init).to(self.device)
+        self.critic = get_critic(config, self.train_env, self.device)
+        self.entropy_coefficient = get_entropy_coefficient(config, self.device)
         self.actor.forward = torch.compile(self.actor.forward, mode=self.compile_mode)
         self.target_actor.forward = torch.compile(self.target_actor.forward, mode=self.compile_mode)
         fused = self.device.type == "cuda"

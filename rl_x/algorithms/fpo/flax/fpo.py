@@ -15,7 +15,8 @@ import optax
 import wandb
 
 from rl_x.algorithms.fpo.flax.general_properties import GeneralProperties
-from rl_x.algorithms.fpo.flax.networks import FlowPolicy, ValueCritic
+from rl_x.algorithms.fpo.flax.policy import get_policy
+from rl_x.algorithms.fpo.flax.critic import get_critic
 from rl_x.algorithms.fpo.flax import observation_normalizer
 
 rlx_logger = logging.getLogger("rl_x")
@@ -55,10 +56,7 @@ class FPO:
         self.observation_normalizer_max_count = config.algorithm.observation_normalizer_max_count
         self.flow_steps = config.algorithm.flow_steps
         self.timestep_embed_dim = config.algorithm.timestep_embed_dim
-        self.policy_hidden_dims = tuple(config.algorithm.policy_hidden_dims)
-        self.critic_hidden_dims = tuple(config.algorithm.critic_hidden_dims)
         self.actor_scale = config.algorithm.actor_scale
-        self.policy_output_scale = config.algorithm.policy_output_scale
         self.action_clip = config.algorithm.action_clip
         self.nr_flow_samples_per_action = config.algorithm.nr_flow_samples_per_action
         self.timestep_inverse_cdf_beta = config.algorithm.timestep_inverse_cdf_beta
@@ -81,8 +79,6 @@ class FPO:
         self.os_shape = self.train_env.single_observation_space.shape
         self.as_shape = self.train_env.single_action_space.shape
         self.action_dimension = self.as_shape[0]
-        self.policy_observation_indices = getattr(self.train_env, "policy_observation_indices", jnp.arange(self.os_shape[0]))
-        self.critic_observation_indices = getattr(self.train_env, "critic_observation_indices", jnp.arange(self.os_shape[0]))
         self.schedule_current = jnp.linspace(1.0, 0.0, self.flow_steps + 1)[:-1]
         self.schedule_next = jnp.linspace(1.0, 0.0, self.flow_steps + 1)[1:]
 
@@ -114,14 +110,8 @@ class FPO:
         dummy_action = jnp.zeros(dummy_observation.shape[:-1] + self.as_shape)
         dummy_timestep = jnp.zeros(dummy_observation.shape[:-1] + (1,))
 
-        self.policy = FlowPolicy(
-            self.action_dimension,
-            self.timestep_embed_dim,
-            self.policy_hidden_dims,
-            self.policy_output_scale,
-            self.policy_observation_indices,
-        )
-        self.critic = ValueCritic(self.critic_hidden_dims, self.critic_observation_indices)
+        self.policy = get_policy(config, self.train_env)
+        self.critic = get_critic(config, self.train_env)
 
         def linear_schedule(count):
             fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates

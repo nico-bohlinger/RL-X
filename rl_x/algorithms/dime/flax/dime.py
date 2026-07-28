@@ -14,11 +14,9 @@ import optax
 import wandb
 
 from rl_x.algorithms.dime.flax.general_properties import GeneralProperties
-from rl_x.algorithms.dime.flax.networks import (
-    EntropyCoefficient,
-    ScorePolicy,
-    VectorDistributionalCritic,
-)
+from rl_x.algorithms.dime.flax.policy import get_policy
+from rl_x.algorithms.dime.flax.critic import get_critic
+from rl_x.algorithms.dime.flax.entropy_coefficient import get_entropy_coefficient
 from rl_x.algorithms.dime.flax.rl_train_state import RLTrainState
 from rl_x.algorithms.dime.flax.replay_buffer import ReplayBuffer
 from rl_x.algorithms.dime.flax import observation_normalizer
@@ -53,13 +51,6 @@ class DIME:
         self.policy_delay = config.algorithm.policy_delay
         self.gamma = config.algorithm.gamma
         self.policy_tau = config.algorithm.policy_tau
-        self.critic_hidden_dims = tuple(config.algorithm.critic_hidden_dims)
-        self.batch_renorm_momentum = (
-            config.algorithm.batch_renorm_momentum
-        )
-        self.batch_renorm_warmup_steps = (
-            config.algorithm.batch_renorm_warmup_steps
-        )
         self.nr_critics = config.algorithm.nr_critics
         self.nr_atoms = config.algorithm.nr_atoms
         self.v_min = config.algorithm.v_min
@@ -68,16 +59,10 @@ class DIME:
             config.algorithm.critic_entropy_coefficient
         )
         self.diffusion_steps = config.algorithm.diffusion_steps
-        self.score_hidden_dims = tuple(config.algorithm.score_hidden_dims)
-        self.timestep_embed_dim = config.algorithm.timestep_embed_dim
         self.prior_std = config.algorithm.prior_std
         self.minimum_timestep = config.algorithm.minimum_timestep
         self.cosine_schedule_offset = (
             config.algorithm.cosine_schedule_offset
-        )
-        self.score_output_scale = config.algorithm.score_output_scale
-        self.entropy_coefficient_init = (
-            config.algorithm.entropy_coefficient_init
         )
         self.target_entropy_per_action_dimension = (
             config.algorithm.target_entropy_per_action_dimension
@@ -95,8 +80,6 @@ class DIME:
         self.os_shape = self.train_env.single_observation_space.shape
         self.as_shape = self.train_env.single_action_space.shape
         self.action_dimension = self.as_shape[0]
-        self.policy_observation_indices = getattr(self.train_env, "policy_observation_indices", jnp.arange(self.os_shape[0]))
-        self.critic_observation_indices = getattr(self.train_env, "critic_observation_indices", jnp.arange(self.os_shape[0]))
         self.action_low = jnp.asarray(self.train_env.single_action_space.low)
         self.action_high = jnp.asarray(self.train_env.single_action_space.high)
         self.support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
@@ -134,24 +117,9 @@ class DIME:
         dummy_action = jnp.zeros(dummy_observation.shape[:-1] + self.as_shape)
         dummy_timestep = jnp.zeros(dummy_observation.shape[:-1] + (1,))
 
-        self.actor = ScorePolicy(
-            self.action_dimension,
-            self.timestep_embed_dim,
-            self.score_hidden_dims,
-            self.score_output_scale,
-            0.1,
-            1.0,
-            self.policy_observation_indices,
-        )
-        self.critic = VectorDistributionalCritic(
-            self.nr_critics,
-            self.critic_hidden_dims,
-            self.nr_atoms,
-            self.batch_renorm_momentum,
-            self.batch_renorm_warmup_steps,
-            self.critic_observation_indices,
-        )
-        self.entropy_coefficient = EntropyCoefficient(self.entropy_coefficient_init)
+        self.actor = get_policy(config, self.train_env)
+        self.critic = get_critic(config, self.train_env)
+        self.entropy_coefficient = get_entropy_coefficient(config)
 
         actor_params = self.actor.init(actor_key, dummy_observation, dummy_action, dummy_timestep)
         critic_variables = self.critic.init({"params": critic_key, "batch_stats": critic_key,}, dummy_observation, dummy_action, False)
