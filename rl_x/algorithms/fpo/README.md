@@ -11,16 +11,14 @@ On how the algorithm works, refer to the [Resources](#resources) section.
 - Trains the flow policy from scratch instead of using a pretrained policy
 
 **Supported frameworks**
-- JAX (Flax)
-- JAX (Flax, full JIT)
-- PyTorch
+- PyTorch, JAX (Flax)
 
 **Supported action space, observation space and data interface types**
 | Version | Flat value obs | Image obs | Continuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
+| PyTorch | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) full JIT | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| PyTorch | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 
 ## Resources
