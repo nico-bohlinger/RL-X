@@ -73,13 +73,9 @@ class DPPO:
         self.evaluation_episodes = config.algorithm.evaluation_episodes
 
         self.batch_size = self.nr_envs * self.nr_steps
-        self.optimization_batch_size = (
-            self.batch_size * self.diffusion_steps
-        )
+        self.optimization_batch_size = self.batch_size * self.diffusion_steps
         self.nr_updates = self.total_timesteps // self.batch_size
-        self.nr_minibatches = (
-            self.optimization_batch_size // self.minibatch_size
-        )
+        self.nr_minibatches = self.optimization_batch_size // self.minibatch_size
         self.os_shape = self.train_env.single_observation_space.shape
         self.as_shape = self.train_env.single_action_space.shape
         self.action_dimension = self.as_shape[0]
@@ -94,21 +90,9 @@ class DPPO:
         self.alphas_cumulative_previous = jnp.concatenate([jnp.ones(1), self.alphas_cumulative[:-1]])
         self.sqrt_reciprocal_alphas_cumulative = jnp.sqrt(1.0 / self.alphas_cumulative)
         self.sqrt_reciprocal_minus_one_alphas_cumulative = jnp.sqrt(1.0 / self.alphas_cumulative - 1.0)
-        self.posterior_variance = (
-            self.betas
-            * (1.0 - self.alphas_cumulative_previous)
-            / (1.0 - self.alphas_cumulative)
-        )
-        self.posterior_mean_coefficient_1 = (
-            self.betas
-            * jnp.sqrt(self.alphas_cumulative_previous)
-            / (1.0 - self.alphas_cumulative)
-        )
-        self.posterior_mean_coefficient_2 = (
-            (1.0 - self.alphas_cumulative_previous)
-            * jnp.sqrt(self.alphas)
-            / (1.0 - self.alphas_cumulative)
-        )
+        self.posterior_variance = self.betas * (1.0 - self.alphas_cumulative_previous) / (1.0 - self.alphas_cumulative)
+        self.posterior_mean_coefficient_1 = self.betas * jnp.sqrt(self.alphas_cumulative_previous) / (1.0 - self.alphas_cumulative)
+        self.posterior_mean_coefficient_2 = (1.0 - self.alphas_cumulative_previous) * jnp.sqrt(self.alphas) / (1.0 - self.alphas_cumulative)
 
         if self.nr_updates == 0:
             raise ValueError("The total number of timesteps must contain at least one rollout batch.")
@@ -140,11 +124,7 @@ class DPPO:
             fraction = 1.0 - (count // (self.nr_minibatches * self.nr_epochs)) / self.nr_updates
             return self.policy_learning_rate * fraction
 
-        policy_learning_rate = (
-            policy_linear_schedule
-            if self.anneal_learning_rate
-            else self.policy_learning_rate
-        )
+        policy_learning_rate = policy_linear_schedule if self.anneal_learning_rate else self.policy_learning_rate
         if self.max_grad_norm != -1.0:
             policy_optimizer = optax.chain(
                 optax.clip_by_global_norm(self.max_grad_norm),
@@ -178,54 +158,19 @@ class DPPO:
         return observation
 
 
-    def compute_transition_log_likelihood(
-        self,
-        policy_params,
-        normalized_observation,
-        path_current,
-        path_next,
-        denoising_index,
-    ):
+    def compute_transition_log_likelihood(self, policy_params, normalized_observation, path_current, path_next, denoising_index):
         if path_current.ndim == normalized_observation.ndim + 1:
-            normalized_observation = jnp.broadcast_to(
-                normalized_observation[..., None, :],
-                path_current.shape[:-1]
-                + (normalized_observation.shape[-1],),
-            )
+            normalized_observation = jnp.broadcast_to(normalized_observation[..., None, :], path_current.shape[:-1] + (normalized_observation.shape[-1],))
         diffusion_timestep = self.diffusion_steps - denoising_index - 1
         timestep = diffusion_timestep[..., None].astype(jnp.float32)
         timestep = jnp.broadcast_to(timestep, path_current.shape[:-1] + (1,))
         predicted_noise = self.policy.apply(policy_params, normalized_observation, path_current, timestep)
-        reconstructed_action = (
-            self.sqrt_reciprocal_alphas_cumulative[
-                diffusion_timestep
-            ][..., None]
-            * path_current
-            - self.sqrt_reciprocal_minus_one_alphas_cumulative[
-                diffusion_timestep
-            ][..., None]
-            * predicted_noise
-        )
+        reconstructed_action = self.sqrt_reciprocal_alphas_cumulative[diffusion_timestep][..., None] * path_current - self.sqrt_reciprocal_minus_one_alphas_cumulative[diffusion_timestep][..., None] * predicted_noise
         reconstructed_action = jnp.clip(reconstructed_action, -self.denoised_clip_value, self.denoised_clip_value)
-        transition_mean = (
-            self.posterior_mean_coefficient_1[
-                diffusion_timestep
-            ][..., None]
-            * reconstructed_action
-            + self.posterior_mean_coefficient_2[
-                diffusion_timestep
-            ][..., None]
-            * path_current
-        )
+        transition_mean = self.posterior_mean_coefficient_1[diffusion_timestep][..., None] * reconstructed_action + self.posterior_mean_coefficient_2[diffusion_timestep][..., None] * path_current
         transition_std = jnp.maximum(jnp.sqrt(self.posterior_variance[diffusion_timestep])[..., None], self.denoising_std)
-        standardized_noise = (
-            path_next - transition_mean
-        ) / transition_std
-        return (
-            -0.5 * standardized_noise ** 2
-            - 0.5
-            * jnp.log(2.0 * jnp.pi * transition_std ** 2)
-        )
+        standardized_noise = (path_next - transition_mean) / transition_std
+        return -0.5 * standardized_noise ** 2 - 0.5 * jnp.log(2.0 * jnp.pi * transition_std ** 2)
 
 
     def sample_action(self, policy_params, normalizer_state, observation, key, deterministic=False):
@@ -238,27 +183,9 @@ class DPPO:
             diffusion_timestep, noise = inputs
             timestep = jnp.full(observation.shape[:-1] + (1,), diffusion_timestep, dtype=jnp.float32)
             predicted_noise = self.policy.apply(policy_params, normalized_observation, noisy_action, timestep)
-            reconstructed_action = (
-                self.sqrt_reciprocal_alphas_cumulative[
-                    diffusion_timestep
-                ]
-                * noisy_action
-                - self.sqrt_reciprocal_minus_one_alphas_cumulative[
-                    diffusion_timestep
-                ]
-                * predicted_noise
-            )
+            reconstructed_action = self.sqrt_reciprocal_alphas_cumulative[diffusion_timestep] * noisy_action - self.sqrt_reciprocal_minus_one_alphas_cumulative[diffusion_timestep] * predicted_noise
             reconstructed_action = jnp.clip(reconstructed_action, -self.denoised_clip_value, self.denoised_clip_value)
-            transition_mean = (
-                self.posterior_mean_coefficient_1[
-                    diffusion_timestep
-                ]
-                * reconstructed_action
-                + self.posterior_mean_coefficient_2[
-                    diffusion_timestep
-                ]
-                * noisy_action
-            )
+            transition_mean = self.posterior_mean_coefficient_1[diffusion_timestep] * reconstructed_action + self.posterior_mean_coefficient_2[diffusion_timestep] * noisy_action
             transition_std = jnp.maximum(jnp.sqrt(self.posterior_variance[diffusion_timestep]), 1e-3 if deterministic else self.denoising_std)
             transition_std = jnp.where(deterministic & (diffusion_timestep == 0), 0.0, transition_std)
             next_action = transition_mean + transition_std * jnp.clip(noise, -self.noise_clip_value, self.noise_clip_value)
@@ -267,17 +194,9 @@ class DPPO:
         action, path = jax.lax.scan(denoising_step, initial_action, (jnp.arange(self.diffusion_steps - 1, -1, -1), noise_path))
         path = jnp.moveaxis(path, 0, -2)
         full_path = jnp.concatenate([path, action[..., None, :]], axis=-2)
-        behavior_log_likelihood = self.compute_transition_log_likelihood(
-            policy_params,
-            normalized_observation,
-            full_path[..., :-1, :],
-            full_path[..., 1:, :],
-            jnp.arange(self.diffusion_steps),
-        )
+        behavior_log_likelihood = self.compute_transition_log_likelihood(policy_params, normalized_observation, full_path[..., :-1, :], full_path[..., 1:, :], jnp.arange(self.diffusion_steps))
         if self.action_rescaling:
-            processed_action = self.action_low + 0.5 * (
-                action + 1.0
-            ) * (self.action_high - self.action_low)
+            processed_action = self.action_low + 0.5 * (action + 1.0) * (self.action_high - self.action_low)
         else:
             processed_action = action
         return key, action, processed_action, full_path, behavior_log_likelihood
@@ -566,13 +485,7 @@ class DPPO:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
 
-    def save(
-        self,
-        policy_state,
-        critic_state,
-        normalizer_state,
-        reward_normalizer_state,
-    ):
+    def save(self, policy_state, critic_state, normalizer_state, reward_normalizer_state):
         checkpoint = {
             "policy": policy_state,
             "critic": critic_state,
@@ -591,14 +504,7 @@ class DPPO:
 
 
     @staticmethod
-    def load(
-        config,
-        train_env,
-        eval_env,
-        run_path,
-        writer,
-        explicitly_set_algorithm_params,
-    ):
+    def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         split_path = config.runner.load_model.split("/")
         checkpoint_directory = os.path.abspath("/".join(split_path[:-1]))
         checkpoint_file_name = split_path[-1]
@@ -607,10 +513,7 @@ class DPPO:
         with open(f"{checkpoint_directory}/config_algorithm.json") as stream:
             loaded_algorithm_config = json.load(stream)
         for key, value in loaded_algorithm_config.items():
-            if (
-                f"algorithm.{key}" not in explicitly_set_algorithm_params
-                and key in config.algorithm
-            ):
+            if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
                 config.algorithm[key] = value
         model = DPPO(config, train_env, eval_env, run_path, writer)
         target = {

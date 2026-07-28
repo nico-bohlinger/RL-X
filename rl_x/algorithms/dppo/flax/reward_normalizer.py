@@ -31,11 +31,7 @@ def normalize_reward(state, reward, terminated, truncated, gamma, reward_clip):
     delta = batch_mean - state["mean"]
     total_count = state["count"] + batch_count
     mean = state["mean"] + delta * batch_count / total_count
-    second_moment = (
-        state["variance"] * state["count"]
-        + batch_variance * batch_count
-        + delta ** 2 * state["count"] * batch_count / total_count
-    )
+    second_moment = state["variance"] * state["count"] + batch_variance * batch_count + delta ** 2 * state["count"] * batch_count / total_count
     variance = second_moment / (total_count - 1.0)
     state = {
         "return": last_return,
