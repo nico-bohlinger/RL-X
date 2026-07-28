@@ -315,12 +315,6 @@ class FPO:
                 metric_group = "rollout" if name in ["episode_return", "episode_length"] else "env_info"
                 metrics[f"{metric_group}/{name}"] = np.mean(values_collection)
 
-            # Logging
-            self.start_logging(global_step)
-            for name, value in metrics.items():
-                self.log(name, np.asarray(value), global_step)
-            self.end_logging()
-
             # Evaluating
             if self.evaluation_frequency != -1 and global_step % self.evaluation_frequency == 0:
                 self.set_eval_mode()
@@ -334,9 +328,15 @@ class FPO:
                     completed_episodes += int(np.sum(eval_terminated | eval_truncated))
                 self.set_train_mode()
 
-        # Saving
-        if self.save_model:
-            self.save()
+            # Saving
+            if self.save_model and global_step >= self.total_timesteps:
+                self.save()
+
+            # Logging
+            self.start_logging(global_step)
+            for name, value in metrics.items():
+                self.log(name, np.asarray(value), global_step)
+            self.end_logging()
 
 
     def log(self, name, value, step):

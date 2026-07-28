@@ -525,27 +525,6 @@ class DIME:
                     for name, value in metrics.items():
                         metrics_collection.setdefault(name, []).append(value)
 
-            # Logging
-            if global_step % self.logging_frequency == 0:
-                metrics = {
-                    name: np.mean(jax.device_get(values))
-                    for name, values in metrics_collection.items()
-                }
-                for name, values in step_info_collection.items():
-                    metric_group = "rollout" if name in ["episode_return", "episode_length"] else "env_info"
-                    metrics[f"{metric_group}/{name}"] = np.mean(values)
-                metrics["replay/fill_fraction"] = replay_buffer.size / replay_buffer.capacity
-                metrics["time/sps"] = self.logging_frequency / (time.time() - logging_start_time)
-                metrics["steps/nr_env_steps"] = global_step
-                metrics["steps/nr_updates"] = update_count
-                self.start_logging(global_step)
-                for name, value in metrics.items():
-                    self.log(name, value, global_step)
-                self.end_logging()
-                metrics_collection = {}
-                step_info_collection = {}
-                logging_start_time = time.time()
-
             # Evaluating
             if self.evaluation_frequency != -1 and global_step % self.evaluation_frequency == 0:
                 eval_state, unused_info = self.eval_env.reset()
@@ -563,9 +542,27 @@ class DIME:
                     eval_state, unused_reward, eval_terminated, eval_truncated, unused_info = self.eval_env.step(jax.device_get(eval_action))
                     completed_episodes += int(np.sum(eval_terminated | eval_truncated))
 
-        # Saving
-        if self.save_model:
-            self.save(self.actor_state, self.critic_state, self.entropy_state, self.observation_normalizer_state)
+            # Saving
+            if self.save_model and global_step >= self.total_timesteps:
+                self.save(self.actor_state, self.critic_state, self.entropy_state, self.observation_normalizer_state)
+
+            # Logging
+            if global_step % self.logging_frequency == 0:
+                metrics = {name: np.mean(jax.device_get(values)) for name, values in metrics_collection.items()}
+                for name, values in step_info_collection.items():
+                    metric_group = "rollout" if name in ["episode_return", "episode_length"] else "env_info"
+                    metrics[f"{metric_group}/{name}"] = np.mean(values)
+                metrics["replay/fill_fraction"] = replay_buffer.size / replay_buffer.capacity
+                metrics["time/sps"] = self.logging_frequency / (time.time() - logging_start_time)
+                metrics["steps/nr_env_steps"] = global_step
+                metrics["steps/nr_updates"] = update_count
+                self.start_logging(global_step)
+                for name, value in metrics.items():
+                    self.log(name, value, global_step)
+                self.end_logging()
+                metrics_collection = {}
+                step_info_collection = {}
+                logging_start_time = time.time()
 
 
     def log(self, name, value, step):

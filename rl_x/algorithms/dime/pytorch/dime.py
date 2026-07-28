@@ -311,6 +311,25 @@ class DIME:
                     for name, value in metrics.items():
                         metrics_collection.setdefault(name, []).append(value.detach())
 
+            # Evaluating
+            if self.evaluation_frequency != -1 and global_step % self.evaluation_frequency == 0:
+                self.set_eval_mode()
+                eval_state, unused_info = self.eval_env.reset()
+                completed_episodes = 0
+                while completed_episodes < self.evaluation_episodes:
+                    normalized_eval_state = torch.tensor(self.normalize(eval_state), dtype=torch.float32, device=self.device)
+                    with torch.inference_mode():
+                        eval_action, unused_running_cost, unused_stochastic_cost, unused_terminal_cost, unused_path = self.sample_action(self.actor, normalized_eval_state, True)
+                    if self.action_rescaling:
+                        eval_action = self.action_low + 0.5 * (eval_action + 1.0) * (self.action_high - self.action_low)
+                    eval_state, unused_reward, eval_terminated, eval_truncated, unused_info = self.eval_env.step(eval_action.cpu().numpy())
+                    completed_episodes += int(np.sum(eval_terminated | eval_truncated))
+                self.set_train_mode()
+
+            # Saving
+            if self.save_model and global_step >= self.total_timesteps:
+                self.save()
+
             # Logging
             if global_step % self.logging_frequency == 0:
                 metrics = {name: torch.stack(values).mean().item() for name, values in metrics_collection.items()}
@@ -328,25 +347,6 @@ class DIME:
                 metrics_collection = {}
                 step_info_collection = {}
                 logging_start_time = time.time()
-
-            # Evaluating
-            if self.evaluation_frequency != -1 and global_step % self.evaluation_frequency == 0:
-                self.set_eval_mode()
-                eval_state, unused_info = self.eval_env.reset()
-                completed_episodes = 0
-                while completed_episodes < self.evaluation_episodes:
-                    normalized_eval_state = torch.tensor(self.normalize(eval_state), dtype=torch.float32, device=self.device)
-                    with torch.inference_mode():
-                        eval_action, unused_running_cost, unused_stochastic_cost, unused_terminal_cost, unused_path = self.sample_action(self.actor, normalized_eval_state, True)
-                    if self.action_rescaling:
-                        eval_action = self.action_low + 0.5 * (eval_action + 1.0) * (self.action_high - self.action_low)
-                    eval_state, unused_reward, eval_terminated, eval_truncated, unused_info = self.eval_env.step(eval_action.cpu().numpy())
-                    completed_episodes += int(np.sum(eval_terminated | eval_truncated))
-                self.set_train_mode()
-
-        # Saving
-        if self.save_model:
-            self.save()
 
 
     def log(self, name, value, step):

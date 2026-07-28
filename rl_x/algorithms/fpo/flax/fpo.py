@@ -396,12 +396,6 @@ class FPO:
                 metric_group = "rollout" if name in ["episode_return", "episode_length"] else "env_info"
                 metrics[f"{metric_group}/{name}"] = np.mean(values_collection)
 
-            # Logging
-            self.start_logging(global_step)
-            for name, value in metrics.items():
-                self.log(name, np.asarray(value), global_step)
-            self.end_logging()
-
             # Evaluating
             if self.evaluation_frequency != -1 and global_step % self.evaluation_frequency == 0:
                 eval_state, unused_info = self.eval_env.reset()
@@ -418,9 +412,15 @@ class FPO:
                     eval_state, unused_reward, eval_terminated, eval_truncated, unused_info = self.eval_env.step(jax.device_get(eval_action))
                     completed_episodes += int(np.sum(eval_terminated | eval_truncated))
 
-        # Saving
-        if self.save_model:
-            self.save(self.policy_state, self.critic_state, self.ema_policy_params, self.observation_normalizer_state, self.completed_updates)
+            # Saving
+            if self.save_model and global_step >= self.total_timesteps:
+                self.save(self.policy_state, self.critic_state, self.ema_policy_params, self.observation_normalizer_state, self.completed_updates)
+
+            # Logging
+            self.start_logging(global_step)
+            for name, value in metrics.items():
+                self.log(name, np.asarray(value), global_step)
+            self.end_logging()
 
 
     def log(self, name, value, step):
