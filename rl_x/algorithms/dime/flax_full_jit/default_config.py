@@ -5,7 +5,6 @@ def get_config(algorithm_name):
     config = config_dict.ConfigDict()
 
     config.name = algorithm_name
-
     config.device = "gpu"
     config.nr_parallel_seeds = 1
     config.total_timesteps = 2000158720
@@ -29,7 +28,6 @@ def get_config(algorithm_name):
     config.v_min = -200.0
     config.v_max = 200.0
     config.critic_entropy_coefficient = 0.005
-
     config.diffusion_steps = 16
     config.score_hidden_dims = (256, 256, 256)
     config.timestep_embed_dim = 256
@@ -45,7 +43,6 @@ def get_config(algorithm_name):
     config.enable_observation_normalization = False
     config.normalizer_epsilon = 1e-8
     config.action_rescaling = False
-
     config.logging_frequency = 40960
     config.evaluation_and_save_frequency = 17301504
     config.evaluation_active = False

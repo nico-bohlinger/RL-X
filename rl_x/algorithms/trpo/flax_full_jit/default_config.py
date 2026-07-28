@@ -5,7 +5,6 @@ def get_config(algorithm_name):
     config = config_dict.ConfigDict()
 
     config.name = algorithm_name
-
     config.device = "gpu"
     config.nr_parallel_seeds = 1
     config.total_timesteps = 2000158720
