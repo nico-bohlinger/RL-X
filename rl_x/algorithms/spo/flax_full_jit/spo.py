@@ -115,24 +115,10 @@ class SPO:
             reward_normalizer_state = self.reward_normalizer_state
 
             def multi_iteration(carry, multi_iteration_step):
-                (
-                    policy_state,
-                    critic_state,
-                    normalizer_state,
-                    reward_normalizer_state,
-                    env_state,
-                    key,
-                ) = carry
+                (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key) = carry
 
                 def learning_iteration(carry, learning_iteration_step):
-                    (
-                        policy_state,
-                        critic_state,
-                        normalizer_state,
-                        reward_normalizer_state,
-                        env_state,
-                        key,
-                    ) = carry
+                    (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key) = carry
 
                     # Acting
                     def rollout_step(carry, _):
@@ -149,40 +135,16 @@ class SPO:
                         value = self.critic.apply(critic_state.params, normalized_observation).squeeze(-1)
                         env_state = self.train_env.step(env_state, self.get_processed_action(action))
                         normalized_next_observation = observation_normalizer.normalize_observation(normalizer_state, env_state.actual_next_observation) if self.normalize_observation else env_state.actual_next_observation
-                        transition = (
-                            normalized_observation,
-                            normalized_next_observation,
-                            action,
-                            log_probability,
-                            env_state.reward,
-                            value,
-                            env_state.terminated,
-                            env_state.truncated,
-                            env_state.info,
-                        )
+                        transition = normalized_observation, normalized_next_observation, action, log_probability, env_state.reward, value, env_state.terminated, env_state.truncated, env_state.info
                         if self.render:
                             if self.render_callback_type == "debug_callback":
                                 jax.debug.callback(self.train_env.render, env_state)
                             else:
                                 env_state = jax.experimental.io_callback(self.train_env.render, env_state, env_state)
-                        return (
-                            env_state,
-                            normalizer_state,
-                            key,
-                        ), transition
+                        return (env_state, normalizer_state, key), transition
 
                     (env_state, normalizer_state, key), batch = jax.lax.scan(rollout_step, (env_state, normalizer_state, key), None, self.nr_steps)
-                    (
-                        states,
-                        next_states,
-                        actions,
-                        behavior_log_probabilities,
-                        rewards,
-                        values,
-                        terminations,
-                        truncations,
-                        infos,
-                    ) = batch
+                    (states, next_states, actions, behavior_log_probabilities, rewards, values, terminations, truncations, infos) = batch
                     next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
 
                     # Calculating advantages and returns
@@ -247,21 +209,7 @@ class SPO:
 
                     def minibatch_update(carry, minibatch_indices):
                         policy_state, critic_state = carry
-                        (
-                            (_, metrics),
-                            (policy_gradients, critic_gradients),
-                        ) = grad_loss_fn(
-                            policy_state.params,
-                            critic_state.params,
-                            batch_states[minibatch_indices],
-                            batch_actions[minibatch_indices],
-                            batch_behavior_log_probabilities[
-                                minibatch_indices
-                            ],
-                            batch_advantages[minibatch_indices],
-                            batch_returns[minibatch_indices],
-                            batch_values[minibatch_indices],
-                        )
+                        ((_, metrics), (policy_gradients, critic_gradients)) = grad_loss_fn(policy_state.params, critic_state.params, batch_states[minibatch_indices], batch_actions[minibatch_indices], batch_behavior_log_probabilities[minibatch_indices], batch_advantages[minibatch_indices], batch_returns[minibatch_indices], batch_values[minibatch_indices])
                         combined_gradient_norm = jnp.sqrt(optax.global_norm(policy_gradients) ** 2 + optax.global_norm(critic_gradients) ** 2)
                         gradient_scale = jnp.minimum(1.0, self.max_grad_norm / (combined_gradient_norm + 1e-6))
                         policy_state = policy_state.apply_gradients(grads=tree.map_structure(lambda gradient: gradient * gradient_scale, policy_gradients))
@@ -277,12 +225,7 @@ class SPO:
 
                     # Logging
                     def callback(callback_carry):
-                        (
-                            metrics,
-                            learning_iteration_step,
-                            multi_iteration_step,
-                            parallel_seed_id,
-                        ) = callback_carry
+                        (metrics, learning_iteration_step, multi_iteration_step, parallel_seed_id) = callback_carry
                         current_time = time.time()
                         metrics["time/sps"] = int(self.batch_size / (current_time - self.last_time[parallel_seed_id]))
                         self.last_time[parallel_seed_id] = current_time
@@ -296,24 +239,10 @@ class SPO:
                         self.end_logging()
 
                     jax.debug.callback(callback, (combined_metrics, learning_iteration_step, multi_iteration_step, parallel_seed_id))
-                    return (
-                        policy_state,
-                        critic_state,
-                        normalizer_state,
-                        reward_normalizer_state,
-                        env_state,
-                        key,
-                    ), None
+                    return (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), None
 
                 carry, _ = jax.lax.scan(learning_iteration, (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), jnp.arange(self.nr_updates_per_multi_learning_iteration))
-                (
-                    policy_state,
-                    critic_state,
-                    normalizer_state,
-                    reward_normalizer_state,
-                    env_state,
-                    key,
-                ) = carry
+                (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key) = carry
 
                 # Evaluating
                 if self.evaluation_active:
@@ -348,23 +277,14 @@ class SPO:
                 # Saving
                 if self.save_model:
                     jax.debug.callback(self.save, policy_state, critic_state, normalizer_state, reward_normalizer_state)
-                return (
-                    policy_state,
-                    critic_state,
-                    normalizer_state,
-                    reward_normalizer_state,
-                    env_state,
-                    key,
-                ), None
+                return (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), None
 
             jax.lax.scan(multi_iteration, (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), jnp.arange(self.nr_multi_learning_and_eval_save_iterations))
 
         self.key, subkey = jax.random.split(self.key)
         seed_keys = jax.random.split(subkey, self.nr_parallel_seeds)
         train_function = jax.jit(jax.vmap(jitable_train_function))
-        self.last_time = [
-            time.time() for _ in range(self.nr_parallel_seeds)
-        ]
+        self.last_time = [time.time() for _ in range(self.nr_parallel_seeds)]
         self.start_time = deepcopy(self.last_time)
         jax.block_until_ready(train_function(seed_keys, jnp.arange(self.nr_parallel_seeds)))
         rlx_logger.info(f"Average time: {max(time.time() - start_time for start_time in self.start_time):.2f} s")
@@ -424,19 +344,13 @@ class SPO:
         with open(f"{checkpoint_directory}/config_algorithm.json") as stream:
             loaded_algorithm_config = json.load(stream)
         for key, value in loaded_algorithm_config.items():
-            if (
-                f"algorithm.{key}"
-                not in explicitly_set_algorithm_params
-                and key in config.algorithm
-            ):
+            if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
                 config.algorithm[key] = value
         model = SPO(config, train_env, eval_env, run_path, writer)
         target = {
             "policy": model.policy_state,
             "critic": model.critic_state,
-            "observation_normalizer": (
-                model.observation_normalizer_state
-            ),
+            "observation_normalizer": model.observation_normalizer_state,
             "reward_normalizer": model.reward_normalizer_state,
         }
         restore_args = orbax_utils.restore_args_from_target(target)

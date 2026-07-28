@@ -213,17 +213,7 @@ class FPO:
                         value = self.critic.apply(critic_state.params, normalized_observation).squeeze(-1)
                         env_state = self.train_env.step(env_state, processed_action)
                         normalized_next_observation = self.normalize(normalizer_state, env_state.actual_next_observation)
-                        transition = (
-                            normalized_observation,
-                            normalized_next_observation,
-                            action,
-                            action_info,
-                            env_state.reward,
-                            value,
-                            env_state.terminated,
-                            env_state.truncated,
-                            env_state.info,
-                        )
+                        transition = normalized_observation, normalized_next_observation, action, action_info, env_state.reward, value, env_state.terminated, env_state.truncated, env_state.info
                         if self.render:
                             if self.render_callback_type == "debug_callback":
                                 jax.debug.callback(self.train_env.render, env_state)
@@ -301,17 +291,7 @@ class FPO:
 
                     def minibatch_update(carry, minibatch_indices):
                         policy_state, critic_state = carry
-                        (_, metrics), (policy_gradients, critic_gradients) = grad_loss_fn(
-                            policy_state.params,
-                            critic_state.params,
-                            batch_states[minibatch_indices],
-                            batch_actions[minibatch_indices],
-                            batch_advantages[minibatch_indices],
-                            batch_returns[minibatch_indices],
-                            batch_epsilon[minibatch_indices],
-                            batch_timestep[minibatch_indices],
-                            batch_initial_statistic[minibatch_indices],
-                        )
+                        (_, metrics), (policy_gradients, critic_gradients) = grad_loss_fn(policy_state.params, critic_state.params, batch_states[minibatch_indices], batch_actions[minibatch_indices], batch_advantages[minibatch_indices], batch_returns[minibatch_indices], batch_epsilon[minibatch_indices], batch_timestep[minibatch_indices], batch_initial_statistic[minibatch_indices])
                         combined_gradient_norm = jnp.sqrt(optax.global_norm(policy_gradients) ** 2 + optax.global_norm(critic_gradients) ** 2)
                         gradient_scale = jnp.minimum(1.0, self.max_grad_norm / (combined_gradient_norm + 1e-6))
                         policy_state = policy_state.apply_gradients(grads=tree.map_structure(lambda gradient: gradient * gradient_scale, policy_gradients))

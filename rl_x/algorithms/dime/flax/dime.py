@@ -150,12 +150,7 @@ class DIME:
             backward_mean = next_action + variance_time * (-next_action / self.prior_std ** 2)
             forward_log_probability = jnp.sum(-0.5 * ((next_action - forward_mean) / transition_std) ** 2 - jnp.log(transition_std) - 0.5 * jnp.log(2.0 * jnp.pi), axis=-1)
             backward_log_probability = jnp.sum(-0.5 * ((action - backward_mean) / transition_std) ** 2 - jnp.log(transition_std) - 0.5 * jnp.log(2.0 * jnp.pi), axis=-1)
-            return (
-                next_action,
-                log_ratio
-                + backward_log_probability
-                - forward_log_probability,
-            ), next_action
+            return (next_action, log_ratio + backward_log_probability - forward_log_probability), next_action
 
         (final_latent, log_ratio), latent_path = jax.lax.scan(diffusion_step, (initial_action, jnp.zeros(initial_action.shape[:-1])), (jnp.arange(self.diffusion_steps, dtype=jnp.float32), noise_path))
         normalized_action = jnp.tanh(final_latent)
@@ -163,14 +158,7 @@ class DIME:
         running_cost = -(log_ratio + tanh_log_determinant)
         terminal_cost = jnp.sum(-0.5 * (initial_action / self.prior_std) ** 2 - jnp.log(self.prior_std) - 0.5 * jnp.log(2.0 * jnp.pi), axis=-1)
         latent_path = jnp.moveaxis(latent_path, 0, -2)
-        return (
-            key,
-            normalized_action,
-            running_cost,
-            jnp.zeros_like(running_cost),
-            terminal_cost,
-            latent_path,
-        )
+        return key, normalized_action, running_cost, jnp.zeros_like(running_cost), terminal_cost, latent_path
 
 
     def project_distribution(self, next_distribution, reward, terminated, entropy_bonus):
@@ -232,14 +220,7 @@ class DIME:
                     q_value = jnp.mean(jnp.sum(q_distribution * self.support, axis=-1), axis=0)
                     path_cost = running_cost + stochastic_cost + terminal_cost
                     loss = jnp.mean(-q_value + jax.lax.stop_gradient(entropy_coefficient) * path_cost)
-                    return loss, {
-                        "loss/actor_loss": loss,
-                        "entropy/running_cost": jnp.mean(running_cost),
-                        "entropy/stochastic_cost": jnp.mean(stochastic_cost),
-                        "entropy/terminal_cost": jnp.mean(terminal_cost),
-                        "policy/latent_abs_max": jnp.max(jnp.abs(latent_path)),
-                        "q/policy_mean": jnp.mean(q_value),
-                    }
+                    return loss, {"loss/actor_loss": loss, "entropy/running_cost": jnp.mean(running_cost), "entropy/stochastic_cost": jnp.mean(stochastic_cost), "entropy/terminal_cost": jnp.mean(terminal_cost), "policy/latent_abs_max": jnp.max(jnp.abs(latent_path)), "q/policy_mean": jnp.mean(q_value)}
 
                 (unused_actor_loss, actor_metrics), actor_gradients = jax.value_and_grad(actor_loss_fn, has_aux=True)(actor_state.params)
                 actor_state = actor_state.apply_gradients(grads=actor_gradients)
@@ -260,19 +241,7 @@ class DIME:
 
             def skip_actor_update(update_carry):
                 actor_state, target_actor_state, entropy_state = update_carry
-                return update_carry, {
-                    "loss/actor_loss": jnp.zeros(()),
-                    "entropy/running_cost": jnp.zeros(()),
-                    "entropy/stochastic_cost": jnp.zeros(()),
-                    "entropy/terminal_cost": jnp.zeros(()),
-                    "policy/latent_abs_max": jnp.zeros(()),
-                    "q/policy_mean": jnp.zeros(()),
-                    "loss/entropy_coefficient_loss": jnp.zeros(()),
-                    "entropy/coefficient": entropy_state.apply_fn(entropy_state.params),
-                    "gradients/actor_grad_norm": jnp.zeros(()),
-                    "actor/update_active": jnp.zeros(()),
-                    "entropy/target_mismatch": jnp.zeros(()),
-                }
+                return update_carry, {"loss/actor_loss": jnp.zeros(()), "entropy/running_cost": jnp.zeros(()), "entropy/stochastic_cost": jnp.zeros(()), "entropy/terminal_cost": jnp.zeros(()), "policy/latent_abs_max": jnp.zeros(()), "q/policy_mean": jnp.zeros(()), "loss/entropy_coefficient_loss": jnp.zeros(()), "entropy/coefficient": entropy_state.apply_fn(entropy_state.params), "gradients/actor_grad_norm": jnp.zeros(()), "actor/update_active": jnp.zeros(()), "entropy/target_mismatch": jnp.zeros(())}
 
             (actor_state, target_actor_state, entropy_state), actor_metrics = jax.lax.cond((update_count + 1) % self.policy_delay == 0, actor_and_temperature_update, skip_actor_update, (actor_state, target_actor_state, entropy_state))
             metrics = {
@@ -280,15 +249,7 @@ class DIME:
                 **actor_metrics,
                 "gradients/critic_grad_norm": optax.global_norm(critic_gradients),
             }
-            return (
-                actor_state,
-                target_actor_state,
-                critic_state,
-                entropy_state,
-                metrics,
-                update_count + 1,
-                key,
-            )
+            return actor_state, target_actor_state, critic_state, entropy_state, metrics, update_count + 1, key
 
 
         replay_buffer = ReplayBuffer(int(self.buffer_size), self.nr_envs, self.os_shape, self.as_shape, np.random.default_rng(self.seed))
@@ -422,20 +383,14 @@ class DIME:
         with open(f"{checkpoint_directory}/config_algorithm.json") as stream:
             loaded_algorithm_config = json.load(stream)
         for key, value in loaded_algorithm_config.items():
-            if (
-                f"algorithm.{key}"
-                not in explicitly_set_algorithm_params
-                and key in config.algorithm
-            ):
+            if f"algorithm.{key}" not in explicitly_set_algorithm_params and key in config.algorithm:
                 config.algorithm[key] = value
         model = DIME(config, train_env, eval_env, run_path, writer)
         target = {
             "actor": model.actor_state,
             "critic": model.critic_state,
             "entropy": model.entropy_state,
-            "observation_normalizer": (
-                model.observation_normalizer_state
-            ),
+            "observation_normalizer": model.observation_normalizer_state,
         }
         restore_args = orbax_utils.restore_args_from_target(target)
         checkpoint = orbax.checkpoint.PyTreeCheckpointer().restore(checkpoint_directory, item=target, restore_args=restore_args)

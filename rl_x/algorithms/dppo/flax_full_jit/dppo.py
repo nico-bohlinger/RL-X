@@ -229,18 +229,7 @@ class DPPO:
                         value = self.critic.apply(critic_state.params, normalized_observation).squeeze(-1)
                         env_state = self.train_env.step(env_state, processed_action)
                         normalized_next_observation = self.normalize(normalizer_state, env_state.actual_next_observation)
-                        transition = (
-                            normalized_observation,
-                            normalized_next_observation,
-                            action,
-                            full_path,
-                            behavior_log_likelihood,
-                            env_state.reward,
-                            value,
-                            env_state.terminated,
-                            env_state.truncated,
-                            env_state.info,
-                        )
+                        transition = normalized_observation, normalized_next_observation, action, full_path, behavior_log_likelihood, env_state.reward, value, env_state.terminated, env_state.truncated, env_state.info
                         if self.render:
                             if self.render_callback_type == "debug_callback":
                                 jax.debug.callback(self.train_env.render, env_state)
@@ -249,18 +238,7 @@ class DPPO:
                         return (env_state, normalizer_state, key), transition
 
                     (env_state, normalizer_state, key), batch = jax.lax.scan(rollout_step, (env_state, normalizer_state, key), None, self.nr_steps)
-                    (
-                        states,
-                        next_states,
-                        actions,
-                        full_paths,
-                        behavior_log_likelihoods,
-                        rewards,
-                        values,
-                        terminations,
-                        truncations,
-                        infos,
-                    ) = batch
+                    (states, next_states, actions, full_paths, behavior_log_likelihoods, rewards, values, terminations, truncations, infos) = batch
                     next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
 
                     # Calculating advantages and returns
@@ -332,38 +310,7 @@ class DPPO:
                             policy_state, critic_state = states
                             transition_indices = minibatch_indices // self.diffusion_steps
                             denoising_indices = minibatch_indices % self.diffusion_steps
-                            (
-                                (_, metrics),
-                                (
-                                    policy_gradients,
-                                    critic_gradients,
-                                ),
-                            ) = grad_loss_fn(
-                                policy_state.params,
-                                critic_state.params,
-                                batch_states[transition_indices],
-                                batch_actions[transition_indices],
-                                jnp.stack(
-                                    [
-                                        batch_full_paths[
-                                            transition_indices,
-                                            denoising_indices,
-                                        ],
-                                        batch_full_paths[
-                                            transition_indices,
-                                            denoising_indices + 1,
-                                        ],
-                                    ],
-                                    axis=-2,
-                                ),
-                                denoising_indices,
-                                batch_behavior_log_likelihoods[
-                                    transition_indices,
-                                    denoising_indices,
-                                ],
-                                batch_advantages[transition_indices],
-                                batch_returns[transition_indices],
-                            )
+                            ((_, metrics), (policy_gradients, critic_gradients)) = grad_loss_fn(policy_state.params, critic_state.params, batch_states[transition_indices], batch_actions[transition_indices], jnp.stack([batch_full_paths[transition_indices, denoising_indices], batch_full_paths[transition_indices, denoising_indices + 1]], axis=-2), denoising_indices, batch_behavior_log_likelihoods[transition_indices, denoising_indices], batch_advantages[transition_indices], batch_returns[transition_indices])
                             policy_state = policy_state.apply_gradients(grads=policy_gradients)
                             critic_state = critic_state.apply_gradients(grads=critic_gradients)
                             metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
@@ -417,14 +364,7 @@ class DPPO:
                         self.end_logging()
 
                     jax.debug.callback(callback, (combined_metrics, learning_iteration_step, multi_iteration_step, parallel_seed_id))
-                    return (
-                        policy_state,
-                        critic_state,
-                        normalizer_state,
-                        reward_normalizer_state,
-                        env_state,
-                        key,
-                    ), None
+                    return (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), None
 
                 carry, _ = jax.lax.scan(learning_iteration, (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), jnp.arange(self.nr_updates_per_multi_learning_iteration))
                 policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key = carry
@@ -460,14 +400,7 @@ class DPPO:
                 if self.save_model:
                     jax.debug.callback(self.save, policy_state, critic_state, normalizer_state, reward_normalizer_state)
 
-                return (
-                    policy_state,
-                    critic_state,
-                    normalizer_state,
-                    reward_normalizer_state,
-                    env_state,
-                    key,
-                ), None
+                return (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), None
 
             jax.lax.scan(multi_iteration, (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), jnp.arange(self.nr_multi_learning_and_eval_save_iterations))
 

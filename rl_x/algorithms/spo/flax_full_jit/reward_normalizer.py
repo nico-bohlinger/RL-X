@@ -26,9 +26,4 @@ def normalize_reward(state, reward, terminated, truncated, gamma):
     mean = state["mean"] + delta * batch_count / total_count
     combined_second_moment = state["variance"] * state["count"] + batch_variance * batch_count + delta ** 2 * state["count"] * batch_count / total_count
     variance = combined_second_moment / total_count
-    return {
-        "return": last_return,
-        "mean": mean,
-        "variance": variance,
-        "count": total_count,
-    }, jnp.clip(reward / jnp.sqrt(variance[None] + 1e-8), -10.0, 10.0)
+    return {"return": last_return, "mean": mean, "variance": variance, "count": total_count}, jnp.clip(reward / jnp.sqrt(variance[None] + 1e-8), -10.0, 10.0)

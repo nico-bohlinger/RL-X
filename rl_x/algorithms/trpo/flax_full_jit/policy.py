@@ -15,11 +15,7 @@ def get_policy(config, env):
     policy_observation_indices = getattr(env, "policy_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return (Policy(env.single_action_space.shape, config.algorithm.std_dev, policy_observation_indices),
-                get_processed_action_function(
-                    config.algorithm.action_clipping_and_rescaling,
-                    jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high)
-                ))
+        return Policy(env.single_action_space.shape, config.algorithm.std_dev, policy_observation_indices), get_processed_action_function(config.algorithm.action_clipping_and_rescaling, jnp.array(env.single_action_space.low), jnp.array(env.single_action_space.high))
 
 
 class Policy(nn.Module):

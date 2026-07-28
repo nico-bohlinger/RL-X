@@ -264,23 +264,7 @@ class DPPO:
 
                 def perform_update(states):
                     policy_state, critic_state = states
-                    (unused_loss, metrics), (policy_gradients, critic_gradients) = grad_loss_fn(
-                        policy_state.params,
-                        critic_state.params,
-                        batch_states[transition_indices],
-                        batch_actions[transition_indices],
-                        jnp.stack(
-                            [
-                                batch_full_paths[transition_indices, denoising_indices],
-                                batch_full_paths[transition_indices, denoising_indices + 1],
-                            ],
-                            axis=-2,
-                        ),
-                        denoising_indices,
-                        batch_behavior_log_likelihoods[transition_indices, denoising_indices],
-                        batch_advantages[transition_indices],
-                        batch_returns[transition_indices],
-                    )
+                    (unused_loss, metrics), (policy_gradients, critic_gradients) = grad_loss_fn(policy_state.params, critic_state.params, batch_states[transition_indices], batch_actions[transition_indices], jnp.stack([batch_full_paths[transition_indices, denoising_indices], batch_full_paths[transition_indices, denoising_indices + 1]], axis=-2), denoising_indices, batch_behavior_log_likelihoods[transition_indices, denoising_indices], batch_advantages[transition_indices], batch_returns[transition_indices])
                     policy_state = policy_state.apply_gradients(grads=policy_gradients)
                     critic_state = critic_state.apply_gradients(grads=critic_gradients)
                     metrics["gradients/policy_grad_norm"] = optax.global_norm(policy_gradients)
@@ -289,22 +273,7 @@ class DPPO:
                     return (policy_state, critic_state), metrics
 
                 def skip_update(states):
-                    return states, {
-                        "loss/policy_gradient_loss": jnp.zeros(()),
-                        "loss/critic_loss": jnp.zeros(()),
-                        "policy_ratio/mean": jnp.ones(()),
-                        "policy_ratio/min": jnp.ones(()),
-                        "policy_ratio/max": jnp.ones(()),
-                        "policy_ratio/clip_fraction": jnp.zeros(()),
-                        "policy_ratio/approx_kl": jnp.zeros(()),
-                        "policy_ratio/log_ratio_abs_max": jnp.zeros(()),
-                        "diffusion/denoising_index_mean": jnp.zeros(()),
-                        "diffusion/clipping_epsilon_mean": jnp.zeros(()),
-                        "policy/latent_action_abs_mean": jnp.zeros(()),
-                        "gradients/policy_grad_norm": jnp.zeros(()),
-                        "gradients/critic_grad_norm": jnp.zeros(()),
-                        "optimization/update_active": jnp.zeros(()),
-                    }
+                    return states, {"loss/policy_gradient_loss": jnp.zeros(()), "loss/critic_loss": jnp.zeros(()), "policy_ratio/mean": jnp.ones(()), "policy_ratio/min": jnp.ones(()), "policy_ratio/max": jnp.ones(()), "policy_ratio/clip_fraction": jnp.zeros(()), "policy_ratio/approx_kl": jnp.zeros(()), "policy_ratio/log_ratio_abs_max": jnp.zeros(()), "diffusion/denoising_index_mean": jnp.zeros(()), "diffusion/clipping_epsilon_mean": jnp.zeros(()), "policy/latent_action_abs_mean": jnp.zeros(()), "gradients/policy_grad_norm": jnp.zeros(()), "gradients/critic_grad_norm": jnp.zeros(()), "optimization/update_active": jnp.zeros(())}
 
                 (policy_state, critic_state), metrics = jax.lax.cond(update_active, perform_update, skip_update, (policy_state, critic_state))
                 if self.target_kl is not None:

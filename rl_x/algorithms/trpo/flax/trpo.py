@@ -173,12 +173,7 @@ class TRPO:
                 next_residual_squared = jnp.dot(next_residual, next_residual)
                 beta = next_residual_squared / jnp.maximum(residual_squared, 1e-8)
                 active = residual_squared > self.cg_residual_tolerance
-                return (
-                    jnp.where(active, next_solution, solution),
-                    jnp.where(active, next_residual, residual),
-                    jnp.where(active, next_residual + beta * direction, direction),
-                    jnp.where(active, next_residual_squared, residual_squared),
-                ), None
+                return (jnp.where(active, next_solution, solution), jnp.where(active, next_residual, residual), jnp.where(active, next_residual + beta * direction, direction), jnp.where(active, next_residual_squared, residual_squared)), None
 
             residual_squared = jnp.dot(policy_gradient, policy_gradient)
             cg_carry = (jnp.zeros_like(policy_gradient), policy_gradient, policy_gradient, residual_squared)
@@ -194,21 +189,9 @@ class TRPO:
                 candidate_objective = policy_objective(candidate_params)
                 candidate_kl = mean_kl(candidate_params)
                 valid = (~accepted) & jnp.isfinite(candidate_objective) & jnp.isfinite(candidate_kl) & (candidate_objective > old_policy_objective) & (candidate_kl <= self.target_kl)
-                return (
-                    jnp.where(valid, candidate_params, accepted_params),
-                    accepted | valid,
-                    jnp.where(valid, candidate_objective, accepted_objective),
-                    jnp.where(valid, candidate_kl, accepted_kl),
-                    jnp.where(valid, line_search_step, accepted_step),
-                ), None
+                return (jnp.where(valid, candidate_params, accepted_params), accepted | valid, jnp.where(valid, candidate_objective, accepted_objective), jnp.where(valid, candidate_kl, accepted_kl), jnp.where(valid, line_search_step, accepted_step)), None
 
-            line_search_carry = (
-                flat_policy_params,
-                jnp.array(False),
-                old_policy_objective,
-                jnp.array(0.0),
-                jnp.array(self.line_search_max_steps),
-            )
+            line_search_carry = flat_policy_params, jnp.array(False), old_policy_objective, jnp.array(0.0), jnp.array(self.line_search_max_steps)
             line_search_carry, _ = jax.lax.scan(line_search_iteration, line_search_carry, jnp.arange(self.line_search_max_steps))
             accepted_params, line_search_success, new_policy_objective, new_kl, accepted_step = line_search_carry
             policy_state = policy_state.replace(params=unravel_policy_params(accepted_params))
