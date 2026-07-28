@@ -39,7 +39,7 @@ class TRPO:
         self.total_timesteps = config.algorithm.total_timesteps
         self.nr_envs = config.environment.nr_envs
         self.render = config.environment.render
-        self.render_callback_type = getattr(config.environment, "render_callback_type", "io_callback")
+        self.render_callback_type = getattr(config.environment, 'render_callback_type', 'io_callback')
         self.critic_learning_rate = config.algorithm.critic_learning_rate
         self.anneal_critic_learning_rate = config.algorithm.anneal_critic_learning_rate
         self.nr_steps = config.algorithm.nr_steps
@@ -58,12 +58,12 @@ class TRPO:
         self.std_dev = config.algorithm.std_dev
         self.evaluation_and_save_frequency = config.algorithm.evaluation_and_save_frequency
         self.evaluation_active = config.algorithm.evaluation_active
-        self.batch_size = self.nr_envs * self.nr_steps
-        self.nr_updates = self.total_timesteps // self.batch_size
+        self.batch_size = config.environment.nr_envs * config.algorithm.nr_steps
+        self.nr_updates = config.algorithm.total_timesteps // self.batch_size
         self.nr_critic_minibatches = self.batch_size // self.critic_minibatch_size
         self.nr_critic_optimizer_steps = self.nr_updates * self.nr_critic_updates * self.nr_critic_minibatches
-        if self.evaluation_and_save_frequency == -1:
-            self.evaluation_and_save_frequency = self.batch_size * self.nr_updates
+        if config.algorithm.evaluation_and_save_frequency == -1:
+            self.evaluation_and_save_frequency = self.batch_size * (self.total_timesteps // self.batch_size)
         self.nr_multi_learning_and_eval_save_iterations = self.total_timesteps // self.evaluation_and_save_frequency
         self.nr_updates_per_multi_learning_iteration = self.evaluation_and_save_frequency // self.batch_size
         self.os_shape = self.train_env.single_observation_space.shape
@@ -112,7 +112,7 @@ class TRPO:
         self.policy_state = TrainState.create(
             apply_fn=self.policy.apply,
             params=self.policy.init(policy_key, env_state.next_observation),
-            tx=optax.set_to_zero()
+            tx=optax.set_to_zero(),
         )
 
         self.critic_state = TrainState.create(
@@ -176,18 +176,24 @@ class TRPO:
                     states, next_states, actions, rewards, values, terminations, log_probs, infos = batch
 
                     # Calculating advantages and returns
-                    def compute_advantages(carry, t):
-                        advantage = deltas[t] + self.gamma * self.gae_lambda * (1 - terminations[t]) * carry
-                        return advantage, advantage
+                    def calculate_gae_advantages(critic_state, next_states, rewards, values, terminations):
+                        def compute_advantages(carry, t):
+                            prev_advantage = carry[0]
+                            advantage = delta[t] + self.gamma * self.gae_lambda * (1 - terminations[t]) * prev_advantage
+                            return (advantage,), advantage
 
-                    next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
-                    deltas = rewards + self.gamma * next_values * (1.0 - terminations) - values
-                    last_advantage = deltas[-1]
-                    _, earlier_advantages = jax.lax.scan(compute_advantages, last_advantage, jnp.arange(self.nr_steps - 2, -1, -1), unroll=True)
-                    advantages = jnp.concatenate([earlier_advantages[::-1], last_advantage[None]])
-                    returns = advantages + values
+                        next_values = self.critic.apply(critic_state.params, next_states).squeeze(-1)
+                        delta = rewards + self.gamma * next_values * (1.0 - terminations) - values
+                        init_advantages = delta[-1]
+                        _, advantages = jax.lax.scan(compute_advantages, (init_advantages,), jnp.arange(self.nr_steps - 2, -1, -1), unroll=True)
+                        advantages = jnp.concatenate([advantages[::-1], jnp.array([init_advantages])])
+                        returns = advantages + values
+                        return advantages, returns
+
+                    advantages, returns = calculate_gae_advantages(critic_state, next_states, rewards, values, terminations)
 
                     # Optimizing
+                    # Policy update
                     batch_states = states.reshape((-1,) + self.os_shape)
                     batch_actions = actions.reshape((-1,) + self.as_shape)
                     batch_advantages = advantages.reshape(-1)
@@ -269,6 +275,7 @@ class TRPO:
                     accepted_params, line_search_success, new_policy_objective, new_kl, accepted_step = line_search_carry
                     policy_state = policy_state.replace(params=unravel_policy_params(accepted_params))
 
+                    # Critic update
                     def critic_loss(critic_params, state_b, return_b):
                         value = self.critic.apply(critic_params, state_b).squeeze(-1)
                         return 0.5 * jnp.mean((value - return_b) ** 2)
@@ -290,6 +297,7 @@ class TRPO:
 
                     critic_state, (critic_losses, critic_gradient_norms) = jax.lax.scan(critic_minibatch_update, critic_state, critic_batch_indices)
 
+                    # Create metrics
                     optimization_metrics = {
                         "loss/policy_objective": new_policy_objective,
                         "loss/critic_loss": jnp.mean(critic_losses),
@@ -308,10 +316,10 @@ class TRPO:
                         "v_value/explained_variance": 1 - jnp.var(batch_returns - values.reshape(-1)) / (jnp.var(batch_returns) + 1e-8),
                     }
 
+                    # Logging
                     combined_metrics = {**infos, **optimization_metrics}
                     combined_metrics = tree.map_structure(lambda x: jnp.mean(x), combined_metrics)
 
-                    # Logging
                     def callback(carry):
                         metrics, learning_iteration_step, combined_learning_iteration_step, parallel_seed_id = carry
                         current_time = time.time()
@@ -323,8 +331,8 @@ class TRPO:
                         metrics["steps/nr_critic_updates"] = combined_learning_iteration_step.item() * self.nr_critic_updates * self.nr_critic_minibatches
                         is_last_train_update_before_eval = self.evaluation_active and (learning_iteration_step + 1 == self.nr_updates_per_multi_learning_iteration)
                         self.start_logging(global_step)
-                        for name, value in metrics.items():
-                            self.log(name, np.asarray(value), global_step)
+                        for key, value in metrics.items():
+                            self.log(f"{key}", np.asarray(value), global_step)
                         self.end_logging(wandb_commit=not is_last_train_update_before_eval)
 
                     combined_learning_iteration_step = (multi_learning_iteration_step * self.nr_updates_per_multi_learning_iteration) + learning_iteration_step + 1
@@ -340,8 +348,12 @@ class TRPO:
                 if self.evaluation_active:
                     def single_eval_rollout(single_eval_rollout_carry, _):
                         policy_state, eval_env_state = single_eval_rollout_carry
+
                         eval_action_mean, _ = self.policy.apply(policy_state.params, eval_env_state.next_observation)
-                        eval_env_state = self.eval_env.step(eval_env_state, self.get_processed_action(eval_action_mean))
+                        eval_action = eval_action_mean
+                        eval_processed_action = self.get_processed_action(eval_action)
+                        eval_env_state = self.eval_env.step(eval_env_state, eval_processed_action)
+
                         return (policy_state, eval_env_state), None
 
                     key, reset_key = jax.random.split(key)
@@ -359,8 +371,8 @@ class TRPO:
                         metrics, combined_learning_iteration_step = metrics_and_global_step
                         global_step = int(combined_learning_iteration_step.item() * self.nr_steps * self.nr_envs)
                         self.start_logging(global_step)
-                        for name, value in metrics.items():
-                            self.log(name, np.asarray(value), global_step)
+                        for key, value in metrics.items():
+                            self.log(f"{key}", np.asarray(value), global_step)
                         self.end_logging()
 
                     combined_learning_iteration_step = (multi_learning_iteration_step + 1) * self.nr_updates_per_multi_learning_iteration
@@ -368,7 +380,9 @@ class TRPO:
 
                 # Saving
                 if self.save_model:
-                    jax.debug.callback(self.save, policy_state, critic_state)
+                    def save_with_check(policy_state, critic_state):
+                        self.save(policy_state, critic_state)
+                    jax.debug.callback(save_with_check, policy_state, critic_state)
 
                 return (policy_state, critic_state, env_state, key), None
 
@@ -420,8 +434,8 @@ class TRPO:
         }
         save_args = orbax_utils.save_args_from_target(checkpoint)
         self.latest_model_checkpointer.save(f"{self.save_path}/tmp", checkpoint, save_args=save_args)
-        with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as file:
-            json.dump(self.config.algorithm.to_dict(), file)
+        with open(f"{self.save_path}/tmp/config_algorithm.json", "w") as f:
+            json.dump(self.config.algorithm.to_dict(), f)
         shutil.make_archive(f"{self.save_path}/{self.latest_model_file_name}", "zip", f"{self.save_path}/tmp")
         os.rename(f"{self.save_path}/{self.latest_model_file_name}.zip", f"{self.save_path}/{self.latest_model_file_name}")
         shutil.rmtree(f"{self.save_path}/tmp")
@@ -464,8 +478,12 @@ class TRPO:
 
         @jax.jit
         def rollout(env_state, key):
-            action_mean, _ = self.policy.apply(self.policy_state.params, env_state.next_observation)
-            env_state = self.train_env.step(env_state, self.get_processed_action(action_mean))
+            # key, subkey = jax.random.split(key)
+            action_mean, action_logstd = self.policy.apply(self.policy_state.params, env_state.next_observation)
+            # action_std = jnp.exp(action_logstd)
+            action = action_mean # + action_std * jax.random.normal(subkey, shape=action_mean.shape)
+            processed_action = self.get_processed_action(action)
+            env_state = self.train_env.step(env_state, processed_action)
             return env_state, key
 
         self.key, subkey = jax.random.split(self.key)

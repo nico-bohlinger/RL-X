@@ -48,4 +48,5 @@ def get_processed_action_function(action_clipping_and_rescaling, env_as_low, env
             clipped_action = jnp.clip(action, -1, 1)
             return env_as_low + (0.5 * (clipped_action + 1.0) * (env_as_high - env_as_low))
         return jax.jit(get_clipped_and_scaled_action)
-    return jax.jit(lambda x: x)
+    else:
+        return jax.jit(lambda x: x)
