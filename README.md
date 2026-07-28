@@ -1,7 +1,17 @@
 <img src="docs/assets/images/logo.png" align="right" width="25%"/>
 
 
-# RL-X
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/readme_title_dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/images/readme_title_light.svg">
+  <img src="docs/assets/images/readme_title_light.svg" alt="RL-X" height="52">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/readme_separator_dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/images/readme_separator_light.svg">
+  <img src="docs/assets/images/readme_separator_light.svg" alt="" width="72%" height="1">
+</picture>
 
 A framework for Reinforcement Learning research.
 
