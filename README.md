@@ -9,7 +9,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/readme_separator_dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/images/readme_separator_light.svg">
-  <img src="docs/assets/images/readme_separator_light.svg" alt="" width="66%" height="1" align="top">
+  <img src="docs/assets/images/readme_separator_light.svg" alt="" width="66%" height="2" align="top">
 </picture>
 
 A framework for Reinforcement Learning research.
