@@ -8,7 +8,7 @@ def get_config(algorithm_name):
 
     config.device = "gpu"
     config.nr_parallel_seeds = 1
-    config.total_timesteps = 2_000_158_720
+    config.total_timesteps = 2000158720
     config.actor_learning_rate = 3e-4
     config.critic_learning_rate = 3e-4
     config.entropy_learning_rate = 1e-3
@@ -47,7 +47,7 @@ def get_config(algorithm_name):
     config.action_rescaling = False
 
     config.logging_frequency = 40960
-    config.evaluation_and_save_frequency = 17_301_504
+    config.evaluation_and_save_frequency = 17301504
     config.evaluation_active = False
 
     return config

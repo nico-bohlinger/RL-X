@@ -25,7 +25,7 @@ def get_config(algorithm_name):
     config.reward_scaling = 1.0
     config.normalize_observation = True
     config.observation_normalizer_epsilon = 1e-2
-    config.observation_normalizer_max_count = 100_000_000
+    config.observation_normalizer_max_count = 100000000
     config.flow_steps = 64
     config.timestep_embed_dim = 8
     config.policy_hidden_dims = (256, 256, 256)
