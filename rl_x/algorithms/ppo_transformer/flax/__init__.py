@@ -1,0 +1,8 @@
+from rl_x.algorithms.algorithm_manager import extract_algorithm_name_from_file, register_algorithm
+from rl_x.algorithms.ppo_transformer.flax.ppo_transformer import PPO_Transformer
+from rl_x.algorithms.ppo_transformer.flax.default_config import get_config
+from rl_x.algorithms.ppo_transformer.flax.general_properties import GeneralProperties
+
+
+PPO_TRANSFORMER_FLAX = extract_algorithm_name_from_file(__file__)
+register_algorithm(PPO_TRANSFORMER_FLAX, get_config, PPO_Transformer, GeneralProperties)
