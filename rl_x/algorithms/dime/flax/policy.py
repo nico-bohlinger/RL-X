@@ -12,15 +12,7 @@ def get_policy(config, env):
     policy_observation_indices = getattr(env, "policy_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return ScorePolicy(
-            env.single_action_space.shape[0],
-            config.algorithm.timestep_embed_dim,
-            config.algorithm.score_hidden_dims,
-            config.algorithm.score_output_scale,
-            config.algorithm.initial_timestep,
-            config.algorithm.initial_friction,
-            policy_observation_indices,
-        )
+        return ScorePolicy(env.single_action_space.shape[0], config.algorithm.timestep_embed_dim, config.algorithm.score_hidden_dims, config.algorithm.score_output_scale, config.algorithm.initial_timestep, config.algorithm.initial_friction, policy_observation_indices)
 
 
 class ScorePolicy(nn.Module):

@@ -27,18 +27,10 @@ class BatchRenorm(nn.Module):
             normalized = (x - mean) / standard_deviation
             normalized = jnp.where(steps.value >= self.warm_up_steps, normalized * r + d, normalized)
             if not self.is_initializing():
-                running_mean.value = (
-                    self.momentum * running_mean.value
-                    + (1.0 - self.momentum) * mean
-                )
-                running_variance.value = (
-                    self.momentum * running_variance.value
-                    + (1.0 - self.momentum) * variance
-                )
+                running_mean.value = self.momentum * running_mean.value + (1.0 - self.momentum) * mean
+                running_variance.value = self.momentum * running_variance.value + (1.0 - self.momentum) * variance
                 steps.value += 1
         else:
-            normalized = (
-                x - running_mean.value
-            ) / jnp.sqrt(running_variance.value + self.epsilon)
+            normalized = (x - running_mean.value) / jnp.sqrt(running_variance.value + self.epsilon)
 
         return normalized * scale + bias

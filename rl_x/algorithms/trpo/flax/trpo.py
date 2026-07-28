@@ -90,14 +90,7 @@ class TRPO:
 
         self.policy_state = TrainState.create(apply_fn=self.policy.apply, params=self.policy.init(policy_key, state), tx=optax.set_to_zero())
 
-        self.critic_state = TrainState.create(
-            apply_fn=self.critic.apply,
-            params=self.critic.init(critic_key, state),
-            tx=optax.chain(
-                optax.clip_by_global_norm(self.critic_max_grad_norm),
-                optax.inject_hyperparams(optax.adam)(learning_rate=critic_learning_rate),
-            )
-        )
+        self.critic_state = TrainState.create(apply_fn=self.critic.apply, params=self.critic.init(critic_key, state), tx=optax.chain(optax.clip_by_global_norm(self.critic_max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=critic_learning_rate)))
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -130,12 +123,7 @@ class TRPO:
                 advantage = delta + self.gamma * self.gae_lambda * continuation * next_advantage
                 return advantage, advantage
 
-            _, advantages = jax.lax.scan(
-                advantage_step,
-                jnp.zeros_like(values[-1]),
-                (rewards, values, next_values, terminations, truncations),
-                reverse=True,
-            )
+            _, advantages = jax.lax.scan(advantage_step, jnp.zeros_like(values[-1]), (rewards, values, next_values, terminations, truncations), reverse=True)
             return advantages, advantages + values
 
 
@@ -160,24 +148,14 @@ class TRPO:
             def policy_objective(flat_params):
                 action_mean, action_logstd = self.policy.apply(unravel_policy_params(flat_params), policy_states)
                 action_std = jnp.exp(action_logstd)
-                new_log_prob = jnp.sum(
-                    -0.5 * ((policy_actions - action_mean) / action_std) ** 2
-                    - 0.5 * jnp.log(2.0 * jnp.pi)
-                    - action_logstd,
-                    axis=-1,
-                )
+                new_log_prob = jnp.sum(-0.5 * ((policy_actions - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd, axis=-1)
                 return jnp.mean(policy_advantages * jnp.exp(new_log_prob - policy_old_log_probs))
 
             def mean_kl(flat_params):
                 action_mean, action_logstd = self.policy.apply(unravel_policy_params(flat_params), policy_states)
                 old_variance = jnp.exp(2.0 * old_action_logstd)
                 new_variance = jnp.exp(2.0 * action_logstd)
-                kl = (
-                    action_logstd
-                    - old_action_logstd
-                    + (old_variance + (old_action_mean - action_mean) ** 2) / (2.0 * new_variance)
-                    - 0.5
-                )
+                kl = action_logstd - old_action_logstd + (old_variance + (old_action_mean - action_mean) ** 2) / (2.0 * new_variance) - 0.5
                 return jnp.mean(jnp.sum(kl, axis=-1))
 
             old_policy_objective, policy_gradient = jax.value_and_grad(policy_objective)(flat_policy_params)
@@ -215,13 +193,7 @@ class TRPO:
                 candidate_params = flat_policy_params + fraction * full_step
                 candidate_objective = policy_objective(candidate_params)
                 candidate_kl = mean_kl(candidate_params)
-                valid = (
-                    (~accepted)
-                    & jnp.isfinite(candidate_objective)
-                    & jnp.isfinite(candidate_kl)
-                    & (candidate_objective > old_policy_objective)
-                    & (candidate_kl <= self.target_kl)
-                )
+                valid = (~accepted) & jnp.isfinite(candidate_objective) & jnp.isfinite(candidate_kl) & (candidate_objective > old_policy_objective) & (candidate_kl <= self.target_kl)
                 return (
                     jnp.where(valid, candidate_params, accepted_params),
                     accepted | valid,
@@ -353,11 +325,7 @@ class TRPO:
 
 
             # Optimizing
-            self.policy_state, self.critic_state, optimization_metrics, self.key = update(
-                self.policy_state, self.critic_state,
-                batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs,
-                self.key
-            )
+            self.policy_state, self.critic_state, optimization_metrics, self.key = update(self.policy_state, self.critic_state, batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs, self.key)
             optimization_metrics = {key: value.item() for key, value in optimization_metrics.items()}
             nr_updates += 1
 

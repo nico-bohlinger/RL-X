@@ -13,12 +13,7 @@ def update_observation_normalizer(state, observations):
     delta = observations - state["mean"]
     total_count = state["count"] + 1.0
     mean = state["mean"] + delta / total_count[:, None]
-    combined_second_moment = (
-        state["var"] * state["count"][:, None]
-        + jnp.square(delta)
-        * state["count"][:, None]
-        / total_count[:, None]
-    )
+    combined_second_moment = state["var"] * state["count"][:, None] + jnp.square(delta) * state["count"][:, None] / total_count[:, None]
     return {
         "mean": mean,
         "var": combined_second_moment / total_count[:, None],

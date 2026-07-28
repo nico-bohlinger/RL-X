@@ -109,20 +109,9 @@ class TRPO:
         critic_learning_rate = linear_schedule if self.anneal_critic_learning_rate else self.critic_learning_rate
         env_state = self.train_env.reset(reset_key, False)
 
-        self.policy_state = TrainState.create(
-            apply_fn=self.policy.apply,
-            params=self.policy.init(policy_key, env_state.next_observation),
-            tx=optax.set_to_zero(),
-        )
+        self.policy_state = TrainState.create(apply_fn=self.policy.apply, params=self.policy.init(policy_key, env_state.next_observation), tx=optax.set_to_zero())
 
-        self.critic_state = TrainState.create(
-            apply_fn=self.critic.apply,
-            params=self.critic.init(critic_key, env_state.next_observation),
-            tx=optax.chain(
-                optax.clip_by_global_norm(self.critic_max_grad_norm),
-                optax.inject_hyperparams(optax.adam)(learning_rate=critic_learning_rate),
-            )
-        )
+        self.critic_state = TrainState.create(apply_fn=self.critic.apply, params=self.critic.init(critic_key, env_state.next_observation), tx=optax.chain(optax.clip_by_global_norm(self.critic_max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=critic_learning_rate)))
 
         if self.save_model:
             os.makedirs(self.save_path)
@@ -287,11 +276,7 @@ class TRPO:
                     critic_batch_indices = critic_batch_indices.reshape((self.nr_critic_updates * self.nr_critic_minibatches, self.critic_minibatch_size))
 
                     def critic_minibatch_update(critic_state, minibatch_indices):
-                        critic_loss_value, critic_gradients = critic_grad_loss(
-                            critic_state.params,
-                            batch_states[minibatch_indices],
-                            batch_returns[minibatch_indices]
-                        )
+                        critic_loss_value, critic_gradients = critic_grad_loss(critic_state.params, batch_states[minibatch_indices], batch_returns[minibatch_indices])
                         critic_state = critic_state.apply_gradients(grads=critic_gradients)
                         return critic_state, (critic_loss_value, optax.global_norm(critic_gradients))
 

@@ -138,23 +138,12 @@ class DPPO:
 
         policy_learning_rate = policy_linear_schedule if self.anneal_learning_rate else self.policy_learning_rate
         if self.max_grad_norm != -1.0:
-            policy_optimizer = optax.chain(
-                optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adam)(learning_rate=policy_learning_rate),
-            )
+            policy_optimizer = optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=policy_learning_rate))
         else:
             policy_optimizer = optax.chain(optax.inject_hyperparams(optax.adam)(learning_rate=policy_learning_rate))
         critic_optimizer = optax.chain(optax.inject_hyperparams(optax.adam)(learning_rate=self.critic_learning_rate))
-        self.policy_state = TrainState.create(
-            apply_fn=self.policy.apply,
-            params=self.policy.init(policy_key, dummy_observation, dummy_action, dummy_timestep),
-            tx=policy_optimizer,
-        )
-        self.critic_state = TrainState.create(
-            apply_fn=self.critic.apply,
-            params=self.critic.init(critic_key, dummy_observation),
-            tx=critic_optimizer,
-        )
+        self.policy_state = TrainState.create(apply_fn=self.policy.apply, params=self.policy.init(policy_key, dummy_observation, dummy_action, dummy_timestep), tx=policy_optimizer)
+        self.critic_state = TrainState.create(apply_fn=self.critic.apply, params=self.critic.init(critic_key, dummy_observation), tx=critic_optimizer)
         self.observation_normalizer_state = observation_normalizer.init_observation_normalizer_state(self.os_shape)
         self.reward_normalizer_state = reward_normalizer.init_reward_normalizer_state(self.nr_envs)
 
@@ -276,17 +265,7 @@ class DPPO:
 
                     # Calculating advantages and returns
                     if self.normalize_reward:
-                        (
-                            reward_normalizer_state,
-                            normalized_rewards,
-                        ) = reward_normalizer.normalize_reward(
-                            reward_normalizer_state,
-                            rewards,
-                            terminations,
-                            truncations,
-                            self.gamma,
-                            self.reward_clip,
-                        )
+                        (reward_normalizer_state, normalized_rewards) = reward_normalizer.normalize_reward(reward_normalizer_state, rewards, terminations, truncations, self.gamma, self.reward_clip)
                     else:
                         normalized_rewards = rewards
 
@@ -297,18 +276,7 @@ class DPPO:
                         advantage = delta + self.gamma * self.gae_lambda * continuation * next_advantage
                         return advantage, advantage
 
-                    _, advantages = jax.lax.scan(
-                        advantage_step,
-                        jnp.zeros_like(values[-1]),
-                        (
-                            normalized_rewards,
-                            values,
-                            next_values,
-                            terminations,
-                            truncations,
-                        ),
-                        reverse=True,
-                    )
+                    _, advantages = jax.lax.scan(advantage_step, jnp.zeros_like(values[-1]), (normalized_rewards, values, next_values, terminations, truncations), reverse=True)
                     returns = advantages + values
 
                     batch_states = states.reshape((-1,) + self.os_shape)
@@ -427,10 +395,7 @@ class DPPO:
                             update_active = update_active & (metrics["policy_ratio/approx_kl"] <= self.target_kl)
                         return (policy_state, critic_state, update_active), metrics
 
-                    (
-                        (policy_state, critic_state, _),
-                        optimization_metrics,
-                    ) = jax.lax.scan(minibatch_update, (policy_state, critic_state, jnp.ones((), dtype=jnp.bool_)), batch_indices)
+                    ((policy_state, critic_state, _), optimization_metrics) = jax.lax.scan(minibatch_update, (policy_state, critic_state, jnp.ones((), dtype=jnp.bool_)), batch_indices)
                     optimization_metrics["lr/policy_learning_rate"] = policy_state.opt_state[-1].hyperparams["learning_rate"]
                     optimization_metrics["lr/critic_learning_rate"] = critic_state.opt_state[-1].hyperparams["learning_rate"]
                     optimization_metrics["v_value/explained_variance"] = 1.0 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
@@ -461,27 +426,14 @@ class DPPO:
                         key,
                     ), None
 
-                carry, _ = jax.lax.scan(
-                    learning_iteration,
-                    (
-                        policy_state,
-                        critic_state,
-                        normalizer_state,
-                        reward_normalizer_state,
-                        env_state,
-                        key,
-                    ),
-                    jnp.arange(self.nr_updates_per_multi_learning_iteration),
-                )
+                carry, _ = jax.lax.scan(learning_iteration, (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), jnp.arange(self.nr_updates_per_multi_learning_iteration))
                 policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key = carry
 
                 # Evaluating
                 if self.evaluation_active:
                     def eval_rollout(eval_carry, _):
                         eval_env_state, key = eval_carry
-                        key, unused_action, processed_action, unused_path, unused_log_likelihood = self.sample_action(
-                            policy_state.params, normalizer_state, eval_env_state.next_observation, key, True
-                        )
+                        key, unused_action, processed_action, unused_path, unused_log_likelihood = self.sample_action(policy_state.params, normalizer_state, eval_env_state.next_observation, key, True)
                         eval_env_state = self.eval_env.step(eval_env_state, processed_action)
                         return (eval_env_state, key), None
 
@@ -517,18 +469,7 @@ class DPPO:
                     key,
                 ), None
 
-            jax.lax.scan(
-                multi_iteration,
-                (
-                    policy_state,
-                    critic_state,
-                    normalizer_state,
-                    reward_normalizer_state,
-                    env_state,
-                    key,
-                ),
-                jnp.arange(self.nr_multi_learning_and_eval_save_iterations),
-            )
+            jax.lax.scan(multi_iteration, (policy_state, critic_state, normalizer_state, reward_normalizer_state, env_state, key), jnp.arange(self.nr_multi_learning_and_eval_save_iterations))
 
         self.key, subkey = jax.random.split(self.key)
         seed_keys = jax.random.split(subkey, self.nr_parallel_seeds)
@@ -621,13 +562,7 @@ class DPPO:
         def rollout(env_state, key):
             def step(carry, _):
                 env_state, key = carry
-                key, _, processed_action, _, _ = self.sample_action(
-                    self.policy_state.params,
-                    self.observation_normalizer_state,
-                    env_state.next_observation,
-                    key,
-                    deterministic=True,
-                )
+                key, _, processed_action, _, _ = self.sample_action(self.policy_state.params, self.observation_normalizer_state, env_state.next_observation, key, deterministic=True)
                 env_state = self.eval_env.step(env_state, processed_action)
                 return (env_state, key), None
 

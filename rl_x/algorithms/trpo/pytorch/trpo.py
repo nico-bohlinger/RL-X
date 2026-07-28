@@ -449,12 +449,7 @@ class TRPO:
 
     def save(self):
         file_path = self.save_path + "/best.model"
-        torch.save({
-            "config_algorithm": self.config.algorithm,
-            "policy_state_dict": self.policy.state_dict(),
-            "critic_state_dict": self.critic.state_dict(),
-            "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
-        }, file_path)
+        torch.save({"config_algorithm": self.config.algorithm, "policy_state_dict": self.policy.state_dict(), "critic_state_dict": self.critic.state_dict(), "critic_optimizer_state_dict": self.critic_optimizer.state_dict()}, file_path)
         if self.track_wandb:
             wandb.save(file_path, base_path=os.path.dirname(file_path))
     

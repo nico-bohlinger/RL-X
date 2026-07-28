@@ -86,17 +86,9 @@ class SPO:
 
         state = jnp.array([self.train_env.single_observation_space.sample()])
 
-        self.policy_state = TrainState.create(
-            apply_fn=self.policy.apply,
-            params=self.policy.init(policy_key, state),
-            tx=optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate))
-        )
+        self.policy_state = TrainState.create(apply_fn=self.policy.apply, params=self.policy.init(policy_key, state), tx=optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate)))
 
-        self.critic_state = TrainState.create(
-            apply_fn=self.critic.apply,
-            params=self.critic.init(critic_key, state),
-            tx=optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate))
-        )
+        self.critic_state = TrainState.create(apply_fn=self.critic.apply, params=self.critic.init(critic_key, state), tx=optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=learning_rate)))
 
         self.observation_normalizer_state = observation_normalizer.init_observation_normalizer_state(self.nr_envs, self.os_shape)
         self.reward_normalizer_state = reward_normalizer.init_reward_normalizer_state(self.nr_envs)
@@ -138,9 +130,7 @@ class SPO:
 
 
         @jax.jit
-        def update(policy_state: TrainState, critic_state: TrainState,
-                   states: np.ndarray, actions: np.ndarray, advantages: np.ndarray, returns: np.ndarray, values: np.ndarray, log_probs: np.ndarray,
-                   key: jax.random.PRNGKey):
+        def update(policy_state: TrainState, critic_state: TrainState, states: np.ndarray, actions: np.ndarray, advantages: np.ndarray, returns: np.ndarray, values: np.ndarray, log_probs: np.ndarray, key: jax.random.PRNGKey):
             def loss_fn(policy_params, critic_params, state_b, action_b, log_prob_b, return_b, advantage_b, value_b):
                 # Policy loss
                 action_mean, action_logstd = self.policy.apply(policy_params, state_b)
@@ -205,16 +195,7 @@ class SPO:
                 minibatch_advantages = batch_advantages[minibatch_indices]
                 minibatch_advantages = (minibatch_advantages - jnp.mean(minibatch_advantages)) / (jnp.std(minibatch_advantages) + 1e-8)
 
-                (loss, (metrics)), (policy_gradients, critic_gradients) = grad_loss_fn(
-                    policy_state.params,
-                    critic_state.params,
-                    batch_states[minibatch_indices],
-                    batch_actions[minibatch_indices],
-                    batch_log_probs[minibatch_indices],
-                    batch_returns[minibatch_indices],
-                    minibatch_advantages,
-                    batch_values[minibatch_indices]
-                )
+                (loss, (metrics)), (policy_gradients, critic_gradients) = grad_loss_fn(policy_state.params, critic_state.params, batch_states[minibatch_indices], batch_actions[minibatch_indices], batch_log_probs[minibatch_indices], batch_returns[minibatch_indices], minibatch_advantages, batch_values[minibatch_indices])
 
                 combined_gradient_norm = jnp.sqrt(optax.global_norm(policy_gradients) ** 2 + optax.global_norm(critic_gradients) ** 2)
                 gradient_scale = jnp.minimum(1.0, self.max_grad_norm / (combined_gradient_norm + 1e-6))
@@ -328,11 +309,7 @@ class SPO:
 
 
             # Optimizing
-            self.policy_state, self.critic_state, optimization_metrics, self.key = update(
-                self.policy_state, self.critic_state,
-                batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs,
-                self.key
-            )
+            self.policy_state, self.critic_state, optimization_metrics, self.key = update(self.policy_state, self.critic_state, batch.states, batch.actions, batch.advantages, batch.returns, batch.values, batch.log_probs, self.key)
             optimization_metrics = {key: value.item() for key, value in optimization_metrics.items()}
             nr_updates += self.nr_epochs * self.nr_minibatches
 

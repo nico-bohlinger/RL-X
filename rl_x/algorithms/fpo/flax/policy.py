@@ -12,13 +12,7 @@ def get_policy(config, env):
     policy_observation_indices = getattr(env, "policy_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if action_space_type == ActionSpaceType.CONTINUOUS and observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return FlowPolicy(
-            env.single_action_space.shape[0],
-            config.algorithm.timestep_embed_dim,
-            config.algorithm.policy_hidden_dims,
-            config.algorithm.policy_output_scale,
-            policy_observation_indices,
-        )
+        return FlowPolicy(env.single_action_space.shape[0], config.algorithm.timestep_embed_dim, config.algorithm.policy_hidden_dims, config.algorithm.policy_output_scale, policy_observation_indices)
 
 
 class FlowPolicy(nn.Module):

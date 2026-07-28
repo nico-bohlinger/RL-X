@@ -55,22 +55,14 @@ class DIME:
         self.nr_atoms = config.algorithm.nr_atoms
         self.v_min = config.algorithm.v_min
         self.v_max = config.algorithm.v_max
-        self.critic_entropy_coefficient = (
-            config.algorithm.critic_entropy_coefficient
-        )
+        self.critic_entropy_coefficient = config.algorithm.critic_entropy_coefficient
         self.diffusion_steps = config.algorithm.diffusion_steps
         self.prior_std = config.algorithm.prior_std
         self.minimum_timestep = config.algorithm.minimum_timestep
-        self.cosine_schedule_offset = (
-            config.algorithm.cosine_schedule_offset
-        )
-        self.target_entropy_per_action_dimension = (
-            config.algorithm.target_entropy_per_action_dimension
-        )
+        self.cosine_schedule_offset = config.algorithm.cosine_schedule_offset
+        self.target_entropy_per_action_dimension = config.algorithm.target_entropy_per_action_dimension
         self.max_grad_norm = config.algorithm.max_grad_norm
-        self.enable_observation_normalization = (
-            config.algorithm.enable_observation_normalization
-        )
+        self.enable_observation_normalization = config.algorithm.enable_observation_normalization
         self.normalizer_epsilon = config.algorithm.normalizer_epsilon
         self.action_rescaling = config.algorithm.action_rescaling
         self.logging_frequency = config.algorithm.logging_frequency
@@ -84,10 +76,7 @@ class DIME:
         self.action_high = jnp.asarray(self.train_env.single_action_space.high)
         self.support = jnp.linspace(self.v_min, self.v_max, self.nr_atoms)
         self.nr_iterations = self.total_timesteps // self.nr_envs
-        self.target_entropy = (
-            self.target_entropy_per_action_dimension
-            * self.action_dimension
-        )
+        self.target_entropy = self.target_entropy_per_action_dimension * self.action_dimension
 
         if self.total_timesteps < self.nr_envs:
             raise ValueError("Total timesteps must contain one environment step.")
@@ -107,12 +96,7 @@ class DIME:
         rlx_logger.info(f"Using device: {jax.default_backend()}")
 
         self.key = jax.random.PRNGKey(self.seed)
-        (
-            self.key,
-            actor_key,
-            critic_key,
-            entropy_key,
-        ) = jax.random.split(self.key, 4)
+        (self.key, actor_key, critic_key, entropy_key) = jax.random.split(self.key, 4)
         dummy_observation = jnp.asarray([self.train_env.single_observation_space.sample()])
         dummy_action = jnp.zeros(dummy_observation.shape[:-1] + self.as_shape)
         dummy_timestep = jnp.zeros(dummy_observation.shape[:-1] + (1,))
@@ -123,37 +107,16 @@ class DIME:
 
         actor_params = self.actor.init(actor_key, dummy_observation, dummy_action, dummy_timestep)
         critic_variables = self.critic.init({"params": critic_key, "batch_stats": critic_key,}, dummy_observation, dummy_action, False)
-        self.actor_state = TrainState.create(
-            apply_fn=self.actor.apply,
-            params=actor_params,
-            tx=optax.chain(
-                optax.zero_nans(),
-                optax.clip_by_global_norm(self.max_grad_norm),
-                optax.adam(self.actor_learning_rate, b1=self.adam_beta1, b2=self.adam_beta2),
-            ),
-        )
+        self.actor_state = TrainState.create(apply_fn=self.actor.apply, params=actor_params, tx=optax.chain(optax.zero_nans(), optax.clip_by_global_norm(self.max_grad_norm), optax.adam(self.actor_learning_rate, b1=self.adam_beta1, b2=self.adam_beta2)))
         self.target_actor_state = TrainState.create(apply_fn=self.actor.apply, params=actor_params, tx=optax.set_to_zero())
-        self.critic_state = RLTrainState.create(
-            apply_fn=self.critic.apply,
-            params=critic_variables["params"],
-            batch_stats=critic_variables["batch_stats"],
-            tx=optax.adam(self.critic_learning_rate, b1=self.adam_beta1, b2=self.adam_beta2),
-        )
-        self.entropy_state = TrainState.create(
-            apply_fn=self.entropy_coefficient.apply,
-            params=self.entropy_coefficient.init(entropy_key),
-            tx=optax.adam(self.entropy_learning_rate),
-        )
-        self.observation_normalizer_state = (
-            observation_normalizer.init_observation_normalizer_state(self.os_shape)
-        )
+        self.critic_state = RLTrainState.create(apply_fn=self.critic.apply, params=critic_variables["params"], batch_stats=critic_variables["batch_stats"], tx=optax.adam(self.critic_learning_rate, b1=self.adam_beta1, b2=self.adam_beta2))
+        self.entropy_state = TrainState.create(apply_fn=self.entropy_coefficient.apply, params=self.entropy_coefficient.init(entropy_key), tx=optax.adam(self.entropy_learning_rate))
+        self.observation_normalizer_state = observation_normalizer.init_observation_normalizer_state(self.os_shape)
 
         if self.save_model:
             os.makedirs(self.save_path)
             self.latest_model_file_name = "latest.model"
-            self.latest_model_checkpointer = (
-                orbax.checkpoint.PyTreeCheckpointer()
-            )
+            self.latest_model_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
 
     def normalize(self, normalizer_state, observation):
@@ -162,13 +125,7 @@ class DIME:
         return observation
 
 
-    def sample_action(
-        self,
-        actor_params,
-        normalized_observation,
-        key,
-        deterministic=False,
-    ):
+    def sample_action(self, actor_params, normalized_observation, key, deterministic=False):
         key, prior_key, noise_key = jax.random.split(key, 3)
         initial_action = self.prior_std * jax.random.normal(prior_key, normalized_observation.shape[:-1] + self.as_shape)
         noise_path = jax.random.normal(noise_key, (self.diffusion_steps,) + initial_action.shape)
@@ -181,48 +138,18 @@ class DIME:
             action, log_ratio = carry
             step, noise = inputs
             timestep = jnp.full(normalized_observation.shape[:-1] + (1,), step)
-            reverse_time = (
-                self.diffusion_steps - step
-            ) / self.diffusion_steps
+            reverse_time = (self.diffusion_steps - step) / self.diffusion_steps
             offset = 1.0 + self.cosine_schedule_offset
-            timestep_delta = (
-                base_timestep
-                * (
-                    (1.0 - self.minimum_timestep)
-                    * jnp.cos(0.5 * jnp.pi * (offset - reverse_time) / offset)
-                    ** 2
-                    + self.minimum_timestep
-                )
-            )
+            timestep_delta = base_timestep * ((1.0 - self.minimum_timestep) * jnp.cos(0.5 * jnp.pi * (offset - reverse_time) / offset) ** 2 + self.minimum_timestep)
             variance_time = timestep_delta / friction
             transition_std = jnp.sqrt(2.0 * variance_time)
             prior_score = -action / self.prior_std ** 2
             control = self.actor.apply(actor_params, normalized_observation, action, timestep)
-            forward_mean = action + variance_time * (
-                prior_score + control
-            )
-            next_action = (
-                forward_mean + transition_std * noise
-            )
-            backward_mean = next_action + variance_time * (
-                -next_action / self.prior_std ** 2
-            )
-            forward_log_probability = jnp.sum(
-                -0.5
-                * ((next_action - forward_mean) / transition_std)
-                ** 2
-                - jnp.log(transition_std)
-                - 0.5 * jnp.log(2.0 * jnp.pi),
-                axis=-1,
-            )
-            backward_log_probability = jnp.sum(
-                -0.5
-                * ((action - backward_mean) / transition_std)
-                ** 2
-                - jnp.log(transition_std)
-                - 0.5 * jnp.log(2.0 * jnp.pi),
-                axis=-1,
-            )
+            forward_mean = action + variance_time * (prior_score + control)
+            next_action = forward_mean + transition_std * noise
+            backward_mean = next_action + variance_time * (-next_action / self.prior_std ** 2)
+            forward_log_probability = jnp.sum(-0.5 * ((next_action - forward_mean) / transition_std) ** 2 - jnp.log(transition_std) - 0.5 * jnp.log(2.0 * jnp.pi), axis=-1)
+            backward_log_probability = jnp.sum(-0.5 * ((action - backward_mean) / transition_std) ** 2 - jnp.log(transition_std) - 0.5 * jnp.log(2.0 * jnp.pi), axis=-1)
             return (
                 next_action,
                 log_ratio
@@ -230,17 +157,7 @@ class DIME:
                 - forward_log_probability,
             ), next_action
 
-        (final_latent, log_ratio), latent_path = jax.lax.scan(
-            diffusion_step,
-            (
-                initial_action,
-                jnp.zeros(initial_action.shape[:-1]),
-            ),
-            (
-                jnp.arange(self.diffusion_steps, dtype=jnp.float32),
-                noise_path,
-            ),
-        )
+        (final_latent, log_ratio), latent_path = jax.lax.scan(diffusion_step, (initial_action, jnp.zeros(initial_action.shape[:-1])), (jnp.arange(self.diffusion_steps, dtype=jnp.float32), noise_path))
         normalized_action = jnp.tanh(final_latent)
         tanh_log_determinant = jnp.sum(jnp.log(1.0 - normalized_action ** 2 + 1e-6), axis=-1)
         running_cost = -(log_ratio + tanh_log_determinant)
@@ -256,34 +173,15 @@ class DIME:
         )
 
 
-    def project_distribution(
-        self,
-        next_distribution,
-        reward,
-        terminated,
-        entropy_bonus,
-    ):
-        target_support = jnp.clip(
-            reward[..., None]
-            + self.gamma
-            * (1.0 - terminated[..., None])
-            * (self.support - entropy_bonus[..., None]),
-            self.v_min,
-            self.v_max,
-        )
-        atom_delta = (
-            self.v_max - self.v_min
-        ) / (self.nr_atoms - 1)
-        position = (
-            target_support - self.v_min
-        ) / atom_delta
+    def project_distribution(self, next_distribution, reward, terminated, entropy_bonus):
+        target_support = jnp.clip(reward[..., None] + self.gamma * (1.0 - terminated[..., None]) * (self.support - entropy_bonus[..., None]), self.v_min, self.v_max)
+        atom_delta = (self.v_max - self.v_min) / (self.nr_atoms - 1)
+        position = (target_support - self.v_min) / atom_delta
         lower = jnp.floor(position).astype(jnp.int32)
         upper = jnp.ceil(position).astype(jnp.int32)
         lower = jnp.where((upper > 0) & (lower == upper), lower - 1, lower)
         upper = jnp.where((lower < self.nr_atoms - 1) & (lower == upper), upper + 1, upper)
-        batch_offset = (
-            jnp.arange(reward.shape[0])[:, None] * self.nr_atoms
-        )
+        batch_offset = jnp.arange(reward.shape[0])[:, None] * self.nr_atoms
         projected = jnp.zeros_like(next_distribution).reshape(-1)
         projected = projected.at[(lower + batch_offset).reshape(-1)].add((next_distribution * (upper.astype(jnp.float32) - position)).reshape(-1))
         projected = projected.at[(upper + batch_offset).reshape(-1)].add((next_distribution * (position - lower.astype(jnp.float32))).reshape(-1))
@@ -300,41 +198,16 @@ class DIME:
         @jax.jit
         def update(actor_state, target_actor_state, critic_state, entropy_state, states, next_states, actions, rewards, terminations, update_count, key):
             key, next_action_key, actor_key = jax.random.split(key, 3)
-            (
-                unused_key,
-                next_action,
-                next_running_cost,
-                next_stochastic_cost,
-                next_terminal_cost,
-                unused_path,
-            ) = self.sample_action(target_actor_state.params, next_states, next_action_key)
+            (unused_key, next_action, next_running_cost, next_stochastic_cost, next_terminal_cost, unused_path) = self.sample_action(target_actor_state.params, next_states, next_action_key)
             entropy_coefficient = entropy_state.apply_fn(entropy_state.params)
-            entropy_bonus = entropy_coefficient * (
-                next_running_cost + next_stochastic_cost + next_terminal_cost
-            )
+            entropy_bonus = entropy_coefficient * (next_running_cost + next_stochastic_cost + next_terminal_cost)
 
             def critic_loss_fn(critic_params, critic_batch_stats):
-                current_and_next_distribution, critic_state_update = self.critic.apply(
-                    {"params": critic_params, "batch_stats": critic_batch_stats},
-                    jnp.concatenate([states, next_states], axis=0),
-                    jnp.concatenate([actions, jax.lax.stop_gradient(next_action)], axis=0),
-                    True,
-                    mutable=["batch_stats"],
-                )
+                current_and_next_distribution, critic_state_update = self.critic.apply({"params": critic_params, "batch_stats": critic_batch_stats}, jnp.concatenate([states, next_states], axis=0), jnp.concatenate([actions, jax.lax.stop_gradient(next_action)], axis=0), True, mutable=["batch_stats"])
                 current_distribution, next_distribution = jnp.split(current_and_next_distribution, 2, axis=1)
-                target_distribution = jax.lax.stop_gradient(
-                    (
-                        self.project_distribution(next_distribution[0], rewards, terminations, entropy_bonus)
-                        + self.project_distribution(next_distribution[1], rewards, terminations, entropy_bonus)
-                    )
-                    / 2.0
-                )
-                cross_entropy = -jnp.sum(
-                    jnp.mean(jnp.sum(target_distribution[None] * jnp.log(current_distribution + 1e-15), axis=-1), axis=-1)
-                )
-                distribution_entropy = jnp.sum(
-                    jnp.mean(jnp.sum(current_distribution * jnp.log(current_distribution + 1e-15), axis=-1), axis=-1)
-                )
+                target_distribution = jax.lax.stop_gradient((self.project_distribution(next_distribution[0], rewards, terminations, entropy_bonus) + self.project_distribution(next_distribution[1], rewards, terminations, entropy_bonus)) / 2.0)
+                cross_entropy = -jnp.sum(jnp.mean(jnp.sum(target_distribution[None] * jnp.log(current_distribution + 1e-15), axis=-1), axis=-1))
+                distribution_entropy = jnp.sum(jnp.mean(jnp.sum(current_distribution * jnp.log(current_distribution + 1e-15), axis=-1), axis=-1))
                 loss = cross_entropy + self.critic_entropy_coefficient * distribution_entropy
                 metrics = {
                     "loss/critic_loss": loss,
@@ -354,20 +227,8 @@ class DIME:
                 actor_state, target_actor_state, entropy_state = update_carry
 
                 def actor_loss_fn(actor_params):
-                    (
-                        unused_key,
-                        sampled_action,
-                        running_cost,
-                        stochastic_cost,
-                        terminal_cost,
-                        latent_path,
-                    ) = self.sample_action(actor_params, states, actor_key)
-                    q_distribution = self.critic.apply(
-                        {"params": critic_state.params, "batch_stats": critic_state.batch_stats},
-                        states,
-                        sampled_action,
-                        False,
-                    )
+                    (unused_key, sampled_action, running_cost, stochastic_cost, terminal_cost, latent_path) = self.sample_action(actor_params, states, actor_key)
+                    q_distribution = self.critic.apply({"params": critic_state.params, "batch_stats": critic_state.batch_stats}, states, sampled_action, False)
                     q_value = jnp.mean(jnp.sum(q_distribution * self.support, axis=-1), axis=0)
                     path_cost = running_cost + stochastic_cost + terminal_cost
                     loss = jnp.mean(-q_value + jax.lax.stop_gradient(entropy_coefficient) * path_cost)
@@ -382,9 +243,7 @@ class DIME:
 
                 (unused_actor_loss, actor_metrics), actor_gradients = jax.value_and_grad(actor_loss_fn, has_aux=True)(actor_state.params)
                 actor_state = actor_state.apply_gradients(grads=actor_gradients)
-                target_actor_state = target_actor_state.replace(
-                    params=optax.incremental_update(actor_state.params, target_actor_state.params, self.policy_tau)
-                )
+                target_actor_state = target_actor_state.replace(params=optax.incremental_update(actor_state.params, target_actor_state.params, self.policy_tau))
 
                 def entropy_loss_fn(entropy_params):
                     coefficient = self.entropy_coefficient.apply(entropy_params)
@@ -396,9 +255,7 @@ class DIME:
                 actor_metrics["entropy/coefficient"] = entropy_state.apply_fn(entropy_state.params)
                 actor_metrics["gradients/actor_grad_norm"] = optax.global_norm(actor_gradients)
                 actor_metrics["actor/update_active"] = jnp.ones(())
-                actor_metrics["entropy/target_mismatch"] = (
-                    actor_metrics["entropy/running_cost"] - self.target_entropy
-                )
+                actor_metrics["entropy/target_mismatch"] = actor_metrics["entropy/running_cost"] - self.target_entropy
                 return (actor_state, target_actor_state, entropy_state), actor_metrics
 
             def skip_actor_update(update_carry):
@@ -417,12 +274,7 @@ class DIME:
                     "entropy/target_mismatch": jnp.zeros(()),
                 }
 
-            (actor_state, target_actor_state, entropy_state), actor_metrics = jax.lax.cond(
-                (update_count + 1) % self.policy_delay == 0,
-                actor_and_temperature_update,
-                skip_actor_update,
-                (actor_state, target_actor_state, entropy_state),
-            )
+            (actor_state, target_actor_state, entropy_state), actor_metrics = jax.lax.cond((update_count + 1) % self.policy_delay == 0, actor_and_temperature_update, skip_actor_update, (actor_state, target_actor_state, entropy_state))
             metrics = {
                 **critic_metrics,
                 **actor_metrics,
@@ -452,12 +304,7 @@ class DIME:
             if self.enable_observation_normalization:
                 self.observation_normalizer_state = observation_normalizer.update_observation_normalizer(self.observation_normalizer_state, state)
             normalized_state = self.normalize(self.observation_normalizer_state, state)
-            self.key, action, unused_running_cost, unused_stochastic_cost, unused_terminal_cost, unused_path = get_action(
-                self.actor_state.params,
-                self.observation_normalizer_state,
-                state,
-                self.key,
-            )
+            self.key, action, unused_running_cost, unused_stochastic_cost, unused_terminal_cost, unused_path = get_action(self.actor_state.params, self.observation_normalizer_state, state, self.key)
             if self.action_rescaling:
                 processed_action = self.action_low + 0.5 * (action + 1.0) * (self.action_high - self.action_low)
             else:
@@ -481,15 +328,7 @@ class DIME:
                 update_budget -= nr_updates
                 for unused_update in range(nr_updates):
                     batch = replay_buffer.sample(self.batch_size)
-                    (
-                        self.actor_state,
-                        self.target_actor_state,
-                        self.critic_state,
-                        self.entropy_state,
-                        metrics,
-                        update_count,
-                        self.key,
-                    ) = update(self.actor_state, self.target_actor_state, self.critic_state, self.entropy_state, *batch, update_count, self.key)
+                    (self.actor_state, self.target_actor_state, self.critic_state, self.entropy_state, metrics, update_count, self.key) = update(self.actor_state, self.target_actor_state, self.critic_state, self.entropy_state, *batch, update_count, self.key)
                     for name, value in metrics.items():
                         metrics_collection.setdefault(name, []).append(value)
 
@@ -498,13 +337,7 @@ class DIME:
                 eval_state, unused_info = self.eval_env.reset()
                 completed_episodes = 0
                 while completed_episodes < self.evaluation_episodes:
-                    self.key, eval_action, unused_running_cost, unused_stochastic_cost, unused_terminal_cost, unused_path = get_action(
-                        self.actor_state.params,
-                        self.observation_normalizer_state,
-                        eval_state,
-                        self.key,
-                        True,
-                    )
+                    self.key, eval_action, unused_running_cost, unused_stochastic_cost, unused_terminal_cost, unused_path = get_action(self.actor_state.params, self.observation_normalizer_state, eval_state, self.key, True)
                     if self.action_rescaling:
                         eval_action = self.action_low + 0.5 * (eval_action + 1.0) * (self.action_high - self.action_low)
                     eval_state, unused_reward, eval_terminated, eval_truncated, unused_info = self.eval_env.step(jax.device_get(eval_action))
@@ -561,13 +394,7 @@ class DIME:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
 
-    def save(
-        self,
-        actor_state,
-        critic_state,
-        entropy_state,
-        normalizer_state,
-    ):
+    def save(self, actor_state, critic_state, entropy_state, normalizer_state):
         checkpoint = {
             "actor": actor_state,
             "critic": critic_state,
@@ -586,14 +413,7 @@ class DIME:
 
 
     @staticmethod
-    def load(
-        config,
-        train_env,
-        eval_env,
-        run_path,
-        writer,
-        explicitly_set_algorithm_params,
-    ):
+    def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         split_path = config.runner.load_model.split("/")
         checkpoint_directory = os.path.abspath("/".join(split_path[:-1]))
         checkpoint_file_name = split_path[-1]
@@ -618,18 +438,12 @@ class DIME:
             ),
         }
         restore_args = orbax_utils.restore_args_from_target(target)
-        checkpoint = (
-            orbax.checkpoint.PyTreeCheckpointer().restore(checkpoint_directory, item=target, restore_args=restore_args)
-        )
+        checkpoint = orbax.checkpoint.PyTreeCheckpointer().restore(checkpoint_directory, item=target, restore_args=restore_args)
         model.actor_state = checkpoint["actor"]
-        model.target_actor_state = (
-            model.target_actor_state.replace(params=checkpoint["actor"].params)
-        )
+        model.target_actor_state = model.target_actor_state.replace(params=checkpoint["actor"].params)
         model.critic_state = checkpoint["critic"]
         model.entropy_state = checkpoint["entropy"]
-        model.observation_normalizer_state = checkpoint[
-            "observation_normalizer"
-        ]
+        model.observation_normalizer_state = checkpoint["observation_normalizer"]
         shutil.rmtree(checkpoint_directory)
         return model
 
@@ -639,12 +453,7 @@ class DIME:
         completed_episodes = 0
         while completed_episodes < episodes:
             normalized_state = self.normalize(self.observation_normalizer_state, state)
-            self.key, action, unused_running_cost, unused_stochastic_cost, unused_terminal_cost, unused_path = self.sample_action(
-                self.actor_state.params,
-                normalized_state,
-                self.key,
-                deterministic=True,
-            )
+            self.key, action, unused_running_cost, unused_stochastic_cost, unused_terminal_cost, unused_path = self.sample_action(self.actor_state.params, normalized_state, self.key, deterministic=True)
             if self.action_rescaling:
                 action = self.action_low + 0.5 * (action + 1.0) * (self.action_high - self.action_low)
             state, unused_reward, terminated, truncated, unused_info = self.eval_env.step(jax.device_get(action))

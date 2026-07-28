@@ -18,14 +18,7 @@ def update_observation_normalizer(state, observations, max_count):
     mean = state["mean"] + delta * batch_count / total_count
     m_a = state["var"] * state["count"]
     m_b = batch_var * batch_count
-    m_2 = (
-        m_a
-        + m_b
-        + jnp.square(delta)
-        * state["count"]
-        * batch_count
-        / total_count
-    )
+    m_2 = m_a + m_b + jnp.square(delta) * state["count"] * batch_count / total_count
     update_active = state["count"] < max_count
     return {
         "mean": jnp.where(update_active, mean, state["mean"]),

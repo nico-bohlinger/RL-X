@@ -126,23 +126,12 @@ class DPPO:
 
         policy_learning_rate = policy_linear_schedule if self.anneal_learning_rate else self.policy_learning_rate
         if self.max_grad_norm != -1.0:
-            policy_optimizer = optax.chain(
-                optax.clip_by_global_norm(self.max_grad_norm),
-                optax.inject_hyperparams(optax.adam)(learning_rate=policy_learning_rate),
-            )
+            policy_optimizer = optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.inject_hyperparams(optax.adam)(learning_rate=policy_learning_rate))
         else:
             policy_optimizer = optax.chain(optax.inject_hyperparams(optax.adam)(learning_rate=policy_learning_rate))
         critic_optimizer = optax.chain(optax.inject_hyperparams(optax.adam)(learning_rate=self.critic_learning_rate))
-        self.policy_state = TrainState.create(
-            apply_fn=self.policy.apply,
-            params=self.policy.init(policy_key, dummy_observation, dummy_action, dummy_timestep),
-            tx=policy_optimizer,
-        )
-        self.critic_state = TrainState.create(
-            apply_fn=self.critic.apply,
-            params=self.critic.init(critic_key, dummy_observation),
-            tx=critic_optimizer,
-        )
+        self.policy_state = TrainState.create(apply_fn=self.policy.apply, params=self.policy.init(policy_key, dummy_observation, dummy_action, dummy_timestep), tx=policy_optimizer)
+        self.critic_state = TrainState.create(apply_fn=self.critic.apply, params=self.critic.init(critic_key, dummy_observation), tx=critic_optimizer)
         self.observation_normalizer_state = observation_normalizer.init_observation_normalizer_state(self.os_shape)
         self.reward_normalizer_state = reward_normalizer.init_reward_normalizer_state(self.nr_envs)
 
@@ -219,12 +208,7 @@ class DPPO:
                 advantage = delta + self.gamma * self.gae_lambda * continuation * next_advantage
                 return advantage, advantage
 
-            _, advantages = jax.lax.scan(
-                advantage_step,
-                jnp.zeros_like(values[-1]),
-                (rewards, values, next_values, terminations, truncations),
-                reverse=True,
-            )
+            _, advantages = jax.lax.scan(advantage_step, jnp.zeros_like(values[-1]), (rewards, values, next_values, terminations, truncations), reverse=True)
             return advantages, advantages + values
 
 
@@ -238,32 +222,16 @@ class DPPO:
             batch_returns = returns.reshape(-1)
 
             def loss_fn(policy_params, critic_params, state_b, action_b, full_path_b, denoising_index_b, behavior_log_likelihood_b, advantage_b, return_b):
-                current_log_likelihood = self.compute_transition_log_likelihood(
-                    policy_params,
-                    state_b,
-                    full_path_b[..., 0, :],
-                    full_path_b[..., 1, :],
-                    denoising_index_b,
-                )
+                current_log_likelihood = self.compute_transition_log_likelihood(policy_params, state_b, full_path_b[..., 0, :], full_path_b[..., 1, :], denoising_index_b)
                 current_log_likelihood = jnp.clip(current_log_likelihood, self.log_probability_min, self.log_probability_max)
                 behavior_log_likelihood_b = jnp.clip(behavior_log_likelihood_b, self.log_probability_min, self.log_probability_max)
                 log_ratio = jnp.mean(current_log_likelihood - behavior_log_likelihood_b, axis=-1)
                 ratio = jnp.exp(log_ratio)
                 normalized_advantage = (advantage_b - jnp.mean(advantage_b)) / (jnp.std(advantage_b) + 1e-8)
-                normalized_advantage = jnp.clip(
-                    normalized_advantage,
-                    jnp.quantile(normalized_advantage, self.advantage_quantile_min),
-                    jnp.quantile(normalized_advantage, self.advantage_quantile_max),
-                )
-                normalized_advantage *= self.denoising_discount ** (
-                    self.diffusion_steps - denoising_index_b - 1
-                )
+                normalized_advantage = jnp.clip(normalized_advantage, jnp.quantile(normalized_advantage, self.advantage_quantile_min), jnp.quantile(normalized_advantage, self.advantage_quantile_max))
+                normalized_advantage *= self.denoising_discount ** (self.diffusion_steps - denoising_index_b - 1)
                 denoising_fraction = denoising_index_b / (self.diffusion_steps - 1)
-                clipping_epsilon = self.clipping_epsilon_base + (
-                    self.clipping_epsilon - self.clipping_epsilon_base
-                ) * (jnp.exp(self.clipping_epsilon_rate * denoising_fraction) - 1.0) / (
-                    jnp.exp(self.clipping_epsilon_rate) - 1.0
-                )
+                clipping_epsilon = self.clipping_epsilon_base + (self.clipping_epsilon - self.clipping_epsilon_base) * (jnp.exp(self.clipping_epsilon_rate * denoising_fraction) - 1.0) / (jnp.exp(self.clipping_epsilon_rate) - 1.0)
                 surrogate = ratio * normalized_advantage
                 clipped_surrogate = jnp.clip(ratio, 1.0 - clipping_epsilon, 1.0 + clipping_epsilon) * normalized_advantage
                 policy_loss = -jnp.mean(jnp.minimum(surrogate, clipped_surrogate))
@@ -343,11 +311,7 @@ class DPPO:
                     update_active &= metrics["policy_ratio/approx_kl"] <= self.target_kl
                 return (policy_state, critic_state, update_active), metrics
 
-            (policy_state, critic_state, unused_update_active), metrics = jax.lax.scan(
-                minibatch_update,
-                (policy_state, critic_state, jnp.ones((), dtype=jnp.bool_)),
-                batch_indices,
-            )
+            (policy_state, critic_state, unused_update_active), metrics = jax.lax.scan(minibatch_update, (policy_state, critic_state, jnp.ones((), dtype=jnp.bool_)), batch_indices)
             metrics = tree.map_structure(jnp.mean, metrics)
             metrics["lr/policy_learning_rate"] = policy_state.opt_state[-1].hyperparams["learning_rate"]
             metrics["lr/critic_learning_rate"] = critic_state.opt_state[-1].hyperparams["learning_rate"]
@@ -373,13 +337,9 @@ class DPPO:
             # Acting
             for step in range(self.nr_steps):
                 if self.normalize_observation:
-                    self.observation_normalizer_state = observation_normalizer.update_observation_normalizer(
-                        self.observation_normalizer_state, state
-                    )
+                    self.observation_normalizer_state = observation_normalizer.update_observation_normalizer(self.observation_normalizer_state, state)
                 normalized_state = self.normalize(self.observation_normalizer_state, state)
-                self.key, action, processed_action, full_path, behavior_log_likelihood = get_action(
-                    self.policy_state.params, self.observation_normalizer_state, state, self.key
-                )
+                self.key, action, processed_action, full_path, behavior_log_likelihood = get_action(self.policy_state.params, self.observation_normalizer_state, state, self.key)
                 value = self.critic.apply(self.critic_state.params, normalized_state).squeeze(-1)
                 next_state, reward, terminated, truncated, info = self.train_env.step(jax.device_get(processed_action))
                 actual_next_state = next_state.copy()
@@ -403,27 +363,10 @@ class DPPO:
             # Calculating advantages and returns
             normalized_rewards = rewards
             if self.normalize_reward:
-                self.reward_normalizer_state, normalized_rewards = reward_normalizer.normalize_reward(
-                    self.reward_normalizer_state,
-                    rewards,
-                    terminations,
-                    truncations,
-                    self.gamma,
-                    self.reward_clip,
-                )
+                self.reward_normalizer_state, normalized_rewards = reward_normalizer.normalize_reward(self.reward_normalizer_state, rewards, terminations, truncations, self.gamma, self.reward_clip)
             advantages, returns = calculate_advantages(self.critic_state, next_states, normalized_rewards, values, terminations, truncations)
             # Optimizing
-            self.policy_state, self.critic_state, metrics, self.key = update(
-                self.policy_state,
-                self.critic_state,
-                states,
-                actions,
-                full_paths,
-                behavior_log_likelihoods,
-                advantages,
-                returns,
-                self.key,
-            )
+            self.policy_state, self.critic_state, metrics, self.key = update(self.policy_state, self.critic_state, states, actions, full_paths, behavior_log_likelihoods, advantages, returns, self.key)
             completed_updates += 1
             metrics["v_value/explained_variance"] = 1.0 - jnp.var(returns - values) / (jnp.var(returns) + 1e-8)
             metrics["time/sps"] = self.batch_size / (time.time() - start_time)
@@ -438,13 +381,7 @@ class DPPO:
                 eval_state, unused_info = self.eval_env.reset()
                 completed_episodes = 0
                 while completed_episodes < self.evaluation_episodes:
-                    self.key, unused_action, eval_action, unused_path, unused_log_likelihood = get_action(
-                        self.policy_state.params,
-                        self.observation_normalizer_state,
-                        eval_state,
-                        self.key,
-                        True,
-                    )
+                    self.key, unused_action, eval_action, unused_path, unused_log_likelihood = get_action(self.policy_state.params, self.observation_normalizer_state, eval_state, self.key, True)
                     eval_state, unused_reward, eval_terminated, eval_truncated, unused_info = self.eval_env.step(jax.device_get(eval_action))
                     completed_episodes += int(np.sum(eval_terminated | eval_truncated))
 
@@ -536,13 +473,7 @@ class DPPO:
         state, unused_info = self.eval_env.reset()
         completed_episodes = 0
         while completed_episodes < episodes:
-            self.key, unused_action, processed_action, unused_path, unused_log_likelihood = self.sample_action(
-                self.policy_state.params,
-                self.observation_normalizer_state,
-                state,
-                self.key,
-                deterministic=True,
-            )
+            self.key, unused_action, processed_action, unused_path, unused_log_likelihood = self.sample_action(self.policy_state.params, self.observation_normalizer_state, state, self.key, deterministic=True)
             state, unused_reward, terminated, truncated, unused_info = self.eval_env.step(jax.device_get(processed_action))
             completed_episodes += int(np.sum(terminated | truncated))
 

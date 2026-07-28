@@ -18,14 +18,7 @@ def update_observation_normalizer(state, observations):
     mean = state["mean"] + delta * batch_count / total_count
     m_a = state["var"] * state["count"]
     m_b = batch_var * batch_count
-    m_2 = (
-        m_a
-        + m_b
-        + jnp.square(delta)
-        * state["count"]
-        * batch_count
-        / total_count
-    )
+    m_2 = m_a + m_b + jnp.square(delta) * state["count"] * batch_count / total_count
     return {
         "mean": mean,
         "var": m_2 / total_count,

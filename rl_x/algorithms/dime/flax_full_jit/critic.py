@@ -12,14 +12,7 @@ def get_critic(config, env):
     critic_observation_indices = getattr(env, "critic_observation_indices", jnp.arange(env.single_observation_space.shape[0]))
 
     if observation_space_type == ObservationSpaceType.FLAT_VALUES:
-        return VectorDistributionalCritic(
-            config.algorithm.nr_critics,
-            config.algorithm.critic_hidden_dims,
-            config.algorithm.nr_atoms,
-            config.algorithm.batch_renorm_momentum,
-            config.algorithm.batch_renorm_warmup_steps,
-            critic_observation_indices,
-        )
+        return VectorDistributionalCritic(config.algorithm.nr_critics, config.algorithm.critic_hidden_dims, config.algorithm.nr_atoms, config.algorithm.batch_renorm_momentum, config.algorithm.batch_renorm_warmup_steps, critic_observation_indices)
 
 
 class DistributionalCritic(nn.Module):
@@ -50,18 +43,5 @@ class VectorDistributionalCritic(nn.Module):
 
     @nn.compact
     def __call__(self, observation, action, train):
-        vectorized_critic = nn.vmap(
-            DistributionalCritic,
-            variable_axes={"params": 0, "batch_stats": 0},
-            split_rngs={"params": True, "batch_stats": True},
-            in_axes=None,
-            out_axes=0,
-            axis_size=self.nr_critics,
-        )
-        return vectorized_critic(
-            hidden_dims=self.hidden_dims,
-            nr_atoms=self.nr_atoms,
-            batch_renorm_momentum=self.batch_renorm_momentum,
-            batch_renorm_warmup_steps=self.batch_renorm_warmup_steps,
-            critic_observation_indices=self.critic_observation_indices,
-        )(observation, action, train)
+        vectorized_critic = nn.vmap(DistributionalCritic, variable_axes={"params": 0, "batch_stats": 0}, split_rngs={"params": True, "batch_stats": True}, in_axes=None, out_axes=0, axis_size=self.nr_critics)
+        return vectorized_critic(hidden_dims=self.hidden_dims, nr_atoms=self.nr_atoms, batch_renorm_momentum=self.batch_renorm_momentum, batch_renorm_warmup_steps=self.batch_renorm_warmup_steps, critic_observation_indices=self.critic_observation_indices)(observation, action, train)

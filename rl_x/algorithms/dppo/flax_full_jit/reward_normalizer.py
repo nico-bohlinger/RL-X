@@ -20,11 +20,7 @@ def normalize_reward(state, reward, terminated, truncated, gamma, reward_clip):
         done_t = jnp.maximum(terminated_t, truncated_t).astype(reward_t.dtype)
         return (return_t, done_t), return_t
 
-    (last_return, last_done), discounted_returns = jax.lax.scan(
-        discounted_return_step,
-        (state["return"], state["previous_done"]),
-        (reward, terminated, truncated),
-    )
+    (last_return, last_done), discounted_returns = jax.lax.scan(discounted_return_step, (state["return"], state["previous_done"]), (reward, terminated, truncated))
     batch_mean = jnp.mean(discounted_returns)
     batch_variance = jnp.var(discounted_returns)
     batch_count = discounted_returns.size

@@ -267,9 +267,7 @@ class SPO:
                     minibatch_indices = batch_indices[start:end]
                     minibatch_advantages = batch_advantages[minibatch_indices]
                     minibatch_advantages = (minibatch_advantages - minibatch_advantages.mean()) / (minibatch_advantages.std(correction=0) + 1e-8)
-                    policy_loss, ratio_deviation_penalty, critic_loss, entropy_loss, approx_kl_div, ratio_mean, policy_grad_norm, critic_grad_norm = loss_fn(
-                        batch_states[minibatch_indices], batch_actions[minibatch_indices], batch_log_probs[minibatch_indices], batch_returns[minibatch_indices], minibatch_advantages, batch_values[minibatch_indices]
-                    )
+                    policy_loss, ratio_deviation_penalty, critic_loss, entropy_loss, approx_kl_div, ratio_mean, policy_grad_norm, critic_grad_norm = loss_fn(batch_states[minibatch_indices], batch_actions[minibatch_indices], batch_log_probs[minibatch_indices], batch_returns[minibatch_indices], minibatch_advantages, batch_values[minibatch_indices])
                     optimization_metrics = {
                         "loss/policy_gradient_loss": policy_loss.item(),
                         "loss/ratio_deviation_penalty": ratio_deviation_penalty.item(),
