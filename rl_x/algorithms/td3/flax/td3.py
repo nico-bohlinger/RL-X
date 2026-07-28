@@ -263,7 +263,7 @@ class TD3:
             # What to do in this step after acting
             should_learning_start = global_step > self.learning_starts
             should_optimize_critic = should_learning_start
-            should_optimize_policy = should_learning_start and global_step % self.policy_delay == 0
+            should_optimize_policy = should_learning_start and (nr_critic_updates + 1) % self.policy_delay == 0
             should_evaluate = global_step % self.evaluation_frequency == 0 and self.evaluation_frequency != -1
             should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
             should_log = global_step % self.logging_frequency == 0

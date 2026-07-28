@@ -22,9 +22,6 @@ from rl_x.algorithms.bro.flax.replay_buffer import ReplayBuffer
 
 rlx_logger = logging.getLogger("rl_x")
 
-LOG_VAL_MIN = -10.0
-LOG_VAL_MAX = 7.5
-
 
 def quantile_huber_loss(td, taus, kappa=1.0):
     huber = jnp.where(jnp.abs(td) <= kappa, 0.5 * td ** 2, kappa * (jnp.abs(td) - 0.5 * kappa))
@@ -62,6 +59,8 @@ class BRO:
         self.pessimism = config.algorithm.pessimism
         self.kl_target = config.algorithm.kl_target
         self.std_multiplier = config.algorithm.std_multiplier
+        self.log_value_min = config.algorithm.log_value_min
+        self.log_value_max = config.algorithm.log_value_max
         self.use_optimistic_exploration = config.algorithm.use_optimistic_exploration
         self.first_reset_step = config.algorithm.first_reset_step
         self.reset_interval = config.algorithm.reset_interval
@@ -98,10 +97,10 @@ class BRO:
         self.critic = get_critic(self.config, self.train_env)
         self.entropy_coefficient = EntropyCoefficient(initial_value=self.config.algorithm.init_entropy_coefficient)
 
-        init_optimism_raw = calculate_init_log_param(self.config.algorithm.init_optimism, LOG_VAL_MIN, LOG_VAL_MAX)
-        init_regularizer_raw = calculate_init_log_param(self.config.algorithm.init_regularizer, LOG_VAL_MIN, LOG_VAL_MAX)
-        self.optimism = Adjustment(init_value=init_optimism_raw, log_val_min=LOG_VAL_MIN, log_val_max=LOG_VAL_MAX)
-        self.regularizer = Adjustment(init_value=init_regularizer_raw, log_val_min=LOG_VAL_MIN, log_val_max=LOG_VAL_MAX)
+        init_optimism_raw = calculate_init_log_param(self.config.algorithm.init_optimism, self.log_value_min, self.log_value_max)
+        init_regularizer_raw = calculate_init_log_param(self.config.algorithm.init_regularizer, self.log_value_min, self.log_value_max)
+        self.optimism = Adjustment(init_value=init_optimism_raw, log_value_min=self.log_value_min, log_value_max=self.log_value_max)
+        self.regularizer = Adjustment(init_value=init_regularizer_raw, log_value_min=self.log_value_min, log_value_max=self.log_value_max)
 
         self.key, policy_key, optimistic_policy_key, critic_key, entropy_coefficient_key, optimism_key, regularizer_key = jax.random.split(master_key, 7)
 

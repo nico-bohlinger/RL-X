@@ -122,11 +122,11 @@ class PQN:
             _, q_targets = jax.lax.scan(
                 compute_q_targets,
                 last_target,
-                (rewards, terminations, next_values),
+                (rewards[:-1], terminations[:-1], next_values[:-1]),
                 reverse=True,
                 unroll=True
             )
-            return q_targets
+            return jnp.concatenate([q_targets, last_target[None]])
 
 
         @jax.jit

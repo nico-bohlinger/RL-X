@@ -21,16 +21,19 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/bro/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/bro/README.md): Implementation details of the Bigger, Regularized, Optimistic (BRO) algorithm
 - [```/rl_x/algorithms/c51/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/c51/README.md): Implementation details of the Categorical Deep Q-Network (C51) algorithm
 - [```/rl_x/algorithms/crossq/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/crossq/README.md): Implementation details of the CrossQ algorithm
+- [```/rl_x/algorithms/dime/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dime/README.md): Implementation details of Diffusion Models for Maximum Entropy Reinforcement Learning (DIME)
 - [```/rl_x/algorithms/ddpg/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ddpg/README.md): Implementation details of the Deep Deterministic Policy Gradient (DDPG) algorithm
 - [```/rl_x/algorithms/dqn/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dqn/README.md): Implementation details of the Deep Q-Network (DQN) algorithm
 - [```/rl_x/algorithms/ddqn/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ddqn/README.md): Implementation details of the Double Deep Q-Network (DDQN) algorithm
 - [```/rl_x/algorithms/dqn_hl_gauss/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dqn_hl_gauss/README.md): Implementation details of the Deep Q-Network with Histogram Loss using Gaussians (DQN HL-Gauss) algorithm
 - [```/rl_x/algorithms/droq/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/droq/README.md): Implementation details of the Dropout Q-Functions (DroQ) algorithm
+- [```/rl_x/algorithms/dppo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/dppo/README.md): Implementation details of Diffusion Policy Policy Optimization (DPPO)
 - [```/rl_x/algorithms/espo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/espo/README.md): Implementation details of the Early Stopping Policy Optimization (ESPO) algorithm
 - [```/rl_x/algorithms/fastmpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fastmpo/README.md): Implementation details of the Fast Maximum a Posteriori Policy Optimization (FastMPO) algorithm
 - [```/rl_x/algorithms/fastsac/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fastsac/README.md): Implementation details of the Fast Soft Actor-Critic (FastSAC) algorithm
 - [```/rl_x/algorithms/fasttd3/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fasttd3/README.md): Implementation details of the Fast Twin Delayed Deep Deterministic Gradient (FastTD3) algorithm
 - [```/rl_x/algorithms/flashsac/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/flashsac/README.md): Implementation details of the Flash Soft Actor-Critic (FlashSAC) algorithm
+- [```/rl_x/algorithms/fpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/fpo/README.md): Implementation details of Flow Policy Optimization (FPO)
 - [```/rl_x/algorithms/mpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/mpo/README.md): Implementation details of the Maximum a Posteriori Policy Optimization (MPO) algorithm
 - [```/rl_x/algorithms/ppo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo/README.md): Implementation details of the Proximal Policy Optimization (PPO) algorithm
 - [```/rl_x/algorithms/ppo_dtrl/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl/README.md): Implementation details of Differentiable Trust Region Layers in combination with the Proximal Policy Optimization (PPO+DTRL) algorithm
@@ -46,7 +49,9 @@ Most documentation is available in the ```README.md``` files in the respective d
 - [```/rl_x/algorithms/sac/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/sac/README.md): Implementation details of the Soft Actor Critic (SAC) algorithm
 - [```/rl_x/algorithms/simba/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simba/README.md): Implementation details of the Simplicity Bias (SimBa) algorithm
 - [```/rl_x/algorithms/simbav2/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/simbav2/README.md): Implementation details of the Simplicity Bias V2 (SimBaV2) algorithm
+- [```/rl_x/algorithms/spo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/spo/README.md): Implementation details of Simple Policy Optimization (SPO)
 - [```/rl_x/algorithms/td3/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/td3/README.md): Implementation details of the Twin Delayed Deep Deterministic Gradient (TD3) algorithm
+- [```/rl_x/algorithms/trpo/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trpo/README.md): Implementation details of Trust Region Policy Optimization (TRPO)
 - [```/rl_x/algorithms/tqc/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/tqc/README.md): Implementation details of the Truncated Quantile Critics (TQC) algorithm
 - [```/rl_x/algorithms/xqc/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/xqc/README.md): Implementation details of the XQC algorithm
 - [```/rl_x/environments/```](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/README.md): Information on the folder structure of environments, how to add new environments and how to mix and match them with algorithms

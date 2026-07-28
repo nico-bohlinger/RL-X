@@ -103,7 +103,7 @@ class C51:
             greedy_action_q_values = jnp.sum(greedy_action_dist * jnp.linspace(self.v_min, self.v_max, self.nr_atoms), axis=-1)
             greedy_action = jnp.argmax(greedy_action_q_values, axis=-1)
             action = jnp.where(
-                jax.random.uniform(subkey2) < epsilon,
+                jax.random.uniform(subkey2, (self.nr_envs,)) < epsilon,
                 random_action,
                 greedy_action,
             )

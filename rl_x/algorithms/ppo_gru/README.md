@@ -12,11 +12,12 @@ On how the algorithms works, refer to the [Resources](#resources) section.
 - The hyperparameters and network architecture for the ```flax_full_jit``` version are tuned for strong performance on many parallel environments for the custom mjx robot locomotion environment
 
 **Supported frameworks**
-- JAX (Flax)
+- PyTorch, JAX (Flax)
 
 **Supported observation space, action space and data interface types**
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
+| PyTorch | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | JAX (Flax) full JIT | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 

@@ -36,7 +36,7 @@ def get_policy(config, env):
                 ))
 
 
-def _sinusoidal_positional_encoding(length: int, d_model: int, dtype=jnp.float32) -> jnp.ndarray:
+def sinusoidal_positional_encoding(length: int, d_model: int, dtype=jnp.float32) -> jnp.ndarray:
     positions = jnp.arange(length, dtype=dtype)[:, None]  # [L,1]
     div = jnp.exp(
         (jnp.arange(0, d_model, 2, dtype=dtype) * (-jnp.log(jnp.array(10000.0, dtype=dtype)) / d_model))
@@ -166,7 +166,6 @@ class Policy(nn.Module):
     tf_d_model: int
     tf_dim_feedforward: int
     tf_down_projection_dim: int
-    tf_down_projection_dim: int
     tf_nhead: int
     tf_num_layers: int
     tf_dropout: float
@@ -214,11 +213,7 @@ class Policy(nn.Module):
         return {"obs": obs_hist, "mask": mask_hist}
 
 
-    def _reset_history(self, history):
-        return {"obs": jnp.zeros_like(history["obs"]), "mask": jnp.zeros_like(history["mask"])}
-
-
-    def _update_history(self, history, obs):
+    def update_history(self, history, obs):
         if history["obs"].shape[1] == 0:
             return history
         new_obs = jnp.concatenate([history["obs"][:, 1:, :], obs[:, None, :]], axis=1)
@@ -282,7 +277,7 @@ class Policy(nn.Module):
 
         x = self.tf_obs_encode(obs_seq)  # [B,T,d_model]
         T = x.shape[1]
-        x = x + _sinusoidal_positional_encoding(T, self.tf_d_model, dtype=x.dtype)[None, :, :]
+        x = x + sinusoidal_positional_encoding(T, self.tf_d_model, dtype=x.dtype)[None, :, :]
 
         h = self.transformer(x, padding_mask=pad, attn_mask=None, deterministic=True, is_causal=True)  # [B,T,d_model]
 
@@ -291,7 +286,7 @@ class Policy(nn.Module):
 
         mean, log_std = self.decode(obs_lat, tf_last)
 
-        next_history = self._update_history(history, obs)
+        next_history = self.update_history(history, obs)
         return mean, log_std, next_history
 
 
@@ -336,7 +331,7 @@ class Policy(nn.Module):
         attn_mask = band & same_seg  # [T_ext,T_ext], bool keep
 
         x = self.tf_obs_encode(obs_ext)[None, ...]  # [1,T_ext,d_model]
-        x = x + _sinusoidal_positional_encoding(T_ext, self.tf_d_model, dtype=x.dtype)[None, :, :]
+        x = x + sinusoidal_positional_encoding(T_ext, self.tf_d_model, dtype=x.dtype)[None, :, :]
 
         h = self.transformer(x, padding_mask=pad_ext[None, :], attn_mask=attn_mask, deterministic=True, is_causal=False)[0]  # [T_ext,d_model]
 
