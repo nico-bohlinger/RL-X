@@ -17,7 +17,7 @@ class ReplayBuffer():
         self.terminations = np.zeros((self.capacity, nr_envs), dtype=np.float32)
         self.pos = 0
         self.size = 0
-    
+
 
     def add(self, states, next_states, actions, rewards, terminations):
         self.states[self.pos] = states
@@ -27,7 +27,7 @@ class ReplayBuffer():
         self.terminations[self.pos] = terminations
         self.pos = (self.pos + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
-    
+
 
     def sample(self, nr_samples):
         idx1 = self.rng.integers(self.size, size=nr_samples)

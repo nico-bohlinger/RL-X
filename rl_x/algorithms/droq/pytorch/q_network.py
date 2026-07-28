@@ -25,7 +25,7 @@ class QNetwork(nn.Module):
             nn.Linear(nr_hidden_units, 1),
         )
 
-    
+
     def forward(self, x, a):
         x = x[..., self.critic_observation_indices]
         return self.critic(torch.cat([x, a], dim=1))

@@ -20,11 +20,11 @@ class EntropyCoefficient(nn.Module):
         else:
             self.target_entropy = float(self.target_entropy)
         self.log_alpha = nn.Parameter(torch.zeros(1, device=device))
-    
-    
+
+
     def forward(self):
         return self.log_alpha.exp()
-    
+
 
     def loss(self, entropy):
         return self.log_alpha.exp() * (entropy - self.target_entropy)

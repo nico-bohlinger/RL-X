@@ -67,7 +67,7 @@ class CrossQ:
         self.policy = get_policy(config, self.train_env, self.device)
         self.critic = get_critic(config, self.train_env, self.device)
         self.entropy_coefficient = get_entropy_coefficient(config, self.train_env, self.device)
-        
+
         fused = self.device.type == "cuda"
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, betas=(config.algorithm.policy_adam_b1, 0.999), fused=fused)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate, betas=(config.algorithm.critic_adam_b1, 0.999), fused=fused)
@@ -82,7 +82,7 @@ class CrossQ:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
 
-    
+
     def train(self):
         @torch.compile(mode=self.compile_mode)
         def policy_and_entropy_loss_fn(batch_states):
@@ -108,7 +108,7 @@ class CrossQ:
             entropy_grad_norm = self.entropy_coefficient.log_alpha.grad.detach().norm(2)
             self.entropy_optimizer.step()
             return policy_loss, entropy_loss, min_q.mean(), entropy.mean(), alpha_detach, policy_grad_norm, entropy_grad_norm
-        
+
 
         @torch.compile(mode=self.compile_mode)
         def critic_loss_fn(states, next_states, actions, rewards, terminations):
@@ -146,7 +146,7 @@ class CrossQ:
         steps_metrics = {}
         prev_saving_end_time = None
         logging_time_prev = None
-        
+
         while global_step < self.total_timesteps:
             start_time = time.time()
             torch.compiler.cudagraph_mark_step_begin()
@@ -164,7 +164,7 @@ class CrossQ:
                     action, processed_action, _ = self.policy.get_action(torch.tensor(state, dtype=torch.float32).to(self.device))
                 action = action.cpu().numpy()
                 processed_action = processed_action.cpu().numpy()
-            
+
             next_state, reward, terminated, truncated, info = self.train_env.step(processed_action)
             done = terminated | truncated
             actual_next_state = next_state.copy()
@@ -175,7 +175,7 @@ class CrossQ:
                     dones_this_rollout += 1
             for key, info_value in self.train_env.get_logging_info_dict(info).items():
                 step_info_collection.setdefault(key, []).extend(info_value)
-            
+
             replay_buffer.add(state, actual_next_state, action, reward, terminated)
 
             state = next_state
@@ -194,7 +194,7 @@ class CrossQ:
             should_try_to_save = should_learning_start and self.save_model and dones_this_rollout > 0
             should_log = global_step % self.logging_frequency == 0
 
-            
+
             # Optimizing - Prepare batches
             if should_optimize_critic:
                 batch_states, batch_next_states, batch_actions, batch_rewards, batch_terminations = replay_buffer.sample(self.batch_size)
@@ -233,7 +233,7 @@ class CrossQ:
                 if self.anneal_learning_rate:
                     self.policy_scheduler.step()
                     self.entropy_scheduler.step()
-            
+
             optimizing_end_time = time.time()
             time_metrics_collection.setdefault("time/optimizing_time", []).append(optimizing_end_time - acting_end_time)
 
@@ -259,7 +259,7 @@ class CrossQ:
                     if eval_nr_episodes == self.evaluation_episodes:
                         break
                 self.set_train_mode()
-            
+
             evaluating_end_time = time.time()
             time_metrics_collection.setdefault("time/evaluating_time", []).append(evaluating_end_time - optimizing_end_time)
 
@@ -270,7 +270,7 @@ class CrossQ:
                 if mean_return > self.best_mean_return:
                     self.best_mean_return = mean_return
                     self.save()
-            
+
             saving_end_time = time.time()
             if prev_saving_end_time:
                 time_metrics_collection.setdefault("time/sps", []).append(self.nr_envs / (saving_end_time - prev_saving_end_time))
@@ -297,7 +297,7 @@ class CrossQ:
                         mean_value = np.mean(step_info_collection[info_name])
                         if mean_value == mean_value:  # Check if mean_value is NaN
                             metric_dict[f"{metric_group}/{info_name}"] = mean_value
-                
+
                 time_metrics = {key: np.mean(value) for key, value in time_metrics_collection.items()}
                 optimization_metrics = {key: np.mean(value) for key, value in optimization_metrics_collection.items()}
                 evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics_collection.items()}
@@ -311,7 +311,7 @@ class CrossQ:
                 evaluation_metrics_collection = {}
 
                 self.end_logging()
-            
+
             logging_end_time = time.time()
             logging_time_prev = logging_end_time - saving_end_time
 
@@ -323,7 +323,7 @@ class CrossQ:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
             self.log_console(name, value)
-    
+
 
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
@@ -360,7 +360,7 @@ class CrossQ:
         torch.save(save_dict, file_path)
         if self.track_wandb:
             wandb.save(file_path, base_path=os.path.dirname(file_path))
-    
+
 
     def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         checkpoint = torch.load(config.runner.load_model, weights_only=False)
@@ -378,7 +378,7 @@ class CrossQ:
         model.entropy_optimizer.load_state_dict(checkpoint["entropy_optimizer_state_dict"])
         return model
 
-    
+
     def test(self, episodes):
         self.set_eval_mode()
         for i in range(episodes):
@@ -404,6 +404,6 @@ class CrossQ:
         self.policy.eval()
         self.critic.eval()
 
-    
+
     def general_properties():
         return GeneralProperties

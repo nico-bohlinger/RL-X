@@ -85,10 +85,10 @@ class TRPO:
 
         self.policy = get_policy(config, self.train_env, self.device)
         self.critic = get_critic(config, self.train_env, self.device)
-        
+
         fused = self.device.type == "cuda"
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_learning_rate, fused=fused)
-        
+
         if self.anneal_critic_learning_rate:
             self.critic_scheduler = optim.lr_scheduler.LambdaLR(self.critic_optimizer, lambda count: max(0.0, 1.0 - count / self.nr_critic_optimizer_steps))
 
@@ -96,7 +96,7 @@ class TRPO:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
 
-    
+
     def train(self):
         @torch.jit.script
         def calculate_gae_advantages_and_returns_mixed_precision(rewards, terminations, truncations, values, next_values, gamma: float, gae_lambda: float):
@@ -108,8 +108,8 @@ class TRPO:
                     lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * (1 - truncations[t]) * lastgaelam
                 returns = advantages + values
                 return advantages, returns
-            
-            
+
+
         @torch.jit.script
         def calculate_gae_advantages_and_returns(rewards, terminations, truncations, values, next_values, gamma: float, gae_lambda: float):
             delta = rewards + gamma * next_values * (1 - terminations) - values
@@ -126,7 +126,7 @@ class TRPO:
             with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 new_value = self.critic.get_value(states).reshape(-1)
                 critic_loss = 0.5 * ((new_value - returns) ** 2).mean()
-            
+
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
 
@@ -153,7 +153,7 @@ class TRPO:
         )
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
-        
+
         state, _ = self.train_env.reset()
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
         global_step = 0
@@ -162,13 +162,13 @@ class TRPO:
         steps_metrics = {}
         prev_saving_end_time = None
         logging_time_prev = None
-        
+
         while global_step < self.total_timesteps:
             start_time = time.time()
             time_metrics = {}
             if logging_time_prev:
                 time_metrics["time/logging_time_prev"] = logging_time_prev
-        
+
 
             # Acting
             with torch.inference_mode():
@@ -202,7 +202,7 @@ class TRPO:
                     state = next_state
                     global_step += self.nr_envs
                 nr_episodes += dones_this_rollout
-                
+
                 acting_end_time = time.time()
                 time_metrics["time/acting_time"] = acting_end_time - start_time
 
@@ -367,7 +367,7 @@ class TRPO:
                         if eval_nr_episodes == self.evaluation_episodes:
                             break
                     self.set_train_mode()
-            
+
             evaluating_end_time = time.time()
             time_metrics["time/evaluating_time"] = evaluating_end_time - optimizing_end_time
 
@@ -379,7 +379,7 @@ class TRPO:
                 if mean_return > self.best_mean_return:
                     self.best_mean_return = mean_return
                     self.save()
-            
+
             saving_end_time = time.time()
             if prev_saving_end_time:
                 time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - prev_saving_end_time))
@@ -404,9 +404,9 @@ class TRPO:
                     mean_value = np.mean(step_info_collection[info_name])
                     if mean_value == mean_value:  # Check if mean_value is NaN
                         metric_dict[f"{metric_group}/{info_name}"] = mean_value
-            
+
             evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
-            
+
             combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
             for key, value in combined_metrics.items():
                 self.log(f"{key}", value, global_step)
@@ -424,7 +424,7 @@ class TRPO:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
             self.log_console(name, value)
-    
+
 
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
@@ -452,7 +452,7 @@ class TRPO:
         torch.save({"config_algorithm": self.config.algorithm, "policy_state_dict": self.policy.state_dict(), "critic_state_dict": self.critic.state_dict(), "critic_optimizer_state_dict": self.critic_optimizer.state_dict()}, file_path)
         if self.track_wandb:
             wandb.save(file_path, base_path=os.path.dirname(file_path))
-    
+
 
     def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         checkpoint = torch.load(config.runner.load_model, weights_only=False)

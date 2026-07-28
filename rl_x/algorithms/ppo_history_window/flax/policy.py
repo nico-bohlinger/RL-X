@@ -65,7 +65,7 @@ class Policy(nn.Module):
 
         self.mean_head = nn.Dense(act_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))
         self.logstd = self.param("policy_logstd", constant(jnp.log(self.std_dev)), (1, np.prod(self.as_shape).item()))
-    
+
 
     def initialize_window(self, nr_envs: int, obs_dim: int):
         return jnp.zeros((nr_envs, self.window_length, obs_dim), dtype=jnp.float32)
@@ -125,7 +125,7 @@ class Policy(nn.Module):
         mean = self.mean_head(h)
 
         return mean, self.logstd
-    
+
 
     def apply_one_step(self, obs, rolling_window):
         w_lat = self.window_encode(rolling_window)
@@ -149,7 +149,7 @@ class Policy(nn.Module):
             window = jnp.where(done_prev_t > 0.0, self.reset_window(window), window)
             mean_t, logstd_t, next_window = self.apply_one_step(obs_t, window)
             return next_window, (mean_t, logstd_t)
-        
+
         _, (mean_seq, logstd_seq) = jax.lax.scan(step, init_window, (obs_seq, done_prev), unroll=True)
 
         return mean_seq, logstd_seq

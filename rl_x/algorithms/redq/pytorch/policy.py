@@ -19,7 +19,7 @@ def get_policy(config, env, device):
         policy.get_action = torch.compile(policy.get_action, mode=compile_mode)
         policy.get_deterministic_action = torch.compile(policy.get_deterministic_action, mode=compile_mode)
         return policy
-    
+
 
 class Policy(nn.Module):
     def __init__(self, env, log_std_min, log_std_max, nr_hidden_units, device, policy_observation_indices):

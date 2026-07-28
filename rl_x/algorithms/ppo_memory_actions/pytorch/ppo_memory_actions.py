@@ -78,11 +78,11 @@ class PPO_Memory_Actions:
 
         self.policy = get_policy(config, self.train_env, self.device)
         self.critic = get_critic(config, self.train_env, self.device)
-        
+
         fused = self.device.type == "cuda"
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, fused=fused)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate, fused=fused)
-        
+
         if self.anneal_learning_rate:
             self.policy_scheduler = optim.lr_scheduler.LinearLR(self.policy_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.batch_size)
             self.critic_scheduler = optim.lr_scheduler.LinearLR(self.critic_optimizer, start_factor=1.0, end_factor=0.0, total_iters=self.total_timesteps // self.batch_size)
@@ -91,7 +91,7 @@ class PPO_Memory_Actions:
             os.makedirs(self.save_path)
             self.best_mean_return = -np.inf
 
-    
+
     def train(self):
         @torch.jit.script
         def calculate_gae_advantages_and_returns_mixed_precision(rewards, terminations, values, next_values, gamma: float, gae_lambda: float):
@@ -103,8 +103,8 @@ class PPO_Memory_Actions:
                     lastgaelam = advantages[t] = delta[t] + gamma * gae_lambda * (1 - terminations[t]) * lastgaelam
                 returns = advantages + values
                 return advantages, returns
-            
-            
+
+
         @torch.jit.script
         def calculate_gae_advantages_and_returns(rewards, terminations, values, next_values, gamma: float, gae_lambda: float):
             delta = rewards + gamma * next_values * (1 - terminations) - values
@@ -153,7 +153,7 @@ class PPO_Memory_Actions:
             with autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16_mixed_precision_training):
                 new_value = self.critic.get_value(states).reshape(-1)
                 critic_loss = self.critic_coef * (0.5 * (new_value - returns) ** 2).mean()
-            
+
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
 
@@ -179,7 +179,7 @@ class PPO_Memory_Actions:
         )
 
         saving_return_buffer = deque(maxlen=100 * self.nr_envs)
-        
+
         env_state, _ = self.train_env.reset()
         memory_action = np.zeros((self.nr_envs, self.memory_action_dimension), dtype=np.float32)
         state = np.concatenate([env_state, memory_action], axis=-1)
@@ -190,13 +190,13 @@ class PPO_Memory_Actions:
         steps_metrics = {}
         prev_saving_end_time = None
         logging_time_prev = None
-        
+
         while global_step < self.total_timesteps:
             start_time = time.time()
             time_metrics = {}
             if logging_time_prev:
                 time_metrics["time/logging_time_prev"] = logging_time_prev
-        
+
 
             # Acting
             with torch.inference_mode():
@@ -231,7 +231,7 @@ class PPO_Memory_Actions:
                     state = torch.cat([next_env_state, memory_action], dim=-1)
                     global_step += self.nr_envs
                 nr_episodes += dones_this_rollout
-                
+
                 acting_end_time = time.time()
                 time_metrics["time/acting_time"] = acting_end_time - start_time
 
@@ -281,7 +281,7 @@ class PPO_Memory_Actions:
                         "gradients/critic_grad_norm": critic_grad_norm.item(),
                     }
                     optimization_metrics_list.append(optimization_metrics)
-            
+
             y_pred, y_true = batch_values.cpu().numpy(), batch_returns.cpu().numpy()
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
@@ -331,7 +331,7 @@ class PPO_Memory_Actions:
                         if eval_nr_episodes == self.evaluation_episodes:
                             break
                     self.set_train_mode()
-            
+
             evaluating_end_time = time.time()
             time_metrics["time/evaluating_time"] = evaluating_end_time - optimizing_end_time
 
@@ -343,7 +343,7 @@ class PPO_Memory_Actions:
                 if mean_return > self.best_mean_return:
                     self.best_mean_return = mean_return
                     self.save()
-            
+
             saving_end_time = time.time()
             if prev_saving_end_time:
                 time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - prev_saving_end_time))
@@ -368,9 +368,9 @@ class PPO_Memory_Actions:
                     mean_value = np.mean(step_info_collection[info_name])
                     if mean_value == mean_value:  # Check if mean_value is NaN
                         metric_dict[f"{metric_group}/{info_name}"] = mean_value
-            
+
             evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
-            
+
             combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
             for key, value in combined_metrics.items():
                 self.log(f"{key}", value, global_step)
@@ -388,7 +388,7 @@ class PPO_Memory_Actions:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
             self.log_console(name, value)
-    
+
 
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
@@ -422,7 +422,7 @@ class PPO_Memory_Actions:
         }, file_path)
         if self.track_wandb:
             wandb.save(file_path, base_path=os.path.dirname(file_path))
-    
+
 
     def load(config, train_env, eval_env, run_path, writer, explicitly_set_algorithm_params):
         checkpoint = torch.load(config.runner.load_model, weights_only=False)

@@ -61,14 +61,14 @@ class PPO_Memory_Actions:
             raise ValueError("Evaluation frequency must be a multiple of the number of steps and environments.")
 
         rlx_logger.info(f"Using device: {jax.default_backend()}")
-        
+
         self.key = jax.random.PRNGKey(self.seed)
         self.key, policy_key, critic_key = jax.random.split(self.key, 3)
 
         self.env_action_dimension = self.train_env.single_action_space.shape[0]
         self.os_shape = (self.train_env.single_observation_space.shape[0] + self.memory_action_dimension,)
         self.as_shape = (self.env_action_dimension + self.memory_action_dimension,)
-        
+
         self.policy, self.get_processed_action = get_policy(config, self.train_env)
         self.critic = get_critic(config, self.train_env)
 
@@ -107,7 +107,7 @@ class PPO_Memory_Actions:
             self.best_model_file_name = "best.model"
             self.best_model_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
-    
+
     def train(self):
         @jax.jit
         def get_action_and_value(policy_state: TrainState, critic_state: TrainState, state: np.ndarray, key: jax.random.PRNGKey):
@@ -120,7 +120,7 @@ class PPO_Memory_Actions:
             env_action, memory_action = jnp.split(action, [self.env_action_dimension], axis=-1)
             processed_action = self.get_processed_action(env_action)
             return processed_action, action, value.reshape(-1), log_prob.sum(1), memory_action / self.memory_action_mean_clip, key
-        
+
 
         @jax.jit
         def calculate_gae_advantages(critic_state: TrainState, next_states: np.ndarray, rewards: np.ndarray, terminations: np.ndarray, values: np.ndarray):
@@ -136,7 +136,7 @@ class PPO_Memory_Actions:
             advantages = jnp.concatenate([advantages[::-1], jnp.array([init_advantages])])
             returns = advantages + values
             return advantages, returns
-        
+
 
         @jax.jit
         def update(policy_state: TrainState, critic_state: TrainState,
@@ -149,7 +149,7 @@ class PPO_Memory_Actions:
                 new_log_prob = -0.5 * ((action_b - action_mean) / action_std) ** 2 - 0.5 * jnp.log(2.0 * jnp.pi) - action_logstd
                 new_log_prob = new_log_prob.sum(1)
                 entropy = action_logstd + 0.5 * jnp.log(2.0 * jnp.pi * jnp.e)
-                
+
                 logratio = new_log_prob - log_prob_b
                 ratio = jnp.exp(logratio)
                 approx_kl_div = (ratio - 1) - logratio
@@ -158,9 +158,9 @@ class PPO_Memory_Actions:
                 pg_loss1 = -advantage_b * ratio
                 pg_loss2 = -advantage_b * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range)
                 pg_loss = jnp.maximum(pg_loss1, pg_loss2)
-                
+
                 entropy_loss = entropy.sum(1)
-                
+
                 # Critic loss
                 new_value = self.critic.apply(critic_params, state_b)
                 critic_loss = 0.5 * (new_value - return_b) ** 2
@@ -178,7 +178,7 @@ class PPO_Memory_Actions:
                 }
 
                 return loss, (metrics)
-            
+
 
             batch_states = states.reshape((-1,) + self.os_shape)
             batch_actions = actions.reshape((-1,) + self.as_shape)
@@ -221,7 +221,7 @@ class PPO_Memory_Actions:
                 carry = (policy_state, critic_state)
 
                 return carry, (metrics)
-            
+
             init_carry = (policy_state, critic_state)
             carry, (metrics) = jax.lax.scan(minibatch_update, init_carry, batch_indices)
             policy_state, critic_state = carry
@@ -240,7 +240,7 @@ class PPO_Memory_Actions:
             action_mean, action_logstd = self.policy.apply(policy_state.params, state)
             env_action, memory_action = jnp.split(action_mean, [self.env_action_dimension], axis=-1)
             return self.get_processed_action(env_action), memory_action / self.memory_action_mean_clip
-        
+
 
         self.set_train_mode()
 
@@ -267,7 +267,7 @@ class PPO_Memory_Actions:
         steps_metrics = {}
         prev_saving_end_time = None
         logging_time_prev = None
-        
+
         while global_step < self.total_timesteps:
             start_time = time.time()
             time_metrics = {}
@@ -302,14 +302,14 @@ class PPO_Memory_Actions:
                 state = np.concatenate([next_env_state, memory_action], axis=-1)
                 global_step += self.nr_envs
             nr_episodes += dones_this_rollout
-            
+
             acting_end_time = time.time()
             time_metrics["time/acting_time"] = acting_end_time - start_time
 
 
             # Calculating advantages and returns
             batch.advantages, batch.returns = calculate_gae_advantages(self.critic_state, batch.next_states, batch.rewards, batch.terminations, batch.values)
-            
+
             calc_adv_return_end_time = time.time()
             time_metrics["time/calc_adv_and_return_time"] = calc_adv_return_end_time - acting_end_time
 
@@ -353,10 +353,10 @@ class PPO_Memory_Actions:
                         break
                 evaluation_metrics = {key: np.mean(value) for key, value in evaluation_metrics.items()}
                 self.set_train_mode()
-            
+
             evaluating_end_time = time.time()
             time_metrics["time/evaluating_time"] = evaluating_end_time - optimizing_end_time
-            
+
 
             # Saving
             # Also only save when there were finished episodes this update
@@ -365,7 +365,7 @@ class PPO_Memory_Actions:
                 if mean_return > self.best_mean_return:
                     self.best_mean_return = mean_return
                     self.save()
-            
+
             saving_end_time = time.time()
             if prev_saving_end_time:
                 time_metrics["time/sps"] = int((self.nr_steps * self.nr_envs) / (saving_end_time - prev_saving_end_time))
@@ -390,7 +390,7 @@ class PPO_Memory_Actions:
                     mean_value = np.mean(step_info_collection[info_name])
                     if mean_value == mean_value:  # Check if mean_value is NaN
                         metric_dict[f"{metric_group}/{info_name}"] = mean_value
-            
+
             combined_metrics = {**rollout_info_metrics, **evaluation_metrics, **env_info_metrics, **steps_metrics, **time_metrics, **optimization_metrics}
             for key, value in combined_metrics.items():
                 self.log(f"{key}", value, global_step)
@@ -408,7 +408,7 @@ class PPO_Memory_Actions:
             self.writer.add_scalar(name, value, step)
         if self.track_console:
             self.log_console(name, value)
-    
+
 
     def log_console(self, name, value):
         value = np.format_float_positional(value, trim="-")
@@ -430,7 +430,7 @@ class PPO_Memory_Actions:
         if self.track_console:
             rlx_logger.info("└" + "─" * 31 + "┴" + "─" * 16 + "┘")
 
-    
+
     def save(self):
         checkpoint = {
             "policy": self.policy_state,
@@ -475,7 +475,7 @@ class PPO_Memory_Actions:
         shutil.rmtree(checkpoint_dir)
 
         return model
-    
+
 
     def test(self, episodes):
         @jax.jit
@@ -483,7 +483,7 @@ class PPO_Memory_Actions:
             action_mean, action_logstd = self.policy.apply(policy_state.params, state)
             env_action, memory_action = jnp.split(action_mean, [self.env_action_dimension], axis=-1)
             return self.get_processed_action(env_action), memory_action / self.memory_action_mean_clip
-        
+
         self.set_eval_mode()
         for i in range(episodes):
             done = False
@@ -499,8 +499,8 @@ class PPO_Memory_Actions:
                 state = np.concatenate([env_state, memory_action], axis=-1)
                 episode_return += reward
             rlx_logger.info(f"Episode {i + 1} - Return: {episode_return}")
-    
-            
+
+
     def set_train_mode(self):
         ...
 
