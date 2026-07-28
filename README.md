@@ -1,11 +1,7 @@
-<img src="docs/assets/images/logo.png" align="right" width="25%"/>
+<img src="docs/assets/images/logo_no_background.png" align="right" width="25%"/>
 
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/readme_title_dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/images/readme_title_light.svg">
-  <img src="docs/assets/images/readme_title_light.svg" alt="RL-X" height="52">
-</picture>
+### RL-X
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/readme_separator_dark.svg">
