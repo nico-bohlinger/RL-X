@@ -13,17 +13,17 @@ class EntropyCoefficient(nn.Module):
 
 
 class Adjustment(nn.Module):
-    init_value: float = 1.0
-    log_val_min: float = -10.0
-    log_val_max: float = 7.5
+    init_value: float
+    log_value_min: float
+    log_value_max: float
 
     @nn.compact
     def __call__(self):
         log_value = self.param("log_value", init_fn=lambda key: jnp.full((), math.log(self.init_value)))
-        log_value = self.log_val_min + (self.log_val_max - self.log_val_min) * 0.5 * (1.0 + jnp.tanh(log_value))
+        log_value = self.log_value_min + (self.log_value_max - self.log_value_min) * 0.5 * (1.0 + jnp.tanh(log_value))
         return jnp.exp(log_value)
 
 
-def calculate_init_log_param(value, log_val_min, log_val_max):
-    ratio = (math.log(value) - log_val_min) / ((log_val_max - log_val_min) * 0.5) - 1.0
+def calculate_init_log_param(value, log_value_min, log_value_max):
+    ratio = (math.log(value) - log_value_min) / ((log_value_max - log_value_min) * 0.5) - 1.0
     return math.exp(math.atanh(ratio))

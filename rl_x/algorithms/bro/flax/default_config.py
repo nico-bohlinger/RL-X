@@ -30,6 +30,8 @@ def get_config(algorithm_name):
     config.init_entropy_coefficient = 1.0
     config.init_optimism = 1.0
     config.init_regularizer = 0.25
+    config.log_value_min = -10.0
+    config.log_value_max = 7.5
     config.target_entropy = "auto"
     config.use_optimistic_exploration = True
     config.first_reset_step = 15000

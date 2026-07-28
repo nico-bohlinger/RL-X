@@ -16,9 +16,6 @@ from rl_x.algorithms.bro.pytorch.replay_buffer import ReplayBuffer
 
 rlx_logger = logging.getLogger("rl_x")
 
-LOG_VALUE_MIN = -10.0
-LOG_VALUE_MAX = 7.5
-
 
 class BRO:
     def __init__(self, config, train_env, eval_env, run_path, writer):
@@ -52,6 +49,8 @@ class BRO:
         self.pessimism = config.algorithm.pessimism
         self.kl_target = config.algorithm.kl_target
         self.std_multiplier = config.algorithm.std_multiplier
+        self.log_value_min = config.algorithm.log_value_min
+        self.log_value_max = config.algorithm.log_value_max
         self.use_optimistic_exploration = config.algorithm.use_optimistic_exploration
         self.first_reset_step = config.algorithm.first_reset_step
         self.reset_interval = config.algorithm.reset_interval
@@ -94,8 +93,8 @@ class BRO:
         self.target_critic = get_critic(self.config, self.train_env, self.device)
         self.target_critic.load_state_dict(self.critic.state_dict())
         self.entropy_coefficient = EntropyCoefficient(self.config.algorithm.init_entropy_coefficient).to(self.device)
-        self.optimism = Adjustment(self.config.algorithm.init_optimism, LOG_VALUE_MIN, LOG_VALUE_MAX).to(self.device)
-        self.regularizer = Adjustment(self.config.algorithm.init_regularizer, LOG_VALUE_MIN, LOG_VALUE_MAX).to(self.device)
+        self.optimism = Adjustment(self.config.algorithm.init_optimism, self.log_value_min, self.log_value_max).to(self.device)
+        self.regularizer = Adjustment(self.config.algorithm.init_regularizer, self.log_value_min, self.log_value_max).to(self.device)
 
         fused = self.device.type == "cuda"
         self.policy_optimizer = optim.AdamW(self.policy.parameters(), lr=self.policy_learning_rate, weight_decay=1e-4, fused=fused)
