@@ -1,4 +1,4 @@
-# Adversarial Motion Priors
+# Noise-conditioned Energy-based Annealed Rewards
 
 Contains the implementation of [Noise-conditioned Energy-based Annealed Rewards (NEAR)](https://arxiv.org/abs/2501.14856) with PPO for policy optimization.
 
@@ -28,3 +28,7 @@ git clone https://huggingface.co/datasets/anishdiwan/trirl_dataset
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
 | JAX (Flax) full JIT | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+## Resources
+
+- Paper: [Noise-conditioned Energy-based Annealed Rewards (NEAR) (Diwan et al., 2025)](https://arxiv.org/abs/2501.14856)

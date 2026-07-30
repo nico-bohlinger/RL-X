@@ -28,3 +28,7 @@ git clone https://huggingface.co/datasets/anishdiwan/trirl_dataset
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
 | JAX (Flax) full JIT | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+## Resources
+
+- Paper: [Generative Adversarial Imitation Learning (Ho & Ermon, 2016)](https://arxiv.org/abs/1606.03476)

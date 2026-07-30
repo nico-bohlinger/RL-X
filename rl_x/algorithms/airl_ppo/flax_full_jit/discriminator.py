@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from flax.linen.initializers import constant, orthogonal
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
-from collections import deque
+
 
 def get_discriminator(config, env):
     action_space_type = env.general_properties.action_space_type
@@ -27,7 +27,7 @@ class DiscriminatorShaped(nn.Module):
         self.hnet_dense2 = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))
         self.hnet_dense3 = nn.Dense(1, kernel_init=orthogonal(0.1), bias_init=constant(0.0))
 
-    def __call__(self, x, a, x_n, absorbing, logp, shaping: float = 1.0):
+    def __call__(self, x, a, x_n, absorbing, logp, shaping=1.0):
         """
         D(s) + gamma h(s') - h(s)
         Args:

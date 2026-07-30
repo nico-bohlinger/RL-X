@@ -4,7 +4,6 @@ import jax.numpy as jnp
 from flax.linen.initializers import constant, orthogonal
 from rl_x.environments.action_space_type import ActionSpaceType
 from rl_x.environments.observation_space_type import ObservationSpaceType
-from collections import deque
 
 
 def get_discriminator(config, env):

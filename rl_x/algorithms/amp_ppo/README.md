@@ -28,3 +28,7 @@ git clone https://huggingface.co/datasets/anishdiwan/trirl_dataset
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
 | JAX (Flax) full JIT | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+## Resources
+
+- Paper: [AMP: Adversarial Motion Priors for Stylized Physics-Based Character Control (Peng et al., 2021)](https://arxiv.org/abs/2104.02180)

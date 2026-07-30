@@ -1,4 +1,4 @@
-# Adversarial Motion Priors
+# Adversarial Inverse Reinforcement Learning
 
 Contains the implementation of [Adversarial Inverse Reinforcement Learning (AIRL)](https://arxiv.org/abs/1710.11248) with PPO for policy optimization.
 
@@ -28,3 +28,7 @@ git clone https://huggingface.co/datasets/anishdiwan/trirl_dataset
 | Version | Flat value obs | Image obs | Contiuous actions | Discrete actions | List interface | Numpy interface | Torch interface | JAX interface |
 | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
 | JAX (Flax) full JIT | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+## Resources
+
+- Paper: [Learning Robust Rewards with Adversarial Inverse Reinforcement Learning (Fu et al., 2018)](https://arxiv.org/abs/1710.11248)

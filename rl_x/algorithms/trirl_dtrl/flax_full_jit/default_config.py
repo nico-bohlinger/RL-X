@@ -40,6 +40,6 @@ def get_config(algorithm_name):
     config.gp_alpha = 0.5
     config.handle_absorbing_states = True
     config.reward_fn_approximator = False
-    config.on_demand_etas = Falsee
+    config.on_demand_etas = False
 
     return config

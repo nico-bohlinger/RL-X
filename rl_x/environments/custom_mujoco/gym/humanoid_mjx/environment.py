@@ -21,7 +21,7 @@ class Humanoid:
         self.mjx_model = mjx.put_model(self.mj_model)
         self.mjx_data = mjx.make_data(self.mjx_model)
 
-        self.nr_intermediate_steps = 1
+        self.nr_intermediate_steps = 5
 
         initial_qpos = [0.0, 0.0, 1.4, 1.0] + [0.0] * (self.mjx_model.nq - 4)
 
@@ -45,11 +45,11 @@ class Humanoid:
         )
 
         self.forward_reward_weight = 1.25
-        self.healthy_z_range: Tuple[float, float] = (1.0, 2.0)
+        self.healthy_z_range = (1.0, 2.0)
         self.terminate_when_unhealthy = True
-        self.ctrl_cost_weight: float = 0.1
-        self.contact_cost_weight: float = 5e-7
-        self.contact_cost_range: Tuple[float, float] = (-jnp.inf, 10.0)
+        self.ctrl_cost_weight = 0.1
+        self.contact_cost_weight = 5e-7
+        self.contact_cost_range = (-jnp.inf, 10.0)
         self.healthy_reward = 5.0
         self.reset_noise_scale = 1e-2
 
@@ -110,7 +110,8 @@ class Humanoid:
         qvel = self.initial_qvel + jax.random.uniform(qvel_key, (self.mjx_model.nv,), minval=-self.reset_noise_scale, maxval=self.reset_noise_scale)
 
         data = self.mjx_data
-        data = data.replace(qpos=qpos, qvel=qvel)
+        data = data.replace(qpos=qpos, qvel=qvel, ctrl=jnp.zeros(self.mjx_model.nu))
+        data = mjx.forward(self.mjx_model, data)
 
         next_observation = self.get_observation(data)
         reward = 0.0

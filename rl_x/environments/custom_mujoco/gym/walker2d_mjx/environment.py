@@ -1,7 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
 from functools import partial
-from typing import Tuple
 
 import jax
 import jax.numpy as jnp
@@ -24,7 +23,7 @@ class Walker2D:
         self.mjx_model = mjx.put_model(self.mj_model)
         self.mjx_data = mjx.make_data(self.mjx_model)
 
-        self.nr_intermediate_steps = 1
+        self.nr_intermediate_steps = 4
 
         initial_qpos = [0.0, 1.25, 0.0] + [0.0] * (self.mjx_model.nq - 3)
         self.initial_qpos = jnp.array(initial_qpos)
@@ -41,10 +40,10 @@ class Walker2D:
         )
 
         self.forward_reward_weight = 1.0
-        self.healthy_z_range: Tuple[float, float] = (0.8, 2.0)
+        self.healthy_z_range = (0.8, 2.0)
         self.healthy_angle_range = (-1.0, 1.0)
         self.terminate_when_unhealthy = True
-        self.ctrl_cost_weight: float = 1e-3
+        self.ctrl_cost_weight = 1e-3
         self.healthy_reward = 1.0
         self.reset_noise_scale = 5e-3
 

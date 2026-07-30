@@ -1,21 +1,20 @@
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
-from typing import Tuple
 from jax.lax import stop_gradient
-from jaxopt import LBFGS
 from functools import partial
 
+
 ####################################################################
 ####################################################################
 """
-Chunked Trust Region Projection 
+Chunked Trust Region Projection
 """
 ####################################################################
 ####################################################################
 
-def make_chunked_compute_etas(policy_apply_fn, kl_cov_proj, nr_steps: int, nr_envs: int, mean_bound: float, cov_bound: float):
+
+def make_chunked_compute_etas(policy_apply_fn, kl_cov_proj, nr_steps, nr_envs, mean_bound, cov_bound):
     """
     chunked_compute_etas(policy_buffer, inputs, chunk_size)
     states: (batch, ...)
@@ -48,7 +47,7 @@ def make_chunked_compute_etas(policy_apply_fn, kl_cov_proj, nr_steps: int, nr_en
     @partial(jax.jit, static_argnames=('chunk_size'))
     def process_chunk_on_device(
         etas, params_chunk, states,
-        available: jnp.ndarray, chunk_size: int, write_index: jnp.ndarray
+        available, chunk_size, write_index
     ):
 
         mean, logstd = vmapped_policy(states, params_chunk)  # mean: (chunk_size, batch, A), logstd: (chunk_size, A)
@@ -96,7 +95,7 @@ def make_chunked_compute_etas(policy_apply_fn, kl_cov_proj, nr_steps: int, nr_en
                             operand=(etas, mean, std, write_index, pair_count_valid))
 
     @partial(jax.jit, static_argnames=('chunk_size', 'buffer_size'))
-    def chunked_compute_etas(policy_buffer, states, level: jnp.ndarray, chunk_size: int, buffer_size: int):
+    def chunked_compute_etas(policy_buffer, states, level, chunk_size, buffer_size):
         """
         policy_buffer: pytree with leading axis >= level (full TrainStateBuffer)
         states: states
@@ -168,9 +167,10 @@ def dual(eta_omega, pred_std, target_std, target_logdet, eps, omega_offset):
 
     return dual_val, jnp.array([grad_val])
 
+
 @jax.custom_vjp
-def kl_cov_proj(pred_std: jnp.ndarray, target_std: jnp.ndarray, eps: float, max_eval: int = 50, 
-                        omega_offset: float = 1.0, eta_init: float = 0.0) -> Tuple[jnp.ndarray, float]:
+def kl_cov_proj(pred_std, target_std, eps, max_eval=50,
+                        omega_offset=1.0, eta_init=0.0):
 
     """
     pred_std: standard deviation of the policy's prediction:  (1, as_dim)
@@ -227,14 +227,13 @@ def kl_cov_proj(pred_std: jnp.ndarray, target_std: jnp.ndarray, eps: float, max_
     return projected_cov, eta_opt
 
 
-
-def kl_cov_proj_backward(d_proj: jnp.ndarray,
-                                succ: bool,
-                                omega_offset: float,
-                                eta: float,
-                                pred_std: jnp.ndarray,
-                                target_std: jnp.ndarray,
-                                projected_std: jnp.ndarray) -> jnp.ndarray:
+def kl_cov_proj_backward(d_proj,
+                                succ,
+                                omega_offset,
+                                eta,
+                                pred_std,
+                                target_std,
+                                projected_std):
 
     if not succ:
         raise RuntimeError("Optimization was not successful, cannot run backward")
@@ -280,10 +279,12 @@ def kl_cov_proj_backward(d_proj: jnp.ndarray,
 
     return d_pred_std
 
+
 def kl_cov_proj_fwd(pred_std, target_std, eps, max_eval, omega_offset, eta_init):
     projected_cov, eta = kl_cov_proj(pred_std, target_std, eps, max_eval, omega_offset, eta_init)
     residuals = (pred_std, target_std, projected_cov, eta, omega_offset)
     return (projected_cov, eta), residuals
+
 
 def kl_cov_proj_bwd(residuals, cotangents):
     d_projected_cov, d_eta = cotangents
@@ -293,6 +294,7 @@ def kl_cov_proj_bwd(residuals, cotangents):
     return (d_std_pred, None, None, None, None, None)
 
 kl_cov_proj.defvjp(kl_cov_proj_fwd, kl_cov_proj_bwd)
+
 
 def kl_projection(mean, std, mean_other, std_other, eps_mean, eps_cov):
     """

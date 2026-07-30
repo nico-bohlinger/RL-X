@@ -1,8 +1,7 @@
 import jax
 import jax.numpy as jnp
-from jax.lax import stop_gradient
 from functools import partial
-from jax.tree_util import tree_map, tree_leaves
+
 
 ####################################################################
 ####################################################################
@@ -12,9 +11,10 @@ Chunked Reward Correction
 ####################################################################
 ####################################################################
 
+
 def make_chunked_ensemble_rew_correct(
-    log_density_ratio_fn, nr_steps: int, nr_envs: int,
-    epsilon: float, beta: float, entropy_coef: float, maximum_eta: bool
+    log_density_ratio_fn, nr_steps, nr_envs,
+    epsilon, beta, entropy_coef, maximum_eta
 ):
     """
     Only load a fixed-size chunk of the buffer into memory. Avoid OOM issues and allows deepr discriminator chains
@@ -38,14 +38,14 @@ def make_chunked_ensemble_rew_correct(
     @partial(jax.jit, static_argnames=('maximum_eta', 'chunk_size'))
     def process_chunk_on_device(
         corr, params_chunk, eta_chunk, inputs,
-        maximum_eta: bool, available: jnp.ndarray, chunk_size: int
+        maximum_eta, available, chunk_size
     ):
         """
         params_chunk: pytree with leading axis == chunk_size
         eta_chunk:    (chunk_size, nr_steps, nr_envs)
         available:    scalar int (<= chunk_size) valid rows for the last (possibly short) chunk
         """
-        out_flat  = vmapped_chunk(inputs, params_chunk)c # (chunk_size, N, ...)
+        out_flat  = vmapped_chunk(inputs, params_chunk) # (chunk_size, N, ...)
         out_chunk = out_flat.reshape((chunk_size, nr_steps, nr_envs)) # (chunk_size, S, E)
 
         def body_fun(t, carry):
@@ -63,7 +63,7 @@ def make_chunked_ensemble_rew_correct(
         return jax.lax.fori_loop(0, chunk_size, body_fun, corr)
 
     @partial(jax.jit, static_argnames=('chunk_size', 'maximum_eta'))
-    def chunked_correct(buffer, inputs, etas, corr, level: jnp.ndarray, chunk_size: int, maximum_eta=maximum_eta):
+    def chunked_correct(buffer, inputs, etas, corr, level, chunk_size, maximum_eta=maximum_eta):
         """
         buffer: pytree with leading axis >= level (full DiscBuffer)
         inputs:    input to log_density_ratio_fn

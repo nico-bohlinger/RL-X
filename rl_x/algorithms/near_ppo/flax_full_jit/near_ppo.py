@@ -13,14 +13,15 @@ from flax.training import orbax_utils
 import orbax.checkpoint
 import optax
 import wandb
-import re
 
 from rl_x.algorithms.near_ppo.flax_full_jit.general_properties import GeneralProperties
 from rl_x.algorithms.near_ppo.flax_full_jit.policy import get_policy
 from rl_x.algorithms.near_ppo.flax_full_jit.critic import get_critic
 from rl_x.algorithms.near_ppo.flax_full_jit.energy_function import get_energyfn
 from rl_x.algorithms.near_ppo.flax_full_jit.data_utils import prepare_expert_data, expert_data_spec
+
 rlx_logger = logging.getLogger("rl_x")
+
 
 class NEAR_PPO:
     def __init__(self, config, train_env, eval_env, run_path, writer):

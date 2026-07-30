@@ -1,7 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
 from functools import partial
-from typing import Tuple
 
 import jax
 import jax.numpy as jnp
@@ -25,7 +24,7 @@ class Ant:
         self.mjx_model = mjx.put_model(self.mj_model)
         self.mjx_data = mjx.make_data(self.mjx_model)
 
-        self.nr_intermediate_steps = 1
+        self.nr_intermediate_steps = 5
 
         initial_height = 0.75
         initial_rotation_quaternion = [1.0, 0.0, 0.0, 0.0]
@@ -44,12 +43,12 @@ class Ant:
         )
 
         self.forward_reward_weight = 1.0
-        self.healthy_z_range: Tuple[float, float] = (0.2, 1.0)
+        self.healthy_z_range = (0.2, 1.0)
         self.terminate_when_unhealthy = True
-        self.ctrl_cost_weight: float = 0.5
+        self.ctrl_cost_weight = 0.5
         self.healthy_reward = 1.0
-        self.contact_force_range: Tuple[float, float] = (-1.0, 1.0)
-        self.contact_cost_weight: float = 5e-4
+        self.contact_force_range = (-1.0, 1.0)
+        self.contact_cost_weight = 5e-4
         self.reset_noise_scale = 0.1
 
         self.viewer = None

@@ -23,7 +23,7 @@ class HalfCheetah:
         self.mjx_model = mjx.put_model(self.mj_model)
         self.mjx_data = mjx.make_data(self.mjx_model)
 
-        self.nr_intermediate_steps = 1
+        self.nr_intermediate_steps = 5
 
         self.initial_qpos = jnp.zeros(self.mjx_model.nq)
         self.initial_qvel = jnp.zeros(self.mjx_model.nv)
@@ -39,7 +39,7 @@ class HalfCheetah:
         )
 
         self.forward_reward_weight = 1.0
-        self.ctrl_cost_weight: float = 0.1
+        self.ctrl_cost_weight = 0.1
         self.reset_noise_scale = 0.1
 
         self.viewer = None
