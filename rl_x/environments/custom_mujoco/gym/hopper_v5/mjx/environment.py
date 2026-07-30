@@ -7,16 +7,16 @@ import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
 
-from rl_x.environments.custom_mujoco.gym.walker2d_mjx.state import State
-from rl_x.environments.custom_mujoco.gym.walker2d_mjx.box_space import BoxSpace
-from rl_x.environments.custom_mujoco.gym.walker2d_mjx.viewer import MujocoViewer
+from rl_x.environments.custom_mujoco.gym.hopper_v5.mjx.state import State
+from rl_x.environments.custom_mujoco.gym.hopper_v5.mjx.box_space import BoxSpace
+from rl_x.environments.custom_mujoco.gym.hopper_v5.mjx.viewer import MujocoViewer
 
 
-class Walker2D:
+class Hopper:
     def __init__(self, render, horizon=1000):
         self.horizon = horizon
 
-        xml_path = (Path(__file__).resolve().parent / "data" / "walker2d_v5.xml").as_posix()
+        xml_path = (Path(__file__).resolve().parent.parent / "data" / "hopper.xml").as_posix()
         self.mj_model = mujoco.MjModel.from_xml_path(xml_path)
         self.mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
         self.mj_data = mujoco.MjData(self.mj_model)
@@ -25,7 +25,7 @@ class Walker2D:
 
         self.nr_intermediate_steps = 4
 
-        initial_qpos = [0.0, 1.25, 0.0] + [0.0] * (self.mjx_model.nq - 3)
+        initial_qpos = [0.0, 1.25] + [0.0] * (self.mjx_model.nq - 2)
         self.initial_qpos = jnp.array(initial_qpos)
         self.initial_qvel = jnp.zeros(self.mjx_model.nv)
 
@@ -35,13 +35,13 @@ class Walker2D:
         self.single_observation_space = BoxSpace(
             low=-jnp.inf,
             high=jnp.inf,
-            shape=(self.mjx_model.nq + self.mjx_model.nv - 1,),
+            shape=((self.mjx_model.nq - 1) + self.mjx_model.nv,),
             dtype=jnp.float32,
         )
 
         self.forward_reward_weight = 1.0
-        self.healthy_z_range = (0.8, 2.0)
-        self.healthy_angle_range = (-1.0, 1.0)
+        self.healthy_z_range = (0.7, float("inf"))
+        self.healthy_angle_range = (-0.2, 0.2)
         self.terminate_when_unhealthy = True
         self.ctrl_cost_weight = 1e-3
         self.healthy_reward = 1.0
@@ -172,23 +172,11 @@ class Walker2D:
         return jax.lax.cond(done, when_done, when_not_done, None)
 
     def get_observation(self, data):
-        torso_height = jnp.array([data.qpos[1]])
-        torso_pitch = jnp.array([data.qpos[2]])
-        joint_positions = data.qpos[3:]
-
-        torso_vel_x = jnp.clip(jnp.array([data.qvel[0]]), -10, 10)
-        torso_vel_z = jnp.clip(jnp.array([data.qvel[1]]), -10, 10)
-        torso_ang_vel = jnp.clip(jnp.array([data.qvel[2]]), -10, 10)
-        joint_velocities = jnp.clip(data.qvel[3:], -10, 10)
-
+        position = data.qpos[1:].flatten()
+        velocity = jnp.clip(data.qvel[:].flatten(), -10, 10)
         observation = jnp.nan_to_num(jnp.concatenate([
-            torso_height,
-            torso_pitch,
-            joint_positions,
-            torso_vel_x,
-            torso_vel_z,
-            torso_ang_vel,
-            joint_velocities,
+            position,
+            velocity,
         ]))
         return observation
 

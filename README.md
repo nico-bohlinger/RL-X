@@ -62,7 +62,6 @@ A framework for Reinforcement Learning research.
 - [Adversarial Inverse Reinforcement Learning (AIRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/airl_ppo) in Flax
 - [Adversarial Motion Priors (AMP)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/amp_ppo) in Flax
 - [Noise Conditioned Energy Based Annealed Rewards (NEAR)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/near_ppo) in Flax
-- [Inverse Soft Q-Learning (IQ-Learn)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/iq_sac) in Flax
 - [Trust Region Inverse Reinforcement Learning + Trust Region Loss (TRIRL+PPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trirl_ppo) in Flax
 - [Trust Region Inverse Reinforcement Learning + Differentiable Trust Region Layers (TRIRL+DTRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trirl_dtrl) in Flax
 

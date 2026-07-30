@@ -1,7 +1,7 @@
 from rl_x.environments.environment_manager import extract_environment_name_from_file, register_environment
-from rl_x.environments.custom_mujoco.gym.ant_mjx.create_env import create_train_and_eval_env
-from rl_x.environments.custom_mujoco.gym.ant_mjx.default_config import get_config
-from rl_x.environments.custom_mujoco.gym.ant_mjx.general_properties import GeneralProperties
+from rl_x.environments.custom_mujoco.gym.ant_v5.mjx.create_env import create_train_and_eval_env
+from rl_x.environments.custom_mujoco.gym.ant_v5.mjx.default_config import get_config
+from rl_x.environments.custom_mujoco.gym.ant_v5.mjx.general_properties import GeneralProperties
 
 
 CUSTOM_MUJOCO_ANT_MJX = extract_environment_name_from_file(__file__)

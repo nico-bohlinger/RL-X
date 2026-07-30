@@ -1,5 +1,5 @@
-from rl_x.environments.custom_mujoco.gym.walker2d_mjx.environment import Walker2D
-from rl_x.environments.custom_mujoco.gym.walker2d_mjx.general_properties import GeneralProperties
+from rl_x.environments.custom_mujoco.gym.walker2d_v5.mjx.environment import Walker2D
+from rl_x.environments.custom_mujoco.gym.walker2d_v5.mjx.general_properties import GeneralProperties
 
 
 def create_train_and_eval_env(config):

@@ -1,5 +1,5 @@
-from rl_x.environments.custom_mujoco.gym.ant_mjx.environment import Ant
-from rl_x.environments.custom_mujoco.gym.ant_mjx.general_properties import GeneralProperties
+from rl_x.environments.custom_mujoco.gym.ant_v5.mjx.environment import Ant
+from rl_x.environments.custom_mujoco.gym.ant_v5.mjx.general_properties import GeneralProperties
 
 
 def create_train_and_eval_env(config):

@@ -1,5 +1,5 @@
-from rl_x.environments.custom_mujoco.gym.half_cheetah_mjx.environment import HalfCheetah
-from rl_x.environments.custom_mujoco.gym.half_cheetah_mjx.general_properties import GeneralProperties
+from rl_x.environments.custom_mujoco.gym.half_cheetah_v5.mjx.environment import HalfCheetah
+from rl_x.environments.custom_mujoco.gym.half_cheetah_v5.mjx.general_properties import GeneralProperties
 
 
 def create_train_and_eval_env(config):

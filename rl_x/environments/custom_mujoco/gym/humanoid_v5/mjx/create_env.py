@@ -1,5 +1,5 @@
-from rl_x.environments.custom_mujoco.gym.humanoid_mjx.environment import Humanoid
-from rl_x.environments.custom_mujoco.gym.humanoid_mjx.general_properties import GeneralProperties
+from rl_x.environments.custom_mujoco.gym.humanoid_v5.mjx.environment import Humanoid
+from rl_x.environments.custom_mujoco.gym.humanoid_v5.mjx.general_properties import GeneralProperties
 
 def create_train_and_eval_env(config):
     train_env = Humanoid(config.environment.render)
