@@ -1,7 +1,7 @@
 <mujoco model="go2">
   <compiler angle="radian" assetdir="assets" autolimits="true"/>
 
-  <option cone="pyramidal" impratio="1" solver="Newton" iterations="2" ls_iterations="4" density="1.2" viscosity="0.00002">
+  <option cone="pyramidal" impratio="1" solver="Newton" iterations="4" ls_iterations="4" density="1.2" viscosity="0.00002">
     <flag eulerdamp="disable"/>
   </option>
 

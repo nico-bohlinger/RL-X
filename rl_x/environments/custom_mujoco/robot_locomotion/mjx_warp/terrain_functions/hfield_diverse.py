@@ -103,7 +103,7 @@ class HFieldDiverseTerrainGeneration:
         internal_state["robot_imu_height_over_ground"] = imu_xpos[:, 2] - self.ground_height_at(internal_state, imu_xpos[:, 0], imu_xpos[:, 1])
 
 
-    def post_step(self, data, mjx_model, internal_state, key):
+    def before_physics_step(self, data, mjx_model, internal_state, key):
         min_edge = self.hfield_half_length_in_meters - 0.5
         max_edge = self.hfield_half_length_in_meters
         reached_edge = ((min_edge < jnp.abs(data.qpos[:, 0])) & (jnp.abs(data.qpos[:, 0]) < max_edge)) | ((min_edge < jnp.abs(data.qpos[:, 1])) & (jnp.abs(data.qpos[:, 1]) < max_edge))

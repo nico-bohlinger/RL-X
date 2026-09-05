@@ -32,6 +32,8 @@ class DefaultReward:
         self.foot_air_time_coeff = env.env_config["reward"]["foot_air_time_coeff"] * env.dt
         self.foot_air_time_per_robot_size_m = env.env_config["reward"]["foot_air_time_per_robot_size_m"]
         self.symmetry_air_coeff = env.env_config["reward"]["symmetry_air_coeff"] * env.dt
+        self.feet_lateral_min_distance_ratio = env.env_config["reward"]["feet_lateral_min_distance_ratio"]
+        self.feet_lateral_min_distance_coeff = env.env_config["reward"]["feet_lateral_min_distance_coeff"] * env.dt
         self.foot_slip_coeff = env.env_config["reward"]["foot_slip_coeff"] * env.dt
         self.foot_z_velocity_coeff = env.env_config["reward"]["foot_z_velocity_coeff"] * env.dt
         self.foot_flat_contact_coeff = env.env_config["reward"]["foot_flat_contact_coeff"] * env.dt
@@ -185,6 +187,15 @@ class DefaultReward:
         air_time_reward = jnp.mean(feet_floor_contacts * jnp.minimum(internal_state["feet_time_in_air"] - target_foot_air_time, 0.0))
         foot_air_time_reward = curriculum_coeff * self.foot_air_time_coeff * air_time_reward
 
+        feet_positions = data.geom_xpos[self.env.foot_geom_indices]
+        feet_deltas = feet_positions[self.feet_symmetry_pairs[:, 0], :2] - feet_positions[self.feet_symmetry_pairs[:, 1], :2]
+        imu_yaw = internal_state["imu_orientation_euler"][2]
+        feet_lateral_distances = jnp.abs(-jnp.sin(imu_yaw) * feet_deltas[:, 0] + jnp.cos(imu_yaw) * feet_deltas[:, 1])
+        nominal_feet_lateral_distances = internal_state["nominal_feet_lateral_distances"]
+        feet_lateral_distance_deficits = jnp.maximum(self.feet_lateral_min_distance_ratio * nominal_feet_lateral_distances - feet_lateral_distances, 0.0) / jnp.maximum(nominal_feet_lateral_distances, jnp.finfo(jnp.float32).eps)
+        feet_lateral_min_distance_penalty = jnp.sum(jnp.square(feet_lateral_distance_deficits)) / max(len(self.feet_symmetry_pairs), 1)
+        feet_lateral_min_distance_reward = curriculum_coeff * self.feet_lateral_min_distance_coeff * -feet_lateral_min_distance_penalty
+
         # Symmetry reward
         symmetry_air_violations = jnp.mean(jnp.where((~feet_floor_contacts[self.feet_symmetry_pairs[:, 0]]) & (~feet_floor_contacts[self.feet_symmetry_pairs[:, 1]]), 1, 0))
         symmetry_air_reward = curriculum_coeff * self.symmetry_air_coeff * -symmetry_air_violations
@@ -217,7 +228,7 @@ class DefaultReward:
         reward_penalty = z_velocity_reward + imu_acceleration_reward + angular_velocity_reward + angular_position_reward + \
                          actuator_joint_nominal_diff_reward +  joint_position_limit_reward + joint_velocity_limit_reward + joint_velocity_reward + \
                          acceleration_reward + torque_reward + power_draw_penalty_reward + action_rate_reward + action_smoothness_reward + \
-                         collision_reward + ground_penetration_reward + base_height_reward + foot_air_time_reward + symmetry_air_reward + foot_slip_reward + foot_z_velocity_reward + foot_flat_contact_reward + feet_orientation_reward
+                         collision_reward + ground_penetration_reward + base_height_reward + foot_air_time_reward + feet_lateral_min_distance_reward + symmetry_air_reward + foot_slip_reward + foot_z_velocity_reward + foot_flat_contact_reward + feet_orientation_reward
         reward = tracking_reward + reward_penalty + alive_clipped_reward
         reward = jnp.maximum(reward, 0.0) + alive_unclipped_reward
         reward = jnp.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
@@ -244,6 +255,7 @@ class DefaultReward:
         info[f"reward/ground_penetration"] = ground_penetration_reward
         info[f"reward/base_height"] = base_height_reward
         info[f"reward/foot_air_time"] = foot_air_time_reward
+        info[f"reward/feet_lateral_min_distance"] = feet_lateral_min_distance_reward
         info[f"reward/symmetry_air"] = symmetry_air_reward
         info[f"reward/foot_slip"] = foot_slip_reward
         info[f"reward/foot_z_velocity"] = foot_z_velocity_reward

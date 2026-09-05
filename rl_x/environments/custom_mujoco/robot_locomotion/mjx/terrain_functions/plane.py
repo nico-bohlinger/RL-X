@@ -51,7 +51,7 @@ class PlaneTerrainGeneration:
         internal_state["robot_imu_height_over_ground"] = data.site_xpos[self.env.imu_site_id, 2] - internal_state["center_height"]
 
 
-    def post_step(self, data, mjx_model, internal_state, key):
+    def before_physics_step(self, data, mjx_model, internal_state, key):
         return data
 
 

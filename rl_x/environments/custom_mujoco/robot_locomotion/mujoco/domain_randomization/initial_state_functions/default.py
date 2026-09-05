@@ -21,7 +21,7 @@ class DefaultDRInitialState:
         mujoco.mj_forward(self.env.internal_state["mj_model"], data)
         feet_x_pos = data.geom_xpos[self.env.foot_geom_indices, 0]
         feet_y_pos = data.geom_xpos[self.env.foot_geom_indices, 1]
-        min_feet_z_pos_under_ground = np.max(self.env.terrain_function.ground_height_at(feet_x_pos, feet_y_pos) - data.geom_xpos[self.env.foot_geom_indices, 2])
+        min_feet_z_pos_under_ground = np.max(self.env.terrain_function.ground_height_at(feet_x_pos, feet_y_pos) - (data.geom_xpos[self.env.foot_geom_indices, 2] - self.env.feet_bottom_extent(data, self.env.internal_state["mj_model"])))
         qpos[2] += min_feet_z_pos_under_ground
 
         return qpos, qvel

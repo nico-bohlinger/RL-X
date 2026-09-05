@@ -202,7 +202,11 @@ class LocomotionEnv:
         distances_between_abs_y_feet = np.linalg.norm(abs_y_feet_xpos[:, None] - abs_y_feet_xpos[None], axis=-1)
         min_dist_indices = np.argmin(distances_between_abs_y_feet + np.eye(len(abs_y_feet_xpos)) * 1000, axis=1)
         feet_symmetry_set = set([(min(i, min_dist_indices[i]), max(i, min_dist_indices[i])) for i in range(len(min_dist_indices)) if min_dist_indices[min_dist_indices[i]] == i])
-        self.feet_symmetry_pairs = jnp.array([list(pair) for pair in feet_symmetry_set])
+        self.feet_symmetry_pairs = jnp.array([list(pair) for pair in feet_symmetry_set]).reshape(-1, 2)
+        feet_deltas = feet_xpos[np.asarray(self.feet_symmetry_pairs)[:, 0], :2] - feet_xpos[np.asarray(self.feet_symmetry_pairs)[:, 1], :2]
+        nominal_imu_rotation = self.c_data.site_xmat[self.imu_site_id].reshape(3, 3)
+        nominal_imu_yaw = np.arctan2(nominal_imu_rotation[1, 0], nominal_imu_rotation[0, 0])
+        self.nominal_feet_lateral_distances = jnp.array(np.abs(-np.sin(nominal_imu_yaw) * feet_deltas[:, 0] + np.cos(nominal_imu_yaw) * feet_deltas[:, 1]))
         self.body_ids_of_feet = jnp.array([self.initial_mj_model.geom(geom_id).bodyid[0] for geom_id in self.foot_geom_indices])
         nominal_feet_rotations = self.c_data.xmat[np.asarray(self.body_ids_of_feet)].reshape(-1, 3, 3)
         self.nominal_feet_tilt = jnp.array(np.sqrt(nominal_feet_rotations[:, 2, 0] ** 2 + nominal_feet_rotations[:, 2, 1] ** 2))
@@ -284,6 +288,17 @@ class LocomotionEnv:
                 self.joystick.init()
                 self.joystick_present = True
         del self.c_model, self.c_data
+
+
+    def feet_bottom_extent(self, data, mjx_model):
+        geom_size = mjx_model.geom_size
+        if geom_size.ndim == 2:
+            geom_size = jnp.broadcast_to(geom_size, (self.nr_envs,) + geom_size.shape)
+        feet_sizes = geom_size[:, self.foot_geom_indices]
+        if self.foot_type == "sphere":
+            return feet_sizes[:, :, 0]
+        feet_rotations = data.geom_xmat[:, self.foot_geom_indices].reshape(self.nr_envs, self.nr_feet, 3, 3)
+        return jnp.sum(feet_sizes * jnp.abs(feet_rotations[:, :, 2, :]), axis=-1)
 
 
     def render(self, state):
@@ -391,6 +406,7 @@ class LocomotionEnv:
             "nr_collisions_in_nominal": jnp.zeros(nr_envs),
             "nr_ground_penetrations_in_nominal": jnp.zeros((nr_envs, self.reward_collision_sphere_geom_ids.shape[0])),
             "nominal_feet_tilt": jnp.tile(self.nominal_feet_tilt[None], (nr_envs, 1)),
+            "nominal_feet_lateral_distances": jnp.tile(self.nominal_feet_lateral_distances[None], (nr_envs, 1)),
         }
         self.command_function.init(internal_state)
         self.reward_function.init(internal_state, mjx_model)
@@ -421,12 +437,6 @@ class LocomotionEnv:
         key, initial_state_key, terrain_key, domain_randomization_key, command_sampling_key, command_key, observation_key = jax.random.split(state.key, 7)
         state = state.replace(key=key)
 
-        mjx_model = self.terrain_function.sample(state.mjx_model, state.internal_state, terrain_key)
-
-        data = self.mjx_data
-        qpos, qvel = self.initial_state_function.setup(mjx_model, state.internal_state, initial_state_key)
-        data = data.replace(qpos=qpos, qvel=qvel, ctrl=jnp.zeros((nr_envs, self.nr_actuator_joints)))
-
         new_state = state
 
         mean_xy_velocity_diff_abs = new_state.info_episode_store["episode_total_xy_velocity_diff_abs"] / jnp.maximum(new_state.info_episode_store["episode_step"], 1)
@@ -445,14 +455,22 @@ class LocomotionEnv:
         new_state.internal_state["env_curriculum_coeff"] = jnp.clip(new_state.internal_state["env_curriculum_coeff"] + new_state.internal_state["env_curriculum_levels_in_a_row"] / self.env_curriculum_nr_levels, 0.0, 1.0)
         new_state.internal_state["env_curriculum_coeff"] = jnp.where(new_state.internal_state["in_eval_mode"], 1.0, new_state.internal_state["env_curriculum_coeff"])
 
-        new_state.internal_state["imu_orientation_rotation"] = Rotation.from_matrix(data.site_xmat[:, self.imu_site_id].reshape(nr_envs, 3, 3))
-        new_state.internal_state["imu_orientation_rotation_inverse"] = new_state.internal_state["imu_orientation_rotation"].inv()
-        new_state.internal_state["imu_orientation_euler"] = new_state.internal_state["imu_orientation_rotation"].as_euler("xyz")
+        mjx_model = self.terrain_function.sample(state.mjx_model, state.internal_state, terrain_key)
+
+        data = self.mjx_data
+        qpos, qvel = self.initial_state_function.setup(mjx_model, state.internal_state, initial_state_key)
+        data = data.replace(qpos=qpos, qvel=qvel, ctrl=jnp.zeros((nr_envs, self.nr_actuator_joints)))
+
         new_state.internal_state["last_action"] = jnp.zeros((nr_envs, self.nr_actuator_joints))
         new_state.internal_state["second_last_action"] = jnp.zeros((nr_envs, self.nr_actuator_joints))
         self.reward_function.setup(new_state.internal_state)
         self.domain_randomization_action_delay_function.setup(new_state.internal_state)
         data, mjx_model = self.handle_domain_randomization(new_state.internal_state, mjx_model, data, domain_randomization_key, is_episode_start=True)
+        data = mjx.forward(mjx_model, data)
+        new_state.internal_state["imu_orientation_rotation"] = Rotation.from_matrix(data.site_xmat[:, self.imu_site_id].reshape(nr_envs, 3, 3))
+        new_state.internal_state["imu_orientation_rotation_inverse"] = new_state.internal_state["imu_orientation_rotation"].inv()
+        new_state.internal_state["imu_orientation_euler"] = new_state.internal_state["imu_orientation_rotation"].as_euler("xyz")
+        self.terrain_function.pre_step(data, new_state.internal_state)
         should_sample_commands = self.command_sampling_function.setup(command_sampling_key)
         self.command_function.get_next_command(new_state.internal_state, should_sample_commands, command_key)
 
@@ -484,6 +502,10 @@ class LocomotionEnv:
         key, domain_randomization_key, command_sampling_key, command_key, observation_key, terrain_key = jax.random.split(state.key, 6)
         state = state.replace(key=key)
 
+        data, mjx_model = self.handle_domain_randomization(state.internal_state, state.mjx_model, state.data, domain_randomization_key)
+        data = self.terrain_function.before_physics_step(data, mjx_model, state.internal_state, terrain_key)
+        state = state.replace(data=data, mjx_model=mjx_model)
+
         chosen_action = action[:, :self.nr_actuator_joints]
         delayed_actions = self.domain_randomization_action_delay_function.delay_action(chosen_action, state.internal_state)
 
@@ -491,21 +513,16 @@ class LocomotionEnv:
         for delayed_action in delayed_actions:
             data = data.replace(ctrl=self.control_function.process_action(delayed_action, state.internal_state))
             data = mjx.step(state.mjx_model, data)
-        max_qvel = 100 * jnp.ones(self.initial_mj_model.nv)
-        max_qvel = jnp.tile(max_qvel[None], (nr_envs, 1))
-        max_qvel = max_qvel.at[:, self.actuator_joint_mask_qvel].set(state.internal_state["actuator_joint_max_velocities"])
-        data = data.replace(qvel=jnp.clip(data.qvel, -max_qvel, max_qvel))
+        data = data.replace(qvel=jnp.clip(data.qvel, -100, 100))
 
         state.internal_state["imu_orientation_rotation"] = Rotation.from_matrix(data.site_xmat[:, self.imu_site_id].reshape(nr_envs, 3, 3))
         state.internal_state["imu_orientation_rotation_inverse"] = state.internal_state["imu_orientation_rotation"].inv()
         state.internal_state["imu_orientation_euler"] = state.internal_state["imu_orientation_rotation"].as_euler("xyz")
 
-        data, mjx_model = self.handle_domain_randomization(state.internal_state, state.mjx_model, data, domain_randomization_key)
-        state = state.replace(data=data, mjx_model=mjx_model)
-
         self.terrain_function.pre_step(data, state.internal_state)
 
         reward = self.reward_function.reward_and_info(data, mjx_model, state.internal_state, chosen_action, state.info)
+        self.reward_function.step(data, state.internal_state)
 
         should_sample_commands = self.command_sampling_function.step(command_sampling_key)
         self.command_function.get_next_command(state.internal_state, should_sample_commands, command_key)
@@ -514,9 +531,6 @@ class LocomotionEnv:
         terminated = self.termination_function.should_terminate(state.internal_state) | jnp.any(jnp.abs(data.qvel[:, :3]) == 100.0, axis=-1)
         truncated = state.info_episode_store["episode_step"] >= (self.horizon - 1)
         done = terminated | truncated
-
-        data = self.terrain_function.post_step(data, mjx_model, state.internal_state, terrain_key)
-        self.reward_function.step(data, state.internal_state)
 
         state.internal_state["second_last_action"] = state.internal_state["last_action"]
         state.internal_state["last_action"] = chosen_action

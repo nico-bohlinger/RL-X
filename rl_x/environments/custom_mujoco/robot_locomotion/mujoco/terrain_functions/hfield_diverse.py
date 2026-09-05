@@ -67,7 +67,7 @@ class HFieldDiverseTerrainGeneration:
         self.env.internal_state["robot_imu_height_over_ground"] = self.env.internal_state["data"].site_xpos[self.env.imu_site_id, 2] - self.ground_height_at(self.env.internal_state["data"].site_xpos[self.env.imu_site_id, 0], self.env.internal_state["data"].site_xpos[self.env.imu_site_id, 1])
     
 
-    def post_step(self):
+    def before_physics_step(self):
         min_edge = self.hfield_half_length_in_meters - 0.5
         max_edge = self.hfield_half_length_in_meters
         reached_edge = np.array(((min_edge < np.abs(self.env.internal_state["data"].qpos[0])) & (np.abs(self.env.internal_state["data"].qpos[0]) < max_edge)) | ((min_edge < np.abs(self.env.internal_state["data"].qpos[1])) & (np.abs(self.env.internal_state["data"].qpos[1]) < max_edge)))

@@ -1,3 +1,6 @@
+import numpy as np
+
+
 class DefaultDRObservationNoise:
     def __init__(self, env):
         self.env = env
@@ -18,9 +21,10 @@ class DefaultDRObservationNoise:
 
 
     def modify_observation(self, observation):
-        observation[self.joint_positions_obs_idx] += self.env.internal_state["env_curriculum_coeff"] * self.env.np_rng.uniform(size=(len(self.joint_positions_obs_idx),), low=-self.joint_position_noise, high=self.joint_position_noise)
-        observation[self.imu_angular_vel_obs_idx] += self.env.internal_state["env_curriculum_coeff"] * self.env.np_rng.uniform(size=(len(self.imu_angular_vel_obs_idx),), low=-self.imu_angular_velocity_noise, high=self.imu_angular_velocity_noise)
-        observation[self.joint_velocities_obs_idx] += self.env.internal_state["env_curriculum_coeff"] * self.env.np_rng.uniform(size=(len(self.joint_velocities_obs_idx),), low=-self.joint_velocity_noise, high=self.joint_velocity_noise)
-        observation[self.gravity_vector_obs_idx] += self.env.internal_state["env_curriculum_coeff"] * self.env.np_rng.uniform(size=(len(self.gravity_vector_obs_idx),), low=-self.gravity_vector_noise, high=self.gravity_vector_noise)
+        curriculum_coeff = np.minimum(2.0 * self.env.internal_state["env_curriculum_coeff"], 1.0)
+        observation[self.joint_positions_obs_idx] += curriculum_coeff * self.env.np_rng.uniform(size=(len(self.joint_positions_obs_idx),), low=-self.joint_position_noise, high=self.joint_position_noise)
+        observation[self.imu_angular_vel_obs_idx] += curriculum_coeff * self.env.np_rng.uniform(size=(len(self.imu_angular_vel_obs_idx),), low=-self.imu_angular_velocity_noise, high=self.imu_angular_velocity_noise)
+        observation[self.joint_velocities_obs_idx] += curriculum_coeff * self.env.np_rng.uniform(size=(len(self.joint_velocities_obs_idx),), low=-self.joint_velocity_noise, high=self.joint_velocity_noise)
+        observation[self.gravity_vector_obs_idx] += curriculum_coeff * self.env.np_rng.uniform(size=(len(self.gravity_vector_obs_idx),), low=-self.gravity_vector_noise, high=self.gravity_vector_noise)
         if len(self.policy_exteroception_obs_idx) > 0:
-            observation[self.policy_exteroception_obs_idx] += self.env.internal_state["env_curriculum_coeff"] * self.env.np_rng.uniform(size=(len(self.policy_exteroception_obs_idx),), low=-self.exteroception_noise, high=self.exteroception_noise)
+            observation[self.policy_exteroception_obs_idx] += curriculum_coeff * self.env.np_rng.uniform(size=(len(self.policy_exteroception_obs_idx),), low=-self.exteroception_noise, high=self.exteroception_noise)

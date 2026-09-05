@@ -274,7 +274,7 @@ class DefaultDRSeenRobotFunction:
             length=1,
             unroll=True
         )
-        min_feet_z_pos = jnp.min(data_tmp.geom_xpos[self.env.foot_geom_indices, 2])
+        min_feet_z_pos = jnp.min(data_tmp.geom_xpos[self.env.foot_geom_indices, 2] - self.env.feet_bottom_extent(data_tmp, new_mjx_model))
         offset = internal_state["center_height"] - min_feet_z_pos
         robot_nominal_qpos_height_over_ground = qpos[2] - internal_state["center_height"] + offset
         robot_nominal_imu_height_over_ground = data_tmp.site_xpos[self.env.imu_site_id, 2] - internal_state["center_height"] + offset
@@ -283,6 +283,12 @@ class DefaultDRSeenRobotFunction:
         nominal_feet_rotations = data_tmp.xmat[self.env.body_ids_of_feet].reshape(-1, 3, 3)
         nominal_feet_tilt = jnp.sqrt(nominal_feet_rotations[:, 2, 0] ** 2 + nominal_feet_rotations[:, 2, 1] ** 2)
         internal_state["nominal_feet_tilt"] = jnp.where(should_randomize, nominal_feet_tilt, internal_state["nominal_feet_tilt"])
+        nominal_feet_positions = data_tmp.geom_xpos[self.env.foot_geom_indices]
+        nominal_feet_deltas = nominal_feet_positions[self.env.feet_symmetry_pairs[:, 0], :2] - nominal_feet_positions[self.env.feet_symmetry_pairs[:, 1], :2]
+        nominal_imu_rotation = data_tmp.site_xmat[self.env.imu_site_id].reshape(3, 3)
+        nominal_imu_yaw = jnp.arctan2(nominal_imu_rotation[1, 0], nominal_imu_rotation[0, 0])
+        nominal_feet_lateral_distances = jnp.abs(-jnp.sin(nominal_imu_yaw) * nominal_feet_deltas[:, 0] + jnp.cos(nominal_imu_yaw) * nominal_feet_deltas[:, 1])
+        internal_state["nominal_feet_lateral_distances"] = jnp.where(should_randomize, nominal_feet_lateral_distances, internal_state["nominal_feet_lateral_distances"])
         all_contact_relevant_geom_xpos = data_tmp.geom_xpos[self.env.reward_collision_sphere_geom_ids]
         all_contact_relevant_geom_sizes = new_mjx_model.geom_size[self.env.reward_collision_sphere_geom_ids, 0]
         distance_between_geoms = jnp.linalg.norm(all_contact_relevant_geom_xpos[:, None] - all_contact_relevant_geom_xpos[None], axis=-1)
@@ -303,7 +309,7 @@ class DefaultDRSeenRobotFunction:
         )
         feet_x_pos = data_tmp.geom_xpos[self.env.foot_geom_indices, 0]
         feet_y_pos = data_tmp.geom_xpos[self.env.foot_geom_indices, 1]
-        min_feet_z_pos_under_ground = jnp.max(self.env.terrain_function.ground_height_at(internal_state, feet_x_pos, feet_y_pos) - data_tmp.geom_xpos[self.env.foot_geom_indices, 2])
+        min_feet_z_pos_under_ground = jnp.max(self.env.terrain_function.ground_height_at(internal_state, feet_x_pos, feet_y_pos) - (data_tmp.geom_xpos[self.env.foot_geom_indices, 2] - self.env.feet_bottom_extent(data_tmp, new_mjx_model)))
         data = data.replace(qpos=jnp.where(should_randomize, data.qpos.at[2].set(data.qpos[2] + min_feet_z_pos_under_ground), data.qpos))
 
         return mjx_model, data

@@ -98,7 +98,11 @@ class LocomotionEnv(gym.Env):
         distances_between_abs_y_feet = np.linalg.norm(abs_y_feet_xpos[:, None] - abs_y_feet_xpos[None], axis=-1)
         min_dist_indices = np.argmin(distances_between_abs_y_feet + np.eye(len(abs_y_feet_xpos)) * 1000, axis=1)
         feet_symmetry_set = set([(min(i, min_dist_indices[i]), max(i, min_dist_indices[i])) for i in range(len(min_dist_indices)) if min_dist_indices[min_dist_indices[i]] == i])
-        self.feet_symmetry_pairs = np.array([list(pair) for pair in feet_symmetry_set])
+        self.feet_symmetry_pairs = np.array([list(pair) for pair in feet_symmetry_set]).reshape(-1, 2)
+        feet_deltas = feet_xpos[self.feet_symmetry_pairs[:, 0], :2] - feet_xpos[self.feet_symmetry_pairs[:, 1], :2]
+        nominal_imu_rotation = self.c_data.site_xmat[self.imu_site_id].reshape(3, 3)
+        nominal_imu_yaw = np.arctan2(nominal_imu_rotation[1, 0], nominal_imu_rotation[0, 0])
+        self.nominal_feet_lateral_distances = np.abs(-np.sin(nominal_imu_yaw) * feet_deltas[:, 0] + np.cos(nominal_imu_yaw) * feet_deltas[:, 1])
         self.body_ids_of_feet = np.array([self.initial_mj_model.geom(geom_id).bodyid[0] for geom_id in self.foot_geom_indices])
         nominal_feet_rotations = self.c_data.xmat[self.body_ids_of_feet].reshape(-1, 3, 3)
         self.nominal_feet_tilt = np.sqrt(nominal_feet_rotations[:, 2, 0] ** 2 + nominal_feet_rotations[:, 2, 1] ** 2)
@@ -187,6 +191,7 @@ class LocomotionEnv(gym.Env):
             "nr_collisions_in_nominal": 0,
             "nr_ground_penetrations_in_nominal": np.zeros(self.reward_collision_sphere_geom_ids.shape[0]),
             "nominal_feet_tilt": self.nominal_feet_tilt,
+            "nominal_feet_lateral_distances": self.nominal_feet_lateral_distances,
             "info": {
                 "rollout/episode_return": 0.0,
                 "rollout/episode_length": 0,
@@ -225,6 +230,14 @@ class LocomotionEnv(gym.Env):
         del self.c_model, self.c_data
 
     
+    def feet_bottom_extent(self, data, mj_model):
+        feet_sizes = mj_model.geom_size[self.foot_geom_indices]
+        if self.foot_type == "sphere":
+            return feet_sizes[:, 0]
+        feet_rotations = data.geom_xmat[self.foot_geom_indices].reshape(-1, 3, 3)
+        return np.sum(feet_sizes * np.abs(feet_rotations[:, 2, :]), axis=-1)
+
+
     def render(self):
         if self.uses_hfield and self.internal_state["info_episode_store"]["episode_step"] == 1:
             mujoco.mjr_uploadHField(self.internal_state["mj_model"], self.viewer.context, 0)
@@ -268,15 +281,6 @@ class LocomotionEnv(gym.Env):
 
 
     def reset(self, seed=None):
-        self.terrain_function.sample()
-
-        qpos, qvel = self.initial_state_function.setup()
-        self.internal_state["data"] = mujoco.MjData(self.internal_state["mj_model"])
-        self.internal_state["data"].qpos = qpos
-        self.internal_state["data"].qvel = qvel
-        self.internal_state["data"].ctrl = np.zeros(self.nr_actuator_joints)
-        mujoco.mj_forward(self.internal_state["mj_model"], self.internal_state["data"])
-
         mean_xy_velocity_diff_abs = self.internal_state["info_episode_store"]["episode_total_xy_velocity_diff_abs"] / max(self.internal_state["info_episode_store"]["episode_step"], 1)
         mean_normalized_xy_velocity_diff_abs = mean_xy_velocity_diff_abs / max(self.internal_state["max_command_velocity"], 1e-6)
         episode_success = (mean_normalized_xy_velocity_diff_abs <= self.env_curriculum_level_success_normalized_xy_vel_diff) & (self.internal_state["info_episode_store"]["episode_step"] >= self.env_curriculum_level_success_episode_length)
@@ -293,14 +297,24 @@ class LocomotionEnv(gym.Env):
         self.internal_state["env_curriculum_coeff"] =  np.clip(self.internal_state["env_curriculum_coeff"] + self.internal_state["env_curriculum_levels_in_a_row"] / self.env_curriculum_nr_levels, 0.0, 1.0)
         self.internal_state["env_curriculum_coeff"] = np.where(self.internal_state["in_eval_mode"], 1.0, self.internal_state["env_curriculum_coeff"])
         
-        self.internal_state["imu_orientation_rotation"] = Rotation.from_matrix(self.internal_state["data"].site_xmat[self.imu_site_id].reshape(3, 3))
-        self.internal_state["imu_orientation_rotation_inverse"] = self.internal_state["imu_orientation_rotation"].inv()
-        self.internal_state["imu_orientation_euler"] = self.internal_state["imu_orientation_rotation"].as_euler("xyz")
+        self.terrain_function.sample()
+
+        qpos, qvel = self.initial_state_function.setup()
+        self.internal_state["data"] = mujoco.MjData(self.internal_state["mj_model"])
+        self.internal_state["data"].qpos = qpos
+        self.internal_state["data"].qvel = qvel
+        self.internal_state["data"].ctrl = np.zeros(self.nr_actuator_joints)
+
         self.internal_state["last_action"] = np.zeros(self.nr_actuator_joints)
         self.internal_state["second_last_action"] = np.zeros(self.nr_actuator_joints)
         self.reward_function.setup()
         self.domain_randomization_action_delay_function.setup()
         self.handle_domain_randomization(is_episode_start=True)
+        mujoco.mj_forward(self.internal_state["mj_model"], self.internal_state["data"])
+        self.internal_state["imu_orientation_rotation"] = Rotation.from_matrix(self.internal_state["data"].site_xmat[self.imu_site_id].reshape(3, 3))
+        self.internal_state["imu_orientation_rotation_inverse"] = self.internal_state["imu_orientation_rotation"].inv()
+        self.internal_state["imu_orientation_euler"] = self.internal_state["imu_orientation_rotation"].as_euler("xyz")
+        self.terrain_function.pre_step()
         if self.command_sampling_function.setup():
             self.command_function.get_next_command()
 
@@ -315,25 +329,25 @@ class LocomotionEnv(gym.Env):
 
 
     def step(self, action):
+        self.handle_domain_randomization(is_episode_start=False)
+        self.terrain_function.before_physics_step()
+
         chosen_action = action[:self.nr_actuator_joints]
         delayed_actions = self.domain_randomization_action_delay_function.delay_action(chosen_action)
 
         for delayed_action in delayed_actions:
             self.internal_state["data"].ctrl = self.control_function.process_action(delayed_action)
             mujoco.mj_step(self.internal_state["mj_model"], self.internal_state["data"], 1)
-        max_qvel = 100 * np.ones(self.initial_mj_model.nv)
-        max_qvel[self.actuator_joint_mask_qvel] = self.internal_state["actuator_joint_max_velocities"]
-        self.internal_state["data"].qvel = np.clip(self.internal_state["data"].qvel, -max_qvel, max_qvel)
+        self.internal_state["data"].qvel = np.clip(self.internal_state["data"].qvel, -100, 100)
 
         self.internal_state["imu_orientation_rotation"] = Rotation.from_matrix(self.internal_state["data"].site_xmat[self.imu_site_id].reshape(3, 3))
         self.internal_state["imu_orientation_rotation_inverse"] = self.internal_state["imu_orientation_rotation"].inv()
         self.internal_state["imu_orientation_euler"] = self.internal_state["imu_orientation_rotation"].as_euler("xyz")
 
-        self.handle_domain_randomization(is_episode_start=False)
-
         self.terrain_function.pre_step()
 
         reward = self.reward_function.reward_and_info(chosen_action)
+        self.reward_function.step()
 
         should_sample_commands = self.command_sampling_function.step()
         if should_sample_commands:
@@ -343,9 +357,6 @@ class LocomotionEnv(gym.Env):
         terminated = self.termination_function.should_terminate() | np.any(np.abs(self.internal_state["data"].qvel[:3]) == 100.0)
         truncated = self.internal_state["info_episode_store"]["episode_step"] >= (self.horizon - 1)
         done = terminated | truncated
-
-        self.terrain_function.post_step()
-        self.reward_function.step()
 
         self.internal_state["second_last_action"] = self.internal_state["last_action"].copy()
         self.internal_state["last_action"] = chosen_action.copy()

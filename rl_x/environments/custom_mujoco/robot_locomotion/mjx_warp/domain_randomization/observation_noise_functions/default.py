@@ -1,4 +1,5 @@
 import jax
+import jax.numpy as jnp
 
 
 class DefaultDRObservationNoise:
@@ -23,7 +24,7 @@ class DefaultDRObservationNoise:
     def modify_observation(self, internal_state, observation, key):
         nr_envs = self.env.nr_envs
         noise_key1, noise_key2, noise_key3, noise_key4, noise_key5 = jax.random.split(key, 5)
-        curriculum_coeff = internal_state["env_curriculum_coeff"][:, None]
+        curriculum_coeff = jnp.minimum(2.0 * internal_state["env_curriculum_coeff"][:, None], 1.0)
 
         observation = observation.at[:, self.joint_positions_obs_idx].set(observation[:, self.joint_positions_obs_idx] + curriculum_coeff * jax.random.uniform(noise_key1, shape=(nr_envs, len(self.joint_positions_obs_idx)), minval=-self.joint_position_noise, maxval=self.joint_position_noise))
         observation = observation.at[:, self.imu_angular_vel_obs_idx].set(observation[:, self.imu_angular_vel_obs_idx] + curriculum_coeff * jax.random.uniform(noise_key2, shape=(nr_envs, len(self.imu_angular_vel_obs_idx)), minval=-self.imu_angular_velocity_noise, maxval=self.imu_angular_velocity_noise))

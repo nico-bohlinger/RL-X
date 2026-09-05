@@ -252,7 +252,7 @@ class DefaultDRSeenRobotFunction:
         data.qvel = qvel
         data.ctrl = np.zeros(self.env.nr_actuator_joints)
         mujoco.mj_forward(self.env.internal_state["mj_model"], data)
-        min_feet_z_pos = np.min(data.geom_xpos[self.env.foot_geom_indices, 2])
+        min_feet_z_pos = np.min(data.geom_xpos[self.env.foot_geom_indices, 2] - self.env.feet_bottom_extent(data, self.env.internal_state["mj_model"]))
         offset = self.env.internal_state["center_height"] - min_feet_z_pos
         robot_nominal_qpos_height_over_ground = qpos[2] - self.env.internal_state["center_height"] + offset
         robot_nominal_imu_height_over_ground = data.site_xpos[self.env.imu_site_id, 2] - self.env.internal_state["center_height"] + offset
@@ -260,6 +260,12 @@ class DefaultDRSeenRobotFunction:
         self.env.internal_state["robot_nominal_imu_height_over_ground"] = robot_nominal_imu_height_over_ground
         nominal_feet_rotations = data.xmat[self.env.body_ids_of_feet].reshape(-1, 3, 3)
         self.env.internal_state["nominal_feet_tilt"] = np.sqrt(nominal_feet_rotations[:, 2, 0] ** 2 + nominal_feet_rotations[:, 2, 1] ** 2)
+        nominal_feet_positions = data.geom_xpos[self.env.foot_geom_indices]
+        nominal_feet_deltas = nominal_feet_positions[self.env.feet_symmetry_pairs[:, 0], :2] - nominal_feet_positions[self.env.feet_symmetry_pairs[:, 1], :2]
+        nominal_imu_rotation = data.site_xmat[self.env.imu_site_id].reshape(3, 3)
+        nominal_imu_yaw = np.arctan2(nominal_imu_rotation[1, 0], nominal_imu_rotation[0, 0])
+        nominal_feet_lateral_distances = np.abs(-np.sin(nominal_imu_yaw) * nominal_feet_deltas[:, 0] + np.cos(nominal_imu_yaw) * nominal_feet_deltas[:, 1])
+        self.env.internal_state["nominal_feet_lateral_distances"] = nominal_feet_lateral_distances
         all_contact_relevant_geom_xpos = data.geom_xpos[self.env.reward_collision_sphere_geom_ids]
         all_contact_relevant_geom_sizes = self.env.internal_state["mj_model"].geom_size[self.env.reward_collision_sphere_geom_ids, 0]
         distance_between_geoms = np.linalg.norm(all_contact_relevant_geom_xpos[:, None] - all_contact_relevant_geom_xpos[None], axis=-1)
@@ -273,5 +279,5 @@ class DefaultDRSeenRobotFunction:
         mujoco.mj_forward(self.env.internal_state["mj_model"], data)
         feet_x_pos = data.geom_xpos[self.env.foot_geom_indices, 0]
         feet_y_pos = data.geom_xpos[self.env.foot_geom_indices, 1]
-        min_feet_z_pos_under_ground = np.max(self.env.terrain_function.ground_height_at(feet_x_pos, feet_y_pos) - data.geom_xpos[self.env.foot_geom_indices, 2])
+        min_feet_z_pos_under_ground = np.max(self.env.terrain_function.ground_height_at(feet_x_pos, feet_y_pos) - (data.geom_xpos[self.env.foot_geom_indices, 2] - self.env.feet_bottom_extent(data, self.env.internal_state["mj_model"])))
         self.env.internal_state["data"].qpos[2] += min_feet_z_pos_under_ground
