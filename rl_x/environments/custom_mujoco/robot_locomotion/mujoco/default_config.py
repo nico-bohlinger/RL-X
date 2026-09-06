@@ -132,7 +132,7 @@ def get_config(environment_name):
             "imu_acceleration_coeff": 1e-4,
             "roll_pitch_vel_coeff": 0.05,
             "roll_pitch_pos_coeff": 10.0,
-            "actuator_joint_nominal_diff_coeff": 100.0,
+            "actuator_joint_nominal_diff_coeff": 20.0,
             "joint_position_limit_coeff": 40.0,
             "soft_joint_position_limit": 0.9,
             "actuator_joint_velocity_limit_coeff": 5.0,
