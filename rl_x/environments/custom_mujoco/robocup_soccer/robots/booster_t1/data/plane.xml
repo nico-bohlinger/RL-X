@@ -7,7 +7,7 @@
 
   <default>
     <site size="0.01" group="5"/>
-    <geom solref="-1000 -80" contype="0" conaffinity="0" group="1"/>
+    <geom contype="0" conaffinity="0" group="1"/>
     <joint damping="0.01" armature="0.01" frictionloss="0.1"/>
     <position forcelimited="true" kp="25" kv="0.6"/>
 

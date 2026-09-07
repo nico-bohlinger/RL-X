@@ -7,7 +7,7 @@
 
   <default>
     <site size="0.01" group="5"/>
-    <geom solref="-1000 -80" contype="0" conaffinity="0" group="1"/>
+    <geom contype="0" conaffinity="0" group="1"/>
     <position forcelimited="true" kp="20" kv="0.5"/>
     <default class="go2">
       <geom margin="0.001" condim="1"/>
