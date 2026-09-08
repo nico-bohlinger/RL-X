@@ -7,7 +7,7 @@ Example deployment code for the Go2 can be found [here](https://github.com/nico-
 The MuJoCo version is a copy of the MJX version but uses the standard MuJoCo physics engine, which makes it easier and quicker to load, visualize and debug policies trained in MJX.
 Use the MJX version for large-scale training on a GPU.
 The default ```mjx``` version should be used with ```flax_full_jit``` algorithm implementations (e.g. ```fastsac.flax_full_jit```).
-The ```mjx_pytorch``` version can be used with algorithms that implement the PyTorch interface (e.g. ```fastsac.pytorch```) but it is not optimized and runs rather slowly.
+The ```mjx_torch``` version can be used with algorithms that implement the PyTorch interface (e.g. ```fastsac.pytorch```) but it is not optimized and runs rather slowly.
 The ```mjx_warp``` version uses the MuJoCo Warp physics backend through MJX (still a JAX environment, used with ```flax_full_jit``` algorithms).
 On machines with a CUDA driver older than 12.4, the ```mjx_warp``` version must be run with ```--environment.graph_mode=jax``` (Warp's conditional CUDA graph nodes used by the solver are only available from driver 12.4+).
 

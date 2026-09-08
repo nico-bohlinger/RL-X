@@ -81,7 +81,7 @@ class MujocoViewer:
         else:
             action = mujoco.mjtMouse.mjMOUSE_ZOOM
 
-        mujoco.mjv_moveCamera(self.model, action, dx / width, dy / height, self.scene, self.camera)
+        mujoco.mjv_moveCamera(self.model, action, dx / width, dy / height, self.camera)
 
 
     def keyboard(self, window, key, scancode, act, mods):
@@ -100,7 +100,7 @@ class MujocoViewer:
 
 
     def scroll(self, window, x_offset, y_offset):
-        mujoco.mjv_moveCamera(self.model, mujoco.mjtMouse.mjMOUSE_ZOOM, 0, 0.05 * y_offset, self.scene, self.camera)
+        mujoco.mjv_moveCamera(self.model, mujoco.mjtMouse.mjMOUSE_ZOOM, 0, 0.05 * y_offset, self.camera)
 
 
     def render(self, data):

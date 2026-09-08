@@ -1,0 +1,1 @@
+The G1 model and meshes originate from [Unitree MuJoCo](https://github.com/unitreerobotics/unitree_mujoco/tree/main/unitree_robots/g1) and are adapted from [Holosoma](https://github.com/amazon-far/holosoma).
