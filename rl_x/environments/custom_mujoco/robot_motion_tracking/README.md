@@ -6,10 +6,10 @@ Tracking an OMOMO clip in MuJoCo with the reference robot and object shown in bl
 
 ![OMOMO motion tracking](omomo_tracking.png)
 
-| Environment | Physics | Algorithm | Data interface |
-| ----------- | ----------- | ----------- | ----------- |
-| `custom_mujoco.robot_motion_tracking.mujoco` | MuJoCo | `ppo.flax` | Numpy |
-| `custom_mujoco.robot_motion_tracking.mjx_warp` | MJX Warp | `ppo.flax_full_jit` | JAX |
+| Environment | Physics | Data interface |
+| ----------- | ----------- | ----------- |
+| `custom_mujoco.robot_motion_tracking.mujoco` | MuJoCo | Numpy |
+| `custom_mujoco.robot_motion_tracking.mjx_warp` | MJX Warp | JAX |
 
 Set `environment.dataset=lafan` for robot-only tracking or `omomo` for robot and object tracking.
 
