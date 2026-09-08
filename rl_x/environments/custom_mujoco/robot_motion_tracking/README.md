@@ -1,4 +1,4 @@
-# G1 robot motion tracking
+# Robot motion tracking
 
 Tracks G1 motions with optional object interaction. The task follows the G1 whole-body tracking setup in [Holosoma](https://github.com/amazon-far/holosoma), with some adaptations.
 
