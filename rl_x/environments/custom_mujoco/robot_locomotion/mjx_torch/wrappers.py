@@ -4,7 +4,7 @@ import jax
 from jax.dlpack import from_dlpack
 import torch.utils.dlpack as tpack
 
-from rl_x.environments.custom_mujoco.robot_locomotion.mjx_pytorch.box_space import BoxSpace
+from rl_x.environments.custom_mujoco.robot_locomotion.mjx_torch.box_space import BoxSpace
 
 
 class RLXInfo(gym.Wrapper):

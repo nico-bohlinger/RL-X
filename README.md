@@ -29,7 +29,7 @@ A framework for Reinforcement Learning research.
 - 🧪 **Mix and match and extend**: Generic interfaces between algorithms and environments
 - ⛰️​ **Custom environments**: Examples for MuJoCo, Isaac Lab, ManiSkill or custom socket communication
 - 🚀​ **GPU environments**: MJX, Warp, Isaac Lab and ManiSkill can run thousands of parallel environments
-- 🤖​ **Robot learning**: Training and deployment for the Unitree Go2 (quadruped) and G1 (humanoid) robots
+- 🤖​ **Robot learning**: Training and deployment for locomotion and motion tracking with the G1 and Go2
 - ⚽ **RoboCup**: Training for the RoboCup soccer competition in MuJoCo and MJX
 - 🕰️ **Memory architectures**: PPO with GRU, LSTM, Transformer, History Window, Mamba-2, Memory Actions
 - 📈 **Experiments**: Checkpoints, Evaluation, Console log, Tensorboard, Weights & Biases, SLURM, Docker
@@ -88,15 +88,11 @@ A framework for Reinforcement Learning research.
     - DeepMind Control Suite
 - [MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground)
     - Locomotion
-- [Custom MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco)
-    - Example of a custom MuJoCo environment
-    - Example of a custom MuJoCo XLA (MJX) environment
-    - Example of a custom MuJoCo XLA (MJX) with Warp backend environment
-    - Example of a custom MuJoCo Warp with PyTorch environment
-- [Custom Robot Learning](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion)
-    - Example of custom MuJoCo, MJX and MJX + Warp environments for quadruped and humanoid locomotion learning and real robot deployment
-- [Custom RoboCup Soccer](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robocup_soccer)
-    - Example of custom MuJoCo and MJX environments for the RoboCup soccer simulation 3D league and other humanoid soccer leagues
+- [Custom MuJoCo](rl_x/environments/custom_mujoco/README.md)
+    - [Ant velocity-tracking](rl_x/environments/custom_mujoco/ant/): Examples with MuJoCo, MJX, MJX Warp and Warp Torch backends
+    - [Robot locomotion](rl_x/environments/custom_mujoco/robot_locomotion/): Go2/G1 locomotion training and real-robot deployment
+    - [Robot motion tracking](rl_x/environments/custom_mujoco/robot_motion_tracking/): BeyondMimic-style G1 tracking of retargeted LAFAN/OMOMO motions
+    - [Custom RoboCup Soccer](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robocup_soccer): Example of custom MuJoCo and MJX environments for the RoboCup soccer simulation 3D league and other humanoid soccer leagues
 - [Custom Isaac Lab](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_isaac_lab)
     - Example of a custom Isaac Lab environment
 - [Custom ManiSkill](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_maniskill)

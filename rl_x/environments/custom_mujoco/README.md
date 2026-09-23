@@ -1,45 +1,47 @@
 # Custom MuJoCo Environments
 
-Contains three examples for custom MuJoCo environments: a minimal Ant tracking task, a more complete Robot Locomotion setup, and a RoboCup Soccer locomotion variant.
+Contains four examples for custom MuJoCo environments. These cover Ant velocity tracking, Robot Locomotion, Motion Tracking and RoboCup Soccer.
 
-The examples can be used as a template for other custom MuJoCo environments. They contain:
-- All necessary handling of the MuJoCo physics engine directly via its Python bindings to form a stand-alone environment class
-- Implementation of a GLFW viewer for rendering (non-MJX version)
+The examples can be used as templates for other custom MuJoCo environments. They handle the physics engine directly through its Python bindings in stand-alone environment classes.
 
-The ant example is a simple environment using the Ant robot to track a given velocity command.
-It is implemented in four versions: one using normal MuJoCo, one using MJX with the standard JAX backend, one using MJX with the Warp backend, and one using MuJoCo Warp with a PyTorch interface.
+The [Ant](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/ant) example uses the Ant robot to track a given velocity command.
+It is implemented with normal MuJoCo, MJX, MJX Warp and Warp Torch.
 
-The robot locomotion example is a more complex environment and contains everything that is needed to train a quadruped (Unitree Go2) or humanoid (Unitree G1) robot to walk and afterwards deploy the learned policy on the real robot.
-It is implemented in three versions: one using normal MuJoCo, one using MJX with the standard JAX backend, and one using MJX with a PyTorch interface.
+The [Robot Locomotion](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion) example contains the setup to train a quadruped (Unitree Go2) or humanoid (Unitree G1) to walk and deploy the learned policy on the real robot.
+It is implemented with normal MuJoCo, MJX, MJX Warp and MJX with a Torch interface.
 
-The RoboCup soccer example builds on top of the robot locomotion environment and is tailored for training bipedal humanoids (e.g. the Booster T1) for the [MuJoCo-based RoboCup Soccer Simulation Server (RCSSServerMJ)](https://gitlab.com/robocup-sim/rcssservermj).
-It is implemented in two versions: one using normal MuJoCo and one using MJX with the standard JAX backend.
+The [Robot Motion Tracking](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_motion_tracking) example implements BeyondMimic-style tracking with the Unitree G1. It uses already-retargeted LAFAN motions for robot-only tracking and OMOMO motions for robot and object interaction.
+It is implemented with normal MuJoCo and MJX Warp.
 
-The environment versions with the MJX suffix use the new MuJoCo XLA (MJX) backend that enables running the environment on a GPU (similar to Isaac Gym / Sim / Lab).
-A modern NVIDIA GPU can easily handle 4000 of those environments in parallel.
-This gives a significant speedup compared to using normal MuJoCo.  
-MJX-based environments break the typical Gym interface and can currently only be used with ```flax_full_jit``` algorithm implementations (e.g. ```ppo.flax_full_jit```).
+The [RoboCup Soccer](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robocup_soccer) example builds on Robot Locomotion to train bipedal humanoids such as the Booster T1 for the [MuJoCo-based RoboCup Soccer Simulation Server (RCSSServerMJ)](https://gitlab.com/robocup-sim/rcssservermj).
+It is implemented with normal MuJoCo and MJX.
 
-The environment versions with the Warp Torch suffix use [MuJoCo Warp](https://github.com/google-deepmind/mujoco_warp).
-It runs all environments in parallel through NVIDIA Warp kernels and exposes the simulation state as zero-copy PyTorch tensors via `wp.to_torch`, so observations, rewards, resets and `ctrl` writes happen entirely on the GPU.
-On CUDA devices the inner step / forward pipeline is captured into a CUDA Graph for minimal kernel-launch overhead; on CPU it falls back to plain `mjwarp.step`.
-Similar to the MJX version, the Warp-based environment can run thousands of parallel environments on a modern NVIDIA GPU, giving a significant speedup compared to normal MuJoCo.
-The environment is meant to be used with PyTorch algorithms (e.g. ```ppo.pytorch```).
+The normal MuJoCo versions use a Numpy interface and can be used with standard algorithms such as ```ppo.flax``` or ```ppo.pytorch```.
+The versions with the MJX suffix use MuJoCo XLA (MJX) to run environments in parallel on a GPU. They use a batched JAX interface rather than the typical Gym interface and require ```flax_full_jit``` algorithms such as ```ppo.flax_full_jit```.
+GPU simulation supports thousands of parallel environments and can be substantially faster than normal MuJoCo. Capacity and throughput depend on the task and hardware.
 
-The environment versions with the MJX Warp suffix use MJX with the MuJoCo Warp physics engine as backend (`impl='warp'`).
-It runs all environments natively in JAX/XLA without an outer `vmap`, using the Warp backend for GPU-accelerated physics.
-It is designed to be used with JAX algorithms (e.g. ```ppo.flax_full_jit```).
+The versions with the Warp Torch suffix use [MuJoCo Warp](https://github.com/google-deepmind/mujoco_warp) and run environments in parallel through NVIDIA Warp kernels.
+Simulation state is exposed as zero-copy Torch tensors through ```wp.to_torch```, so observations, rewards, resets and ```ctrl``` writes stay on the GPU during training.
+On supported CUDA devices, physics steps and forward passes are captured in CUDA graphs to reduce kernel-launch overhead. Without graph capture, including on CPU, the environment calls ```mjwarp.step``` and ```mjwarp.forward``` directly.
+These versions use Torch algorithms such as ```ppo.pytorch```.
 
-More specifically, the example uses the Ant robot and defines as the task to track a given velocity command.
+The versions with the MJX Warp suffix use MuJoCo Warp through MJX with ```impl='warp'```.
+They retain a JAX/XLA interface and use ```flax_full_jit``` algorithms such as ```ppo.flax_full_jit```.
+
+The Robot Locomotion MJX Torch version exposes MJX physics through a Torch interface for algorithms such as ```fastsac.pytorch```. It is less optimized than the JAX versions.
+See the [environment interface guide](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/environments/README.md#mix-and-match-environments-and-algorithms) for algorithm compatibility.
 
 | Version | Observation space | Action space | Data interface |
 | ----------- | ----------- | ----------- | ----------- |
-| Ant MuJoCo | Flat value | Continuous | Numpy |
-| Ant MJX | Flat value | Continuous | JAX |
-| Ant MJX Warp | Flat value | Continuous | JAX |
-| Ant Warp Torch | Flat value | Continuous | Torch |
-| Robot Locomotion MuJoCo | Flat value | Continuous | Numpy |
-| Robot Locomotion MJX | Flat value | Continuous | JAX |
-| Robot Locomotion MJX PyTorch | Flat value | Continuous | Torch |
-| RoboCup Soccer Locomotion MuJoCo | Flat value | Continuous | Numpy |
-| RoboCup Soccer Locomotion MJX | Flat value | Continuous | JAX |
+| [Ant MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/ant/mujoco) | Flat value | Continuous | Numpy |
+| [Ant MJX](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/ant/mjx) | Flat value | Continuous | JAX |
+| [Ant MJX Warp](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/ant/mjx_warp) | Flat value | Continuous | JAX |
+| [Ant Warp Torch](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/ant/warp_torch) | Flat value | Continuous | Torch |
+| [Robot Locomotion MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion/mujoco) | Flat value | Continuous | Numpy |
+| [Robot Locomotion MJX](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion/mjx) | Flat value | Continuous | JAX |
+| [Robot Locomotion MJX Warp](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion/mjx_warp) | Flat value | Continuous | JAX |
+| [Robot Locomotion MJX Torch](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_locomotion/mjx_torch) | Flat value | Continuous | Torch |
+| [Robot Motion Tracking MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_motion_tracking/mujoco) | Flat value | Continuous | Numpy |
+| [Robot Motion Tracking MJX Warp](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robot_motion_tracking/mjx_warp) | Flat value | Continuous | JAX |
+| [RoboCup Soccer Locomotion MuJoCo](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robocup_soccer/locomotion/mujoco) | Flat value | Continuous | Numpy |
+| [RoboCup Soccer Locomotion MJX](https://github.com/nico-bohlinger/RL-X/tree/master/rl_x/environments/custom_mujoco/robocup_soccer/locomotion/mjx) | Flat value | Continuous | JAX |
