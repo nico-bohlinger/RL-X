@@ -36,6 +36,9 @@ A framework for Reinforcement Learning research.
 
 
 ### Implemented Algorithms
+
+#### Reinforcement Learning
+
 - [Proximal Policy Optimization (PPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo)
 - [Proximal Policy Optimization + Differentiable Trust Region Layers (PPO+DTRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl)
 - [Proximal Policy Optimization + Gated Recurrent Unit (PPO+GRU)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_gru)
@@ -75,6 +78,19 @@ A framework for Reinforcement Learning research.
 - [Parallelized Q-Network (PQN)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/pqn)
 
 
+#### Imitation Learning & Inverse RL
+
+- [Generative Adversarial Imitation Learning (GAIL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/gail_ppo)
+- [Adversarial Inverse Reinforcement Learning (AIRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/airl_ppo)
+- [Adversarial Motion Priors (AMP)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/amp_ppo)
+- [Noise Conditioned Energy Based Annealed Rewards (NEAR)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/near_ppo)
+- [Trust Region Inverse Reinforcement Learning + Trust Region Loss (TRIRL+PPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trirl_ppo)
+- [Trust Region Inverse Reinforcement Learning + Differentiable Trust Region Layers (TRIRL+DTRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trirl_dtrl)
+
+
+All six imitation/inverse-RL algorithms provide `flax`, `pytorch`, and `flax_full_jit` implementations.
+
+
 ### Usable Environments
 - [Gymnasium](https://github.com/Farama-Foundation/Gymnasium)
     - MuJoCo
@@ -89,6 +105,7 @@ A framework for Reinforcement Learning research.
 - [MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground)
     - Locomotion
 - [Custom MuJoCo](rl_x/environments/custom_mujoco/README.md)
+    - [MuJoCo benchmarks](rl_x/environments/custom_mujoco/gym): Ant, Half Cheetah, Hopper, Walker2D, Humanoid, and custom Point Maze
     - [Ant velocity-tracking](rl_x/environments/custom_mujoco/ant/): Examples with MuJoCo, MJX, MJX Warp and Warp Torch backends
     - [Robot locomotion](rl_x/environments/custom_mujoco/robot_locomotion/): Go2/G1 locomotion training and real-robot deployment
     - [Robot motion tracking](rl_x/environments/custom_mujoco/robot_motion_tracking/): BeyondMimic-style G1 tracking of retargeted LAFAN/OMOMO motions
@@ -137,7 +154,7 @@ Example for Google Colab: [![Open In Colab](https://colab.research.google.com/as
 If you use RL-X in your research, please cite the following [paper](https://arxiv.org/abs/2310.13396):
 ```bibtex
 @incollection{bohlinger2023rlx,
-      title={RL-X: A Deep Reinforcement Learning Library (not only) for RoboCup}, 
+      title={RL-X: A Deep Reinforcement Learning Library (not only) for RoboCup},
       author={Nico Bohlinger and Klaus Dorer},
       booktitle={Robot World Cup},
       pages={228--239},
