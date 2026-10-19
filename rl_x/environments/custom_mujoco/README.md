@@ -1,7 +1,15 @@
 # MuJoCo Benchmarks
-Contains the [MuJoCo benchmark environments](https://gymnasium.farama.org/environments/mujoco/) Ant, Half Cheetah, Hopper, Walker2D and Humanoid, implemented with native MuJoCo for standard Flax/PyTorch and MuJoCo XLA for fully jitted parallel training. See the [benchmark backend and rendering guide](gym/README.md).
-Also contains Point Maze, a custom goal-reaching task in the same style. It is not a port of the Gymnasium-Robotics environment of that name: it uses a flat observation, a fixed reset pose and its own dense and sparse reward variants.
-Unlike the locomotion environments, Point Maze defaults to ```nr_envs = 64```, which is plenty for such a small task but yields a batch smaller than the default ```minibatch_size``` of the ```flax_full_jit``` algorithms, so a smaller value has to be set manually (e.g. ```--algorithm.minibatch_size=512```).
+
+The benchmark environments implement the Gymnasium v5 tasks Ant, Half Cheetah, Hopper, Walker2D and Humanoid.
+They also include Point Maze, a custom task where a particle has to reach a target position.
+Point Maze is not a port of the Gymnasium-Robotics environment with the same name.
+
+Each environment is implemented with normal MuJoCo and MuJoCo XLA (MJX).
+The normal MuJoCo versions work with standard Flax and PyTorch algorithms and are useful for testing and rendering trained policies.
+The MJX versions work with ```flax_full_jit``` algorithms and run many environments in parallel on a GPU.
+
+The [benchmark README](gym/README.md) lists the environment names and explains how to train and test a policy with each version.
+
 
 # Custom MuJoCo Environments
 

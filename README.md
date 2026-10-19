@@ -37,8 +37,6 @@ A framework for Reinforcement Learning research.
 
 ### Implemented Algorithms
 
-#### Reinforcement Learning
-
 - [Proximal Policy Optimization (PPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo)
 - [Proximal Policy Optimization + Differentiable Trust Region Layers (PPO+DTRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_dtrl)
 - [Proximal Policy Optimization + Gated Recurrent Unit (PPO+GRU)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ppo_gru)
@@ -76,19 +74,12 @@ A framework for Reinforcement Learning research.
 - [Double Deep Q-Network (DDQN)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/ddqn)
 - [Categorical Deep Q-Network (C51)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/c51)
 - [Parallelized Q-Network (PQN)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/pqn)
-
-
-#### Imitation Learning & Inverse RL
-
 - [Generative Adversarial Imitation Learning (GAIL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/gail_ppo)
 - [Adversarial Inverse Reinforcement Learning (AIRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/airl_ppo)
 - [Adversarial Motion Priors (AMP)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/amp_ppo)
 - [Noise Conditioned Energy Based Annealed Rewards (NEAR)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/near_ppo)
 - [Trust Region Inverse Reinforcement Learning + Trust Region Loss (TRIRL+PPO)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trirl_ppo)
 - [Trust Region Inverse Reinforcement Learning + Differentiable Trust Region Layers (TRIRL+DTRL)](https://github.com/nico-bohlinger/RL-X/blob/master/rl_x/algorithms/trirl_dtrl)
-
-
-All six imitation/inverse-RL algorithms provide `flax`, `pytorch`, and `flax_full_jit` implementations.
 
 
 ### Usable Environments

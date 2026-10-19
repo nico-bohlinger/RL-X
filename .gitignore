@@ -14,4 +14,3 @@ experiments/*.sh
 .github/evaluate-experiments.md
 experiments/plotting/
 .claude/
-/tests/
