@@ -303,7 +303,7 @@ class Runner:
             python_packages = [package.split("==") for package in python_packages if package]
             python_packages = [package for package in python_packages if len(package) == 2]
             python_packages = {package[0]: package[1] for package in python_packages}
-            wandb.config["python_packages"] = python_packages
+            wandb.config.update({"python_packages": python_packages}, allow_val_change=True)
             # Log git diff and commit hash
             try:
                 project_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
@@ -312,12 +312,12 @@ class Runner:
                     f.write(git_diff)
                 wandb.save(os.path.join(run_path, "diff.patch"), base_path=run_path)
                 git_commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=project_dir).decode().strip()
-                wandb.config["git_commit_hash"] = git_commit_hash
+                wandb.config.update({"git_commit_hash": git_commit_hash}, allow_val_change=True)
             except Exception as e:
                 rlx_logger.warning(f"Could not log git diff and commit hash: {e}")
             # Log slurm job id
             if "SLURM_JOB_ID" in os.environ:
-                wandb.config["SLURM_JOB_ID"] = os.environ["SLURM_JOB_ID"]
+                wandb.config.update({"SLURM_JOB_ID": os.environ["SLURM_JOB_ID"]}, allow_val_change=True)
 
         writer = None
         if self._config.runner.track_tb:
